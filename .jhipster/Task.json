@@ -1,0 +1,54 @@
+{
+  "annotations": {
+    "changelogDate": "20240206220119"
+  },
+  "changelogDate": "20240206220119",
+  "clientRootFolder": "professionalMS",
+  "databaseType": "mongodb",
+  "entityTableName": "task",
+  "fields": [
+    {
+      "fieldName": "name",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "description",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "schedule",
+      "fieldType": "LocalDate"
+    },
+    {
+      "fieldName": "duration",
+      "fieldType": "Double"
+    },
+    {
+      "fieldName": "attendant",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "createdDate",
+      "fieldType": "LocalDate"
+    },
+    {
+      "fieldName": "modifiedDate",
+      "fieldType": "LocalDate"
+    },
+    {
+      "fieldName": "createdBy",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "modifiedBy",
+      "fieldType": "String"
+    }
+  ],
+  "microserviceName": "professionalMS",
+  "name": "Task",
+  "pagination": "no",
+  "readOnly": false,
+  "relationships": [],
+  "searchEngine": true,
+  "service": "no"
+}

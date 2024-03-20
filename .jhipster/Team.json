@@ -1,0 +1,30 @@
+{
+  "annotations": {
+    "changelogDate": "20240206215921"
+  },
+  "changelogDate": "20240206215921",
+  "clientRootFolder": "professionalMS",
+  "databaseType": "mongodb",
+  "entityTableName": "team",
+  "fields": [
+    {
+      "fieldName": "name",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "description",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "contact",
+      "fieldType": "String"
+    }
+  ],
+  "microserviceName": "professionalMS",
+  "name": "Team",
+  "pagination": "no",
+  "readOnly": false,
+  "relationships": [],
+  "searchEngine": true,
+  "service": "no"
+}

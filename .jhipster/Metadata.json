@@ -1,0 +1,38 @@
+{
+  "annotations": {
+    "changelogDate": "20240206220638"
+  },
+  "changelogDate": "20240206220638",
+  "clientRootFolder": "professionalMS",
+  "databaseType": "mongodb",
+  "entityTableName": "metadata",
+  "fields": [
+    {
+      "fieldName": "createdBy",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "modifiedBy",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "createdDate",
+      "fieldType": "LocalDate"
+    },
+    {
+      "fieldName": "modifiedDate",
+      "fieldType": "LocalDate"
+    },
+    {
+      "fieldName": "data",
+      "fieldType": "String"
+    }
+  ],
+  "microserviceName": "professionalMS",
+  "name": "Metadata",
+  "pagination": "no",
+  "readOnly": false,
+  "relationships": [],
+  "searchEngine": true,
+  "service": "no"
+}

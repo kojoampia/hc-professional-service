@@ -1,0 +1,30 @@
+{
+  "annotations": {
+    "changelogDate": "20240206221753"
+  },
+  "changelogDate": "20240206221753",
+  "clientRootFolder": "professionalMS",
+  "databaseType": "mongodb",
+  "entityTableName": "hcpay_option",
+  "fields": [
+    {
+      "fieldName": "type",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "userID",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "metadata",
+      "fieldType": "String"
+    }
+  ],
+  "microserviceName": "professionalMS",
+  "name": "HCPayOption",
+  "pagination": "no",
+  "readOnly": false,
+  "relationships": [],
+  "searchEngine": true,
+  "service": "no"
+}
