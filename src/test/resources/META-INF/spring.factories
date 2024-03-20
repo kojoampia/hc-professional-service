@@ -1,0 +1,4 @@
+org.springframework.test.context.ContextCustomizerFactory = net.jojoaddison.\
+    config.TestContainersSpringContextCustomizerFactory,net.jojoaddison.config.\
+    KafkaTestContainersSpringContextCustomizerFactory,net.jojoaddison.config.\
+    RedisTestContainersSpringContextCustomizerFactory
