@@ -21,7 +21,19 @@
     },
     {
       "fieldName": "duration",
-      "fieldType": "Double"
+      "fieldType": "Duration"
+    },
+    {
+      "fieldName": "attendantId",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "teamId",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "patientId",
+      "fieldType": "String"
     },
     {
       "fieldName": "attendant",
@@ -44,7 +56,7 @@
       "fieldType": "String"
     }
   ],
-  "microserviceName": "professionalMS",
+  "microserviceName": "hcProfessionalMs",
   "name": "Task",
   "pagination": "no",
   "readOnly": false,

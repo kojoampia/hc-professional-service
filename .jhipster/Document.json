@@ -1,0 +1,48 @@
+{
+  "annotations": {
+    "changelogDate": "20240320235005"
+  },
+  "clientRootFolder": "hcProfessionalMs",
+  "databaseType": "mongodb",
+  "dto": "no",
+  "entityTableName": "jhi_document",
+  "fields": [
+    {
+      "fieldName": "name",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "profileId",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "data",
+      "fieldType": "byte[]",
+      "fieldTypeBlobContent": "data"
+    },
+    {
+      "fieldName": "type",
+      "fieldType": "DocumentType",
+      "fieldValues": "PASSPORT,CERTIFICATE,GHANACARD,PASSPHOTO,DRIVERLICENSE,VOTERCARD,NHIS,OTHER"
+    },
+    {
+      "fieldName": "createdDate",
+      "fieldType": "LocalDate"
+    },
+    {
+      "fieldName": "modifiedDate",
+      "fieldType": "LocalDate"
+    },
+    {
+      "fieldName": "lastModifiedBy",
+      "fieldType": "String"
+    }
+  ],
+  "microserviceName": "hcProfessionalMs",
+  "name": "Document",
+  "pagination": "no",
+  "readOnly": false,
+  "relationships": [],
+  "searchEngine": "no",
+  "service": "serviceClass"
+}

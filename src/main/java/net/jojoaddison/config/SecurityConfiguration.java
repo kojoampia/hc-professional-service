@@ -1,6 +1,6 @@
 package net.jojoaddison.config;
 
-import net.jojoaddison.security.*;
+import net.jojoaddison.security.AuthoritiesConstants;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;

@@ -4,11 +4,11 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>net.jojoaddison</groupId>
-    <artifactId>hc-professional-ms</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <artifactId>hc-professional-service</artifactId>
+    <version>0.0.1</version>
     <packaging>jar</packaging>
-    <name>Hc Professional Ms</name>
-    <description>Description for Hc Professional Ms</description>
+    <name>Health Connect Professional Service</name>
+    <description>Micro Service API for Health Connect Professional Data</description>
 
     <properties>
         <!--
@@ -273,6 +273,7 @@
 
     <build>
         <defaultGoal>spring-boot:run</defaultGoal>
+        <finalName>${project.artifactId}</finalName>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
@@ -394,8 +395,11 @@
                             </platforms>
                         </from>
                         <to>
-                            <image>hcprofessionalms:latest</image>
+                            <image>${build.finalName}:${project.version}</image>
                         </to>
+                        <tags>
+                            <tag>${build.finalName}:latest</tag>
+                        </tags>
                         <container>
                             <entrypoint>
                                 <shell>bash</shell>
@@ -403,7 +407,7 @@
                                 <arg>/entrypoint.sh</arg>
                             </entrypoint>
                             <ports>
-                                <port>8081</port>
+                                <port>8080</port>
                             </ports>
                             <environment>
                                 <SPRING_OUTPUT_ANSI_ENABLED>ALWAYS</SPRING_OUTPUT_ANSI_ENABLED>

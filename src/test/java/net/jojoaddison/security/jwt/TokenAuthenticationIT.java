@@ -1,8 +1,12 @@
 package net.jojoaddison.security.jwt;
 
-import static net.jojoaddison.security.jwt.JwtAuthenticationTestUtils.*;
+import static net.jojoaddison.security.jwt.JwtAuthenticationTestUtils.BEARER;
+import static net.jojoaddison.security.jwt.JwtAuthenticationTestUtils.createExpiredToken;
+import static net.jojoaddison.security.jwt.JwtAuthenticationTestUtils.createSignedInvalidJwt;
+import static net.jojoaddison.security.jwt.JwtAuthenticationTestUtils.createTokenWithDifferentSignature;
+import static net.jojoaddison.security.jwt.JwtAuthenticationTestUtils.createValidToken;
 import static org.springframework.http.HttpHeaders.AUTHORIZATION;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

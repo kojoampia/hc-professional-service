@@ -1,11 +1,10 @@
 {
   "annotations": {
-    "changelogDate": "20240206215413"
+    "changelogDate": "20240326163347"
   },
-  "changelogDate": "20240206215413",
-  "clientRootFolder": "professionalMS",
+  "clientRootFolder": "hcProfessionalMs",
   "databaseType": "mongodb",
-  "entityTableName": "condition",
+  "entityTableName": "category",
   "fields": [
     {
       "fieldName": "name",
@@ -32,11 +31,11 @@
       "fieldType": "String"
     }
   ],
-  "microserviceName": "professionalMS",
-  "name": "Condition",
+  "microserviceName": "hcProfessionalMs",
+  "name": "Category",
   "pagination": "no",
   "readOnly": false,
   "relationships": [],
-  "searchEngine": true,
+  "searchEngine": "no",
   "service": "no"
 }

@@ -16,11 +16,19 @@
       "fieldType": "String"
     },
     {
-      "fieldName": "contact",
+      "fieldName": "members",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "supervisor",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "manager",
       "fieldType": "String"
     }
   ],
-  "microserviceName": "professionalMS",
+  "microserviceName": "hcprofessionalService",
   "name": "Team",
   "pagination": "no",
   "readOnly": false,

@@ -1,11 +1,10 @@
 {
   "annotations": {
-    "changelogDate": "20240206220314"
+    "changelogDate": "20240326164027"
   },
-  "changelogDate": "20240206220314",
-  "clientRootFolder": "professionalMS",
+  "clientRootFolder": "hcProfessionalMs",
   "databaseType": "mongodb",
-  "entityTableName": "membership",
+  "entityTableName": "activity",
   "fields": [
     {
       "fieldName": "name",
@@ -16,31 +15,31 @@
       "fieldType": "String"
     },
     {
-      "fieldName": "status",
+      "fieldName": "patientId",
       "fieldType": "String"
     },
     {
       "fieldName": "createdDate",
-      "fieldType": "LocalDate"
-    },
-    {
-      "fieldName": "modifiedDate",
-      "fieldType": "LocalDate"
+      "fieldType": "Instant"
     },
     {
       "fieldName": "createdBy",
       "fieldType": "String"
     },
     {
+      "fieldName": "modifiedDate",
+      "fieldType": "Instant"
+    },
+    {
       "fieldName": "modifiedBy",
       "fieldType": "String"
     }
   ],
-  "microserviceName": "professionalMS",
-  "name": "Membership",
+  "microserviceName": "hcProfessionalMs",
+  "name": "Activity",
   "pagination": "no",
   "readOnly": false,
   "relationships": [],
-  "searchEngine": true,
+  "searchEngine": "no",
   "service": "no"
 }

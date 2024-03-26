@@ -24,6 +24,10 @@
       "fieldType": "String"
     },
     {
+      "fieldName": "professionalId",
+      "fieldType": "String"
+    },
+    {
       "fieldName": "createdDate",
       "fieldType": "LocalDate"
     },

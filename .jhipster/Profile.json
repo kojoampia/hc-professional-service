@@ -45,11 +45,11 @@
       "fieldType": "String"
     },
     {
-      "fieldName": "idType",
+      "fieldName": "cardType",
       "fieldType": "String"
     },
     {
-      "fieldName": "idNumber",
+      "fieldName": "cardNumber",
       "fieldType": "String"
     },
     {
@@ -58,6 +58,10 @@
     },
     {
       "fieldName": "address",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "team",
       "fieldType": "String"
     }
   ],

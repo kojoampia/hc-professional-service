@@ -1,11 +1,10 @@
 {
   "annotations": {
-    "changelogDate": "20240206215539"
+    "changelogDate": "20240326172739"
   },
-  "changelogDate": "20240206215539",
-  "clientRootFolder": "professionalMS",
+  "clientRootFolder": "hcProfessionalMs",
   "databaseType": "mongodb",
-  "entityTableName": "medication",
+  "entityTableName": "roster",
   "fields": [
     {
       "fieldName": "name",
@@ -16,12 +15,24 @@
       "fieldType": "String"
     },
     {
-      "fieldName": "prescription",
+      "fieldName": "professionalId",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "schedule",
+      "fieldType": "LocalDate"
+    },
+    {
+      "fieldName": "duration",
+      "fieldType": "Duration"
+    },
+    {
+      "fieldName": "tasks",
       "fieldType": "String"
     },
     {
       "fieldName": "createdDate",
-      "fieldType": "LocalDate"
+      "fieldType": "String"
     },
     {
       "fieldName": "modifiedDate",
@@ -36,11 +47,11 @@
       "fieldType": "String"
     }
   ],
-  "microserviceName": "professionalMS",
-  "name": "Medication",
+  "microserviceName": "hcProfessionalMs",
+  "name": "Roster",
   "pagination": "no",
   "readOnly": false,
   "relationships": [],
-  "searchEngine": true,
+  "searchEngine": "no",
   "service": "no"
 }
