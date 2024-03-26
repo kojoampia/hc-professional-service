@@ -53,15 +53,7 @@
       "fieldType": "String"
     },
     {
-      "fieldName": "contacts",
-      "fieldType": "String"
-    },
-    {
       "fieldName": "address",
-      "fieldType": "String"
-    },
-    {
-      "fieldName": "team",
       "fieldType": "String"
     }
   ],

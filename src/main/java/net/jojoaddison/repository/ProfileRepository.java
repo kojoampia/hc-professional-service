@@ -11,6 +11,4 @@ import org.springframework.stereotype.Repository;
  */
 @SuppressWarnings("unused")
 @Repository
-public interface ProfileRepository extends MongoRepository<Profile, String> {
-    Page<Profile> search(String query, Pageable pageable);
-}
+public interface ProfileRepository extends MongoRepository<Profile, String> {}

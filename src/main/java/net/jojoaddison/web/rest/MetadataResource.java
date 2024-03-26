@@ -192,21 +192,4 @@ public class MetadataResource {
         metadataRepository.deleteById(id);
         return ResponseEntity.noContent().headers(HeaderUtil.createEntityDeletionAlert(applicationName, true, ENTITY_NAME, id)).build();
     }
-
-    /**
-     * {@code SEARCH  /metadata/_search?query=:query} : search for the metadata corresponding
-     * to the query.
-     *
-     * @param query the query of the metadata search.
-     * @return the result of the search.
-     */
-    @GetMapping("/_search")
-    public List<Metadata> searchMetadata(@RequestParam("query") String query) {
-        log.debug("REST request to search Metadata for query {}", query);
-        try {
-            return metadataRepository.search(query);
-        } catch (RuntimeException e) {
-            throw e;
-        }
-    }
 }

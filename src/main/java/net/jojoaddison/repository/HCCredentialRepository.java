@@ -10,6 +10,4 @@ import org.springframework.stereotype.Repository;
  */
 @SuppressWarnings("unused")
 @Repository
-public interface HCCredentialRepository extends MongoRepository<HCCredential, String> {
-    List<HCCredential> search(String query);
-}
+public interface HCCredentialRepository extends MongoRepository<HCCredential, String> {}

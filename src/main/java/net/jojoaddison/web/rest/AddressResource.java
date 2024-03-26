@@ -213,21 +213,4 @@ public class AddressResource {
         addressRepository.deleteById(id);
         return ResponseEntity.noContent().headers(HeaderUtil.createEntityDeletionAlert(applicationName, true, ENTITY_NAME, id)).build();
     }
-
-    /**
-     * {@code SEARCH  /addresses/_search?query=:query} : search for the address corresponding
-     * to the query.
-     *
-     * @param query the query of the address search.
-     * @return the result of the search.
-     */
-    @GetMapping("/_search")
-    public List<Address> searchAddresses(@RequestParam("query") String query) {
-        log.debug("REST request to search Addresses for query {}", query);
-        try {
-            return addressRepository.search(query);
-        } catch (RuntimeException e) {
-            throw e;
-        }
-    }
 }

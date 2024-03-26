@@ -10,6 +10,4 @@ import org.springframework.stereotype.Repository;
  */
 @SuppressWarnings("unused")
 @Repository
-public interface ReportRepository extends MongoRepository<Report, String> {
-    List<Report> search(String query);
-}
+public interface ReportRepository extends MongoRepository<Report, String> {}

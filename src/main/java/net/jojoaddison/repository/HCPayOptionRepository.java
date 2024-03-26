@@ -10,6 +10,4 @@ import org.springframework.stereotype.Repository;
  */
 @SuppressWarnings("unused")
 @Repository
-public interface HCPayOptionRepository extends MongoRepository<HCPayOption, String> {
-    List<HCPayOption> search(String query);
-}
+public interface HCPayOptionRepository extends MongoRepository<HCPayOption, String> {}

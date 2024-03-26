@@ -10,6 +10,4 @@ import org.springframework.stereotype.Repository;
  */
 @SuppressWarnings("unused")
 @Repository
-public interface MetadataRepository extends MongoRepository<Metadata, String> {
-    List<Metadata> search(String query);
-}
+public interface MetadataRepository extends MongoRepository<Metadata, String> {}

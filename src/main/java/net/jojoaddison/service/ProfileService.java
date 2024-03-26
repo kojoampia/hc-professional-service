@@ -127,16 +127,4 @@ public class ProfileService {
         log.debug("Request to delete Profile : {}", id);
         profileRepository.deleteById(id);
     }
-
-    /**
-     * Search for the profile corresponding to the query.
-     *
-     * @param query the query of the search.
-     * @param pageable the pagination information.
-     * @return the list of entities.
-     */
-    public Page<Profile> search(String query, Pageable pageable) {
-        log.debug("Request to search for a page of Profiles for query {}", query);
-        return profileRepository.search(query, pageable);
-    }
 }

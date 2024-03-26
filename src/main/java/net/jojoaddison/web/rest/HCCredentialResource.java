@@ -198,21 +198,4 @@ public class HCCredentialResource {
         hCCredentialRepository.deleteById(id);
         return ResponseEntity.noContent().headers(HeaderUtil.createEntityDeletionAlert(applicationName, true, ENTITY_NAME, id)).build();
     }
-
-    /**
-     * {@code SEARCH  /hc-credentials/_search?query=:query} : search for the hCCredential corresponding
-     * to the query.
-     *
-     * @param query the query of the hCCredential search.
-     * @return the result of the search.
-     */
-    @GetMapping("/_search")
-    public List<HCCredential> searchHCCredentials(@RequestParam("query") String query) {
-        log.debug("REST request to search HCCredentials for query {}", query);
-        try {
-            return hCCredentialRepository.search(query);
-        } catch (RuntimeException e) {
-            throw e;
-        }
-    }
 }
