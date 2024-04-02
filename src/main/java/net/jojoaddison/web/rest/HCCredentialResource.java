@@ -12,16 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import tech.jhipster.web.util.HeaderUtil;
 import tech.jhipster.web.util.ResponseUtil;
 
@@ -58,11 +49,10 @@ public class HCCredentialResource {
         if (hCCredential.getId() != null) {
             throw new BadRequestAlertException("A new hCCredential cannot already have an ID", ENTITY_NAME, "idexists");
         }
-        HCCredential result = hCCredentialRepository.save(hCCredential);
-        return ResponseEntity
-            .created(new URI("/api/hc-credentials/" + result.getId()))
-            .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, result.getId()))
-            .body(result);
+        hCCredential = hCCredentialRepository.save(hCCredential);
+        return ResponseEntity.created(new URI("/api/hc-credentials/" + hCCredential.getId()))
+            .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, hCCredential.getId()))
+            .body(hCCredential);
     }
 
     /**
@@ -92,11 +82,10 @@ public class HCCredentialResource {
             throw new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound");
         }
 
-        HCCredential result = hCCredentialRepository.save(hCCredential);
-        return ResponseEntity
-            .ok()
+        hCCredential = hCCredentialRepository.save(hCCredential);
+        return ResponseEntity.ok()
             .headers(HeaderUtil.createEntityUpdateAlert(applicationName, true, ENTITY_NAME, hCCredential.getId()))
-            .body(result);
+            .body(hCCredential);
     }
 
     /**

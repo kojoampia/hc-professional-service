@@ -1,19 +1,15 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.domain.ActivityAsserts.*;
+import static net.jojoaddison.web.rest.TestUtil.createUpdateProxyForBean;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.List;
 import java.util.UUID;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.Activity;
@@ -57,6 +53,9 @@ class ActivityResourceIT {
 
     private static final String ENTITY_API_URL = "/api/activities";
     private static final String ENTITY_API_URL_ID = ENTITY_API_URL + "/{id}";
+
+    @Autowired
+    private ObjectMapper om;
 
     @Autowired
     private ActivityRepository activityRepository;
@@ -110,23 +109,21 @@ class ActivityResourceIT {
 
     @Test
     void createActivity() throws Exception {
-        int databaseSizeBeforeCreate = activityRepository.findAll().size();
+        long databaseSizeBeforeCreate = getRepositoryCount();
         // Create the Activity
-        restActivityMockMvc
-            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(activity)))
-            .andExpect(status().isCreated());
+        var returnedActivity = om.readValue(
+            restActivityMockMvc
+                .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(activity)))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(),
+            Activity.class
+        );
 
         // Validate the Activity in the database
-        List<Activity> activityList = activityRepository.findAll();
-        assertThat(activityList).hasSize(databaseSizeBeforeCreate + 1);
-        Activity testActivity = activityList.get(activityList.size() - 1);
-        assertThat(testActivity.getName()).isEqualTo(DEFAULT_NAME);
-        assertThat(testActivity.getDescription()).isEqualTo(DEFAULT_DESCRIPTION);
-        assertThat(testActivity.getPatientId()).isEqualTo(DEFAULT_PATIENT_ID);
-        assertThat(testActivity.getCreatedDate()).isEqualTo(DEFAULT_CREATED_DATE);
-        assertThat(testActivity.getCreatedBy()).isEqualTo(DEFAULT_CREATED_BY);
-        assertThat(testActivity.getModifiedDate()).isEqualTo(DEFAULT_MODIFIED_DATE);
-        assertThat(testActivity.getModifiedBy()).isEqualTo(DEFAULT_MODIFIED_BY);
+        assertIncrementedRepositoryCount(databaseSizeBeforeCreate);
+        assertActivityUpdatableFieldsEquals(returnedActivity, getPersistedActivity(returnedActivity));
     }
 
     @Test
@@ -134,16 +131,15 @@ class ActivityResourceIT {
         // Create the Activity with an existing ID
         activity.setId("existing_id");
 
-        int databaseSizeBeforeCreate = activityRepository.findAll().size();
+        long databaseSizeBeforeCreate = getRepositoryCount();
 
         // An entity with an existing ID cannot be created, so this API call must fail
         restActivityMockMvc
-            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(activity)))
+            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(activity)))
             .andExpect(status().isBadRequest());
 
         // Validate the Activity in the database
-        List<Activity> activityList = activityRepository.findAll();
-        assertThat(activityList).hasSize(databaseSizeBeforeCreate);
+        assertSameRepositoryCount(databaseSizeBeforeCreate);
     }
 
     @Test
@@ -197,7 +193,7 @@ class ActivityResourceIT {
         // Initialize the database
         activityRepository.save(activity);
 
-        int databaseSizeBeforeUpdate = activityRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the activity
         Activity updatedActivity = activityRepository.findById(activity.getId()).orElseThrow();
@@ -214,45 +210,34 @@ class ActivityResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, updatedActivity.getId())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(updatedActivity))
+                    .content(om.writeValueAsBytes(updatedActivity))
             )
             .andExpect(status().isOk());
 
         // Validate the Activity in the database
-        List<Activity> activityList = activityRepository.findAll();
-        assertThat(activityList).hasSize(databaseSizeBeforeUpdate);
-        Activity testActivity = activityList.get(activityList.size() - 1);
-        assertThat(testActivity.getName()).isEqualTo(UPDATED_NAME);
-        assertThat(testActivity.getDescription()).isEqualTo(UPDATED_DESCRIPTION);
-        assertThat(testActivity.getPatientId()).isEqualTo(UPDATED_PATIENT_ID);
-        assertThat(testActivity.getCreatedDate()).isEqualTo(UPDATED_CREATED_DATE);
-        assertThat(testActivity.getCreatedBy()).isEqualTo(UPDATED_CREATED_BY);
-        assertThat(testActivity.getModifiedDate()).isEqualTo(UPDATED_MODIFIED_DATE);
-        assertThat(testActivity.getModifiedBy()).isEqualTo(UPDATED_MODIFIED_BY);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertPersistedActivityToMatchAllProperties(updatedActivity);
     }
 
     @Test
     void putNonExistingActivity() throws Exception {
-        int databaseSizeBeforeUpdate = activityRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         activity.setId(UUID.randomUUID().toString());
 
         // If the entity doesn't have an ID, it will throw BadRequestAlertException
         restActivityMockMvc
             .perform(
-                put(ENTITY_API_URL_ID, activity.getId())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(activity))
+                put(ENTITY_API_URL_ID, activity.getId()).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(activity))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the Activity in the database
-        List<Activity> activityList = activityRepository.findAll();
-        assertThat(activityList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void putWithIdMismatchActivity() throws Exception {
-        int databaseSizeBeforeUpdate = activityRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         activity.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
@@ -260,28 +245,26 @@ class ActivityResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(activity))
+                    .content(om.writeValueAsBytes(activity))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the Activity in the database
-        List<Activity> activityList = activityRepository.findAll();
-        assertThat(activityList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void putWithMissingIdPathParamActivity() throws Exception {
-        int databaseSizeBeforeUpdate = activityRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         activity.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
         restActivityMockMvc
-            .perform(put(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(activity)))
+            .perform(put(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(activity)))
             .andExpect(status().isMethodNotAllowed());
 
         // Validate the Activity in the database
-        List<Activity> activityList = activityRepository.findAll();
-        assertThat(activityList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
@@ -289,7 +272,7 @@ class ActivityResourceIT {
         // Initialize the database
         activityRepository.save(activity);
 
-        int databaseSizeBeforeUpdate = activityRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the activity using partial update
         Activity partialUpdatedActivity = new Activity();
@@ -301,21 +284,14 @@ class ActivityResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, partialUpdatedActivity.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(partialUpdatedActivity))
+                    .content(om.writeValueAsBytes(partialUpdatedActivity))
             )
             .andExpect(status().isOk());
 
         // Validate the Activity in the database
-        List<Activity> activityList = activityRepository.findAll();
-        assertThat(activityList).hasSize(databaseSizeBeforeUpdate);
-        Activity testActivity = activityList.get(activityList.size() - 1);
-        assertThat(testActivity.getName()).isEqualTo(DEFAULT_NAME);
-        assertThat(testActivity.getDescription()).isEqualTo(UPDATED_DESCRIPTION);
-        assertThat(testActivity.getPatientId()).isEqualTo(DEFAULT_PATIENT_ID);
-        assertThat(testActivity.getCreatedDate()).isEqualTo(DEFAULT_CREATED_DATE);
-        assertThat(testActivity.getCreatedBy()).isEqualTo(DEFAULT_CREATED_BY);
-        assertThat(testActivity.getModifiedDate()).isEqualTo(DEFAULT_MODIFIED_DATE);
-        assertThat(testActivity.getModifiedBy()).isEqualTo(DEFAULT_MODIFIED_BY);
+
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertActivityUpdatableFieldsEquals(createUpdateProxyForBean(partialUpdatedActivity, activity), getPersistedActivity(activity));
     }
 
     @Test
@@ -323,7 +299,7 @@ class ActivityResourceIT {
         // Initialize the database
         activityRepository.save(activity);
 
-        int databaseSizeBeforeUpdate = activityRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the activity using partial update
         Activity partialUpdatedActivity = new Activity();
@@ -342,26 +318,19 @@ class ActivityResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, partialUpdatedActivity.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(partialUpdatedActivity))
+                    .content(om.writeValueAsBytes(partialUpdatedActivity))
             )
             .andExpect(status().isOk());
 
         // Validate the Activity in the database
-        List<Activity> activityList = activityRepository.findAll();
-        assertThat(activityList).hasSize(databaseSizeBeforeUpdate);
-        Activity testActivity = activityList.get(activityList.size() - 1);
-        assertThat(testActivity.getName()).isEqualTo(UPDATED_NAME);
-        assertThat(testActivity.getDescription()).isEqualTo(UPDATED_DESCRIPTION);
-        assertThat(testActivity.getPatientId()).isEqualTo(UPDATED_PATIENT_ID);
-        assertThat(testActivity.getCreatedDate()).isEqualTo(UPDATED_CREATED_DATE);
-        assertThat(testActivity.getCreatedBy()).isEqualTo(UPDATED_CREATED_BY);
-        assertThat(testActivity.getModifiedDate()).isEqualTo(UPDATED_MODIFIED_DATE);
-        assertThat(testActivity.getModifiedBy()).isEqualTo(UPDATED_MODIFIED_BY);
+
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertActivityUpdatableFieldsEquals(partialUpdatedActivity, getPersistedActivity(partialUpdatedActivity));
     }
 
     @Test
     void patchNonExistingActivity() throws Exception {
-        int databaseSizeBeforeUpdate = activityRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         activity.setId(UUID.randomUUID().toString());
 
         // If the entity doesn't have an ID, it will throw BadRequestAlertException
@@ -369,18 +338,17 @@ class ActivityResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, activity.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(activity))
+                    .content(om.writeValueAsBytes(activity))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the Activity in the database
-        List<Activity> activityList = activityRepository.findAll();
-        assertThat(activityList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void patchWithIdMismatchActivity() throws Exception {
-        int databaseSizeBeforeUpdate = activityRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         activity.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
@@ -388,28 +356,26 @@ class ActivityResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(activity))
+                    .content(om.writeValueAsBytes(activity))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the Activity in the database
-        List<Activity> activityList = activityRepository.findAll();
-        assertThat(activityList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void patchWithMissingIdPathParamActivity() throws Exception {
-        int databaseSizeBeforeUpdate = activityRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         activity.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
         restActivityMockMvc
-            .perform(patch(ENTITY_API_URL).contentType("application/merge-patch+json").content(TestUtil.convertObjectToJsonBytes(activity)))
+            .perform(patch(ENTITY_API_URL).contentType("application/merge-patch+json").content(om.writeValueAsBytes(activity)))
             .andExpect(status().isMethodNotAllowed());
 
         // Validate the Activity in the database
-        List<Activity> activityList = activityRepository.findAll();
-        assertThat(activityList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
@@ -417,7 +383,7 @@ class ActivityResourceIT {
         // Initialize the database
         activityRepository.save(activity);
 
-        int databaseSizeBeforeDelete = activityRepository.findAll().size();
+        long databaseSizeBeforeDelete = getRepositoryCount();
 
         // Delete the activity
         restActivityMockMvc
@@ -425,7 +391,34 @@ class ActivityResourceIT {
             .andExpect(status().isNoContent());
 
         // Validate the database contains one less item
-        List<Activity> activityList = activityRepository.findAll();
-        assertThat(activityList).hasSize(databaseSizeBeforeDelete - 1);
+        assertDecrementedRepositoryCount(databaseSizeBeforeDelete);
+    }
+
+    protected long getRepositoryCount() {
+        return activityRepository.count();
+    }
+
+    protected void assertIncrementedRepositoryCount(long countBefore) {
+        assertThat(countBefore + 1).isEqualTo(getRepositoryCount());
+    }
+
+    protected void assertDecrementedRepositoryCount(long countBefore) {
+        assertThat(countBefore - 1).isEqualTo(getRepositoryCount());
+    }
+
+    protected void assertSameRepositoryCount(long countBefore) {
+        assertThat(countBefore).isEqualTo(getRepositoryCount());
+    }
+
+    protected Activity getPersistedActivity(Activity activity) {
+        return activityRepository.findById(activity.getId()).orElseThrow();
+    }
+
+    protected void assertPersistedActivityToMatchAllProperties(Activity expectedActivity) {
+        assertActivityAllPropertiesEquals(expectedActivity, getPersistedActivity(expectedActivity));
+    }
+
+    protected void assertPersistedActivityToMatchUpdatableProperties(Activity expectedActivity) {
+        assertActivityAllUpdatablePropertiesEquals(expectedActivity, getPersistedActivity(expectedActivity));
     }
 }

@@ -9,6 +9,10 @@
   "entityTableName": "profile",
   "fields": [
     {
+      "fieldName": "id",
+      "fieldType": "String"
+    },
+    {
       "fieldName": "firstName",
       "fieldType": "String"
     },
@@ -62,6 +66,6 @@
   "pagination": "pagination",
   "readOnly": false,
   "relationships": [],
-  "searchEngine": true,
+  "searchEngine": "no",
   "service": "serviceClass"
 }

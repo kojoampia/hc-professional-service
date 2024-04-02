@@ -7,7 +7,7 @@ import java.lang.annotation.Target;
 import net.jojoaddison.config.AsyncSyncConfiguration;
 import net.jojoaddison.config.EmbeddedKafka;
 import net.jojoaddison.config.EmbeddedMongo;
-import net.jojoaddison.config.EmbeddedRedis;
+import net.jojoaddison.config.JacksonConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.annotation.DirtiesContext;
 
@@ -16,8 +16,7 @@ import org.springframework.test.annotation.DirtiesContext;
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
-@SpringBootTest(classes = { HcProfessionalMsApp.class, AsyncSyncConfiguration.class })
-@EmbeddedRedis
+@SpringBootTest(classes = { HcProfessionalMsApp.class, JacksonConfiguration.class, AsyncSyncConfiguration.class })
 @EmbeddedMongo
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @EmbeddedKafka

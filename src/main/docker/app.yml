@@ -10,8 +10,6 @@ services:
       - SPRING_CLOUD_CONSUL_HOST=consul
       - SPRING_CLOUD_CONSUL_PORT=8500
       - SPRING_DATA_MONGODB_URI=mongodb://mongodb:27017/hcProfessionalMs
-      - JHIPSTER_CACHE_REDIS_SERVER=redis://redis:6379
-      - JHIPSTER_CACHE_REDIS_CLUSTER=false
       - SPRING_CLOUD_STREAM_KAFKA_BINDER_BROKERS=kafka:9092
     healthcheck:
       test:
@@ -29,10 +27,6 @@ services:
     extends:
       file: ./mongodb.yml
       service: mongodb
-  redis:
-    extends:
-      file: ./redis.yml
-      service: redis
   consul:
     extends:
       file: ./consul.yml

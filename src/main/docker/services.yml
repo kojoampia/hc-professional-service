@@ -5,10 +5,6 @@ services:
     extends:
       file: ./mongodb.yml
       service: mongodb
-  redis:
-    extends:
-      file: ./redis.yml
-      service: redis
   consul:
     extends:
       file: ./consul.yml

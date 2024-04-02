@@ -8,6 +8,10 @@
   "entityTableName": "metadata",
   "fields": [
     {
+      "fieldName": "id",
+      "fieldType": "String"
+    },
+    {
       "fieldName": "createdBy",
       "fieldType": "String"
     },
@@ -33,6 +37,6 @@
   "pagination": "no",
   "readOnly": false,
   "relationships": [],
-  "searchEngine": true,
+  "searchEngine": "no",
   "service": "no"
 }

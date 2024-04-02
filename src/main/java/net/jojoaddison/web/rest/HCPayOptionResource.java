@@ -12,16 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import tech.jhipster.web.util.HeaderUtil;
 import tech.jhipster.web.util.ResponseUtil;
 
@@ -58,11 +49,10 @@ public class HCPayOptionResource {
         if (hCPayOption.getId() != null) {
             throw new BadRequestAlertException("A new hCPayOption cannot already have an ID", ENTITY_NAME, "idexists");
         }
-        HCPayOption result = hCPayOptionRepository.save(hCPayOption);
-        return ResponseEntity
-            .created(new URI("/api/hc-pay-options/" + result.getId()))
-            .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, result.getId()))
-            .body(result);
+        hCPayOption = hCPayOptionRepository.save(hCPayOption);
+        return ResponseEntity.created(new URI("/api/hc-pay-options/" + hCPayOption.getId()))
+            .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, hCPayOption.getId()))
+            .body(hCPayOption);
     }
 
     /**
@@ -92,11 +82,10 @@ public class HCPayOptionResource {
             throw new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound");
         }
 
-        HCPayOption result = hCPayOptionRepository.save(hCPayOption);
-        return ResponseEntity
-            .ok()
+        hCPayOption = hCPayOptionRepository.save(hCPayOption);
+        return ResponseEntity.ok()
             .headers(HeaderUtil.createEntityUpdateAlert(applicationName, true, ENTITY_NAME, hCPayOption.getId()))
-            .body(result);
+            .body(hCPayOption);
     }
 
     /**
@@ -185,22 +174,5 @@ public class HCPayOptionResource {
         log.debug("REST request to delete HCPayOption : {}", id);
         hCPayOptionRepository.deleteById(id);
         return ResponseEntity.noContent().headers(HeaderUtil.createEntityDeletionAlert(applicationName, true, ENTITY_NAME, id)).build();
-    }
-
-    /**
-     * {@code SEARCH  /hc-pay-options/_search?query=:query} : search for the hCPayOption corresponding
-     * to the query.
-     *
-     * @param query the query of the hCPayOption search.
-     * @return the result of the search.
-     */
-    @GetMapping("/_search")
-    public List<HCPayOption> searchHCPayOptions(@RequestParam("query") String query) {
-        log.debug("REST request to search HCPayOptions for query {}", query);
-        try {
-            return hCPayOptionRepository.search(query);
-        } catch (RuntimeException e) {
-            throw e;
-        }
     }
 }

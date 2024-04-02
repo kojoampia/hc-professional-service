@@ -1,19 +1,15 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.domain.HCCredentialAsserts.*;
+import static net.jojoaddison.web.rest.TestUtil.createUpdateProxyForBean;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.List;
 import java.util.UUID;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.HCCredential;
@@ -57,7 +53,9 @@ class HCCredentialResourceIT {
 
     private static final String ENTITY_API_URL = "/api/hc-credentials";
     private static final String ENTITY_API_URL_ID = ENTITY_API_URL + "/{id}";
-    private static final String ENTITY_SEARCH_API_URL = "/api/hc-credentials/_search";
+
+    @Autowired
+    private ObjectMapper om;
 
     @Autowired
     private HCCredentialRepository hCCredentialRepository;
@@ -111,23 +109,21 @@ class HCCredentialResourceIT {
 
     @Test
     void createHCCredential() throws Exception {
-        int databaseSizeBeforeCreate = hCCredentialRepository.findAll().size();
+        long databaseSizeBeforeCreate = getRepositoryCount();
         // Create the HCCredential
-        restHCCredentialMockMvc
-            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(hCCredential)))
-            .andExpect(status().isCreated());
+        var returnedHCCredential = om.readValue(
+            restHCCredentialMockMvc
+                .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(hCCredential)))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(),
+            HCCredential.class
+        );
 
         // Validate the HCCredential in the database
-        List<HCCredential> hCCredentialList = hCCredentialRepository.findAll();
-        assertThat(hCCredentialList).hasSize(databaseSizeBeforeCreate + 1);
-        HCCredential testHCCredential = hCCredentialList.get(hCCredentialList.size() - 1);
-        assertThat(testHCCredential.getEmail()).isEqualTo(DEFAULT_EMAIL);
-        assertThat(testHCCredential.getPhoneNumber()).isEqualTo(DEFAULT_PHONE_NUMBER);
-        assertThat(testHCCredential.getPassword()).isEqualTo(DEFAULT_PASSWORD);
-        assertThat(testHCCredential.getRole()).isEqualTo(DEFAULT_ROLE);
-        assertThat(testHCCredential.getCreatedDate()).isEqualTo(DEFAULT_CREATED_DATE);
-        assertThat(testHCCredential.getActive()).isEqualTo(DEFAULT_ACTIVE);
-        assertThat(testHCCredential.getModifiedDate()).isEqualTo(DEFAULT_MODIFIED_DATE);
+        assertIncrementedRepositoryCount(databaseSizeBeforeCreate);
+        assertHCCredentialUpdatableFieldsEquals(returnedHCCredential, getPersistedHCCredential(returnedHCCredential));
     }
 
     @Test
@@ -135,16 +131,15 @@ class HCCredentialResourceIT {
         // Create the HCCredential with an existing ID
         hCCredential.setId("existing_id");
 
-        int databaseSizeBeforeCreate = hCCredentialRepository.findAll().size();
+        long databaseSizeBeforeCreate = getRepositoryCount();
 
         // An entity with an existing ID cannot be created, so this API call must fail
         restHCCredentialMockMvc
-            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(hCCredential)))
+            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(hCCredential)))
             .andExpect(status().isBadRequest());
 
         // Validate the HCCredential in the database
-        List<HCCredential> hCCredentialList = hCCredentialRepository.findAll();
-        assertThat(hCCredentialList).hasSize(databaseSizeBeforeCreate);
+        assertSameRepositoryCount(databaseSizeBeforeCreate);
     }
 
     @Test
@@ -198,7 +193,7 @@ class HCCredentialResourceIT {
         // Initialize the database
         hCCredentialRepository.save(hCCredential);
 
-        int databaseSizeBeforeUpdate = hCCredentialRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the hCCredential
         HCCredential updatedHCCredential = hCCredentialRepository.findById(hCCredential.getId()).orElseThrow();
@@ -215,26 +210,18 @@ class HCCredentialResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, updatedHCCredential.getId())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(updatedHCCredential))
+                    .content(om.writeValueAsBytes(updatedHCCredential))
             )
             .andExpect(status().isOk());
 
         // Validate the HCCredential in the database
-        List<HCCredential> hCCredentialList = hCCredentialRepository.findAll();
-        assertThat(hCCredentialList).hasSize(databaseSizeBeforeUpdate);
-        HCCredential testHCCredential = hCCredentialList.get(hCCredentialList.size() - 1);
-        assertThat(testHCCredential.getEmail()).isEqualTo(UPDATED_EMAIL);
-        assertThat(testHCCredential.getPhoneNumber()).isEqualTo(UPDATED_PHONE_NUMBER);
-        assertThat(testHCCredential.getPassword()).isEqualTo(UPDATED_PASSWORD);
-        assertThat(testHCCredential.getRole()).isEqualTo(UPDATED_ROLE);
-        assertThat(testHCCredential.getCreatedDate()).isEqualTo(UPDATED_CREATED_DATE);
-        assertThat(testHCCredential.getActive()).isEqualTo(UPDATED_ACTIVE);
-        assertThat(testHCCredential.getModifiedDate()).isEqualTo(UPDATED_MODIFIED_DATE);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertPersistedHCCredentialToMatchAllProperties(updatedHCCredential);
     }
 
     @Test
     void putNonExistingHCCredential() throws Exception {
-        int databaseSizeBeforeUpdate = hCCredentialRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         hCCredential.setId(UUID.randomUUID().toString());
 
         // If the entity doesn't have an ID, it will throw BadRequestAlertException
@@ -242,18 +229,17 @@ class HCCredentialResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, hCCredential.getId())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(hCCredential))
+                    .content(om.writeValueAsBytes(hCCredential))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the HCCredential in the database
-        List<HCCredential> hCCredentialList = hCCredentialRepository.findAll();
-        assertThat(hCCredentialList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void putWithIdMismatchHCCredential() throws Exception {
-        int databaseSizeBeforeUpdate = hCCredentialRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         hCCredential.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
@@ -261,28 +247,26 @@ class HCCredentialResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(hCCredential))
+                    .content(om.writeValueAsBytes(hCCredential))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the HCCredential in the database
-        List<HCCredential> hCCredentialList = hCCredentialRepository.findAll();
-        assertThat(hCCredentialList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void putWithMissingIdPathParamHCCredential() throws Exception {
-        int databaseSizeBeforeUpdate = hCCredentialRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         hCCredential.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
         restHCCredentialMockMvc
-            .perform(put(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(hCCredential)))
+            .perform(put(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(hCCredential)))
             .andExpect(status().isMethodNotAllowed());
 
         // Validate the HCCredential in the database
-        List<HCCredential> hCCredentialList = hCCredentialRepository.findAll();
-        assertThat(hCCredentialList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
@@ -290,7 +274,7 @@ class HCCredentialResourceIT {
         // Initialize the database
         hCCredentialRepository.save(hCCredential);
 
-        int databaseSizeBeforeUpdate = hCCredentialRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the hCCredential using partial update
         HCCredential partialUpdatedHCCredential = new HCCredential();
@@ -309,21 +293,17 @@ class HCCredentialResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, partialUpdatedHCCredential.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(partialUpdatedHCCredential))
+                    .content(om.writeValueAsBytes(partialUpdatedHCCredential))
             )
             .andExpect(status().isOk());
 
         // Validate the HCCredential in the database
-        List<HCCredential> hCCredentialList = hCCredentialRepository.findAll();
-        assertThat(hCCredentialList).hasSize(databaseSizeBeforeUpdate);
-        HCCredential testHCCredential = hCCredentialList.get(hCCredentialList.size() - 1);
-        assertThat(testHCCredential.getEmail()).isEqualTo(UPDATED_EMAIL);
-        assertThat(testHCCredential.getPhoneNumber()).isEqualTo(UPDATED_PHONE_NUMBER);
-        assertThat(testHCCredential.getPassword()).isEqualTo(UPDATED_PASSWORD);
-        assertThat(testHCCredential.getRole()).isEqualTo(UPDATED_ROLE);
-        assertThat(testHCCredential.getCreatedDate()).isEqualTo(UPDATED_CREATED_DATE);
-        assertThat(testHCCredential.getActive()).isEqualTo(UPDATED_ACTIVE);
-        assertThat(testHCCredential.getModifiedDate()).isEqualTo(UPDATED_MODIFIED_DATE);
+
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertHCCredentialUpdatableFieldsEquals(
+            createUpdateProxyForBean(partialUpdatedHCCredential, hCCredential),
+            getPersistedHCCredential(hCCredential)
+        );
     }
 
     @Test
@@ -331,7 +311,7 @@ class HCCredentialResourceIT {
         // Initialize the database
         hCCredentialRepository.save(hCCredential);
 
-        int databaseSizeBeforeUpdate = hCCredentialRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the hCCredential using partial update
         HCCredential partialUpdatedHCCredential = new HCCredential();
@@ -350,26 +330,19 @@ class HCCredentialResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, partialUpdatedHCCredential.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(partialUpdatedHCCredential))
+                    .content(om.writeValueAsBytes(partialUpdatedHCCredential))
             )
             .andExpect(status().isOk());
 
         // Validate the HCCredential in the database
-        List<HCCredential> hCCredentialList = hCCredentialRepository.findAll();
-        assertThat(hCCredentialList).hasSize(databaseSizeBeforeUpdate);
-        HCCredential testHCCredential = hCCredentialList.get(hCCredentialList.size() - 1);
-        assertThat(testHCCredential.getEmail()).isEqualTo(UPDATED_EMAIL);
-        assertThat(testHCCredential.getPhoneNumber()).isEqualTo(UPDATED_PHONE_NUMBER);
-        assertThat(testHCCredential.getPassword()).isEqualTo(UPDATED_PASSWORD);
-        assertThat(testHCCredential.getRole()).isEqualTo(UPDATED_ROLE);
-        assertThat(testHCCredential.getCreatedDate()).isEqualTo(UPDATED_CREATED_DATE);
-        assertThat(testHCCredential.getActive()).isEqualTo(UPDATED_ACTIVE);
-        assertThat(testHCCredential.getModifiedDate()).isEqualTo(UPDATED_MODIFIED_DATE);
+
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertHCCredentialUpdatableFieldsEquals(partialUpdatedHCCredential, getPersistedHCCredential(partialUpdatedHCCredential));
     }
 
     @Test
     void patchNonExistingHCCredential() throws Exception {
-        int databaseSizeBeforeUpdate = hCCredentialRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         hCCredential.setId(UUID.randomUUID().toString());
 
         // If the entity doesn't have an ID, it will throw BadRequestAlertException
@@ -377,18 +350,17 @@ class HCCredentialResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, hCCredential.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(hCCredential))
+                    .content(om.writeValueAsBytes(hCCredential))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the HCCredential in the database
-        List<HCCredential> hCCredentialList = hCCredentialRepository.findAll();
-        assertThat(hCCredentialList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void patchWithIdMismatchHCCredential() throws Exception {
-        int databaseSizeBeforeUpdate = hCCredentialRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         hCCredential.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
@@ -396,30 +368,26 @@ class HCCredentialResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(hCCredential))
+                    .content(om.writeValueAsBytes(hCCredential))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the HCCredential in the database
-        List<HCCredential> hCCredentialList = hCCredentialRepository.findAll();
-        assertThat(hCCredentialList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void patchWithMissingIdPathParamHCCredential() throws Exception {
-        int databaseSizeBeforeUpdate = hCCredentialRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         hCCredential.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
         restHCCredentialMockMvc
-            .perform(
-                patch(ENTITY_API_URL).contentType("application/merge-patch+json").content(TestUtil.convertObjectToJsonBytes(hCCredential))
-            )
+            .perform(patch(ENTITY_API_URL).contentType("application/merge-patch+json").content(om.writeValueAsBytes(hCCredential)))
             .andExpect(status().isMethodNotAllowed());
 
         // Validate the HCCredential in the database
-        List<HCCredential> hCCredentialList = hCCredentialRepository.findAll();
-        assertThat(hCCredentialList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
@@ -427,7 +395,7 @@ class HCCredentialResourceIT {
         // Initialize the database
         hCCredentialRepository.save(hCCredential);
 
-        int databaseSizeBeforeDelete = hCCredentialRepository.findAll().size();
+        long databaseSizeBeforeDelete = getRepositoryCount();
 
         // Delete the hCCredential
         restHCCredentialMockMvc
@@ -435,27 +403,34 @@ class HCCredentialResourceIT {
             .andExpect(status().isNoContent());
 
         // Validate the database contains one less item
-        List<HCCredential> hCCredentialList = hCCredentialRepository.findAll();
-        assertThat(hCCredentialList).hasSize(databaseSizeBeforeDelete - 1);
+        assertDecrementedRepositoryCount(databaseSizeBeforeDelete);
     }
 
-    @Test
-    void searchHCCredential() throws Exception {
-        // Initialize the database
-        hCCredential = hCCredentialRepository.save(hCCredential);
+    protected long getRepositoryCount() {
+        return hCCredentialRepository.count();
+    }
 
-        // Search the hCCredential
-        restHCCredentialMockMvc
-            .perform(get(ENTITY_SEARCH_API_URL + "?query=id:" + hCCredential.getId()))
-            .andExpect(status().isOk())
-            .andExpect(content().contentType(MediaType.APPLICATION_JSON_VALUE))
-            .andExpect(jsonPath("$.[*].id").value(hasItem(hCCredential.getId())))
-            .andExpect(jsonPath("$.[*].email").value(hasItem(DEFAULT_EMAIL)))
-            .andExpect(jsonPath("$.[*].phoneNumber").value(hasItem(DEFAULT_PHONE_NUMBER)))
-            .andExpect(jsonPath("$.[*].password").value(hasItem(DEFAULT_PASSWORD)))
-            .andExpect(jsonPath("$.[*].role").value(hasItem(DEFAULT_ROLE)))
-            .andExpect(jsonPath("$.[*].createdDate").value(hasItem(DEFAULT_CREATED_DATE.toString())))
-            .andExpect(jsonPath("$.[*].active").value(hasItem(DEFAULT_ACTIVE.booleanValue())))
-            .andExpect(jsonPath("$.[*].modifiedDate").value(hasItem(DEFAULT_MODIFIED_DATE.toString())));
+    protected void assertIncrementedRepositoryCount(long countBefore) {
+        assertThat(countBefore + 1).isEqualTo(getRepositoryCount());
+    }
+
+    protected void assertDecrementedRepositoryCount(long countBefore) {
+        assertThat(countBefore - 1).isEqualTo(getRepositoryCount());
+    }
+
+    protected void assertSameRepositoryCount(long countBefore) {
+        assertThat(countBefore).isEqualTo(getRepositoryCount());
+    }
+
+    protected HCCredential getPersistedHCCredential(HCCredential hCCredential) {
+        return hCCredentialRepository.findById(hCCredential.getId()).orElseThrow();
+    }
+
+    protected void assertPersistedHCCredentialToMatchAllProperties(HCCredential expectedHCCredential) {
+        assertHCCredentialAllPropertiesEquals(expectedHCCredential, getPersistedHCCredential(expectedHCCredential));
+    }
+
+    protected void assertPersistedHCCredentialToMatchUpdatableProperties(HCCredential expectedHCCredential) {
+        assertHCCredentialAllUpdatablePropertiesEquals(expectedHCCredential, getPersistedHCCredential(expectedHCCredential));
     }
 }

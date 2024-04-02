@@ -1,8 +1,6 @@
 package net.jojoaddison.domain;
 
 import java.io.Serializable;
-import java.util.HashSet;
-import java.util.Set;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -11,6 +9,7 @@ import org.springframework.data.mongodb.core.mapping.Field;
  * A Team.
  */
 @Document(collection = "team")
+@SuppressWarnings("common-java:DuplicatedBlocks")
 public class Team implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -25,13 +24,13 @@ public class Team implements Serializable {
     private String description;
 
     @Field("members")
-    private Set<Profile> members = new HashSet<>();
+    private String members;
 
     @Field("supervisor")
-    private Profile supervisor;
+    private String supervisor;
 
     @Field("manager")
-    private Profile manager;
+    private String manager;
 
     // jhipster-needle-entity-add-field - JHipster will add fields here
 
@@ -74,42 +73,42 @@ public class Team implements Serializable {
         this.description = description;
     }
 
-    public Set<Profile> getMembers() {
+    public String getMembers() {
         return this.members;
     }
 
-    public Team members(Set<Profile> members) {
+    public Team members(String members) {
         this.setMembers(members);
         return this;
     }
 
-    public void setMembers(Set<Profile> members) {
+    public void setMembers(String members) {
         this.members = members;
     }
 
-    public Profile getSupervisor() {
+    public String getSupervisor() {
         return this.supervisor;
     }
 
-    public Team supervisor(Profile supervisor) {
+    public Team supervisor(String supervisor) {
         this.setSupervisor(supervisor);
         return this;
     }
 
-    public void setSupervisor(Profile supervisor) {
+    public void setSupervisor(String supervisor) {
         this.supervisor = supervisor;
     }
 
-    public Profile getManager() {
+    public String getManager() {
         return this.manager;
     }
 
-    public Team manager(Profile manager) {
+    public Team manager(String manager) {
         this.setManager(manager);
         return this;
     }
 
-    public void setManager(Profile manager) {
+    public void setManager(String manager) {
         this.manager = manager;
     }
 

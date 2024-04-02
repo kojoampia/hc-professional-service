@@ -1,7 +1,6 @@
 package net.jojoaddison.domain;
 
-import static net.jojoaddison.domain.DocumentTestSamples.getDocumentSample1;
-import static net.jojoaddison.domain.DocumentTestSamples.getDocumentSample2;
+import static net.jojoaddison.domain.HCDocumentTestSamples.*;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import net.jojoaddison.web.rest.TestUtil;
@@ -12,14 +11,14 @@ class HCDocumentTest {
     @Test
     void equalsVerifier() throws Exception {
         TestUtil.equalsVerifier(HCDocument.class);
-        HCDocument document1 = getDocumentSample1();
-        HCDocument document2 = new HCDocument();
-        assertThat(document1).isNotEqualTo(document2);
+        HCDocument hCDocument1 = getHCDocumentSample1();
+        HCDocument hCDocument2 = new HCDocument();
+        assertThat(hCDocument1).isNotEqualTo(hCDocument2);
 
-        document2.setId(document1.getId());
-        assertThat(document1).isEqualTo(document2);
+        hCDocument2.setId(hCDocument1.getId());
+        assertThat(hCDocument1).isEqualTo(hCDocument2);
 
-        document2 = getDocumentSample2();
-        assertThat(document1).isNotEqualTo(document2);
+        hCDocument2 = getHCDocumentSample2();
+        assertThat(hCDocument1).isNotEqualTo(hCDocument2);
     }
 }

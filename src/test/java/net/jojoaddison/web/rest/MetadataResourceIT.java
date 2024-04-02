@@ -1,19 +1,15 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.domain.MetadataAsserts.*;
+import static net.jojoaddison.web.rest.TestUtil.createUpdateProxyForBean;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.List;
 import java.util.UUID;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.Metadata;
@@ -51,7 +47,9 @@ class MetadataResourceIT {
 
     private static final String ENTITY_API_URL = "/api/metadata";
     private static final String ENTITY_API_URL_ID = ENTITY_API_URL + "/{id}";
-    private static final String ENTITY_SEARCH_API_URL = "/api/metadata/_search";
+
+    @Autowired
+    private ObjectMapper om;
 
     @Autowired
     private MetadataRepository metadataRepository;
@@ -101,21 +99,21 @@ class MetadataResourceIT {
 
     @Test
     void createMetadata() throws Exception {
-        int databaseSizeBeforeCreate = metadataRepository.findAll().size();
+        long databaseSizeBeforeCreate = getRepositoryCount();
         // Create the Metadata
-        restMetadataMockMvc
-            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(metadata)))
-            .andExpect(status().isCreated());
+        var returnedMetadata = om.readValue(
+            restMetadataMockMvc
+                .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(metadata)))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(),
+            Metadata.class
+        );
 
         // Validate the Metadata in the database
-        List<Metadata> metadataList = metadataRepository.findAll();
-        assertThat(metadataList).hasSize(databaseSizeBeforeCreate + 1);
-        Metadata testMetadata = metadataList.get(metadataList.size() - 1);
-        assertThat(testMetadata.getCreatedBy()).isEqualTo(DEFAULT_CREATED_BY);
-        assertThat(testMetadata.getModifiedBy()).isEqualTo(DEFAULT_MODIFIED_BY);
-        assertThat(testMetadata.getCreatedDate()).isEqualTo(DEFAULT_CREATED_DATE);
-        assertThat(testMetadata.getModifiedDate()).isEqualTo(DEFAULT_MODIFIED_DATE);
-        assertThat(testMetadata.getData()).isEqualTo(DEFAULT_DATA);
+        assertIncrementedRepositoryCount(databaseSizeBeforeCreate);
+        assertMetadataUpdatableFieldsEquals(returnedMetadata, getPersistedMetadata(returnedMetadata));
     }
 
     @Test
@@ -123,16 +121,15 @@ class MetadataResourceIT {
         // Create the Metadata with an existing ID
         metadata.setId("existing_id");
 
-        int databaseSizeBeforeCreate = metadataRepository.findAll().size();
+        long databaseSizeBeforeCreate = getRepositoryCount();
 
         // An entity with an existing ID cannot be created, so this API call must fail
         restMetadataMockMvc
-            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(metadata)))
+            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(metadata)))
             .andExpect(status().isBadRequest());
 
         // Validate the Metadata in the database
-        List<Metadata> metadataList = metadataRepository.findAll();
-        assertThat(metadataList).hasSize(databaseSizeBeforeCreate);
+        assertSameRepositoryCount(databaseSizeBeforeCreate);
     }
 
     @Test
@@ -182,7 +179,7 @@ class MetadataResourceIT {
         // Initialize the database
         metadataRepository.save(metadata);
 
-        int databaseSizeBeforeUpdate = metadataRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the metadata
         Metadata updatedMetadata = metadataRepository.findById(metadata.getId()).orElseThrow();
@@ -197,43 +194,34 @@ class MetadataResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, updatedMetadata.getId())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(updatedMetadata))
+                    .content(om.writeValueAsBytes(updatedMetadata))
             )
             .andExpect(status().isOk());
 
         // Validate the Metadata in the database
-        List<Metadata> metadataList = metadataRepository.findAll();
-        assertThat(metadataList).hasSize(databaseSizeBeforeUpdate);
-        Metadata testMetadata = metadataList.get(metadataList.size() - 1);
-        assertThat(testMetadata.getCreatedBy()).isEqualTo(UPDATED_CREATED_BY);
-        assertThat(testMetadata.getModifiedBy()).isEqualTo(UPDATED_MODIFIED_BY);
-        assertThat(testMetadata.getCreatedDate()).isEqualTo(UPDATED_CREATED_DATE);
-        assertThat(testMetadata.getModifiedDate()).isEqualTo(UPDATED_MODIFIED_DATE);
-        assertThat(testMetadata.getData()).isEqualTo(UPDATED_DATA);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertPersistedMetadataToMatchAllProperties(updatedMetadata);
     }
 
     @Test
     void putNonExistingMetadata() throws Exception {
-        int databaseSizeBeforeUpdate = metadataRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         metadata.setId(UUID.randomUUID().toString());
 
         // If the entity doesn't have an ID, it will throw BadRequestAlertException
         restMetadataMockMvc
             .perform(
-                put(ENTITY_API_URL_ID, metadata.getId())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(metadata))
+                put(ENTITY_API_URL_ID, metadata.getId()).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(metadata))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the Metadata in the database
-        List<Metadata> metadataList = metadataRepository.findAll();
-        assertThat(metadataList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void putWithIdMismatchMetadata() throws Exception {
-        int databaseSizeBeforeUpdate = metadataRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         metadata.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
@@ -241,28 +229,26 @@ class MetadataResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(metadata))
+                    .content(om.writeValueAsBytes(metadata))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the Metadata in the database
-        List<Metadata> metadataList = metadataRepository.findAll();
-        assertThat(metadataList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void putWithMissingIdPathParamMetadata() throws Exception {
-        int databaseSizeBeforeUpdate = metadataRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         metadata.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
         restMetadataMockMvc
-            .perform(put(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(metadata)))
+            .perform(put(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(metadata)))
             .andExpect(status().isMethodNotAllowed());
 
         // Validate the Metadata in the database
-        List<Metadata> metadataList = metadataRepository.findAll();
-        assertThat(metadataList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
@@ -270,7 +256,7 @@ class MetadataResourceIT {
         // Initialize the database
         metadataRepository.save(metadata);
 
-        int databaseSizeBeforeUpdate = metadataRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the metadata using partial update
         Metadata partialUpdatedMetadata = new Metadata();
@@ -282,19 +268,14 @@ class MetadataResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, partialUpdatedMetadata.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(partialUpdatedMetadata))
+                    .content(om.writeValueAsBytes(partialUpdatedMetadata))
             )
             .andExpect(status().isOk());
 
         // Validate the Metadata in the database
-        List<Metadata> metadataList = metadataRepository.findAll();
-        assertThat(metadataList).hasSize(databaseSizeBeforeUpdate);
-        Metadata testMetadata = metadataList.get(metadataList.size() - 1);
-        assertThat(testMetadata.getCreatedBy()).isEqualTo(DEFAULT_CREATED_BY);
-        assertThat(testMetadata.getModifiedBy()).isEqualTo(UPDATED_MODIFIED_BY);
-        assertThat(testMetadata.getCreatedDate()).isEqualTo(DEFAULT_CREATED_DATE);
-        assertThat(testMetadata.getModifiedDate()).isEqualTo(UPDATED_MODIFIED_DATE);
-        assertThat(testMetadata.getData()).isEqualTo(DEFAULT_DATA);
+
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertMetadataUpdatableFieldsEquals(createUpdateProxyForBean(partialUpdatedMetadata, metadata), getPersistedMetadata(metadata));
     }
 
     @Test
@@ -302,7 +283,7 @@ class MetadataResourceIT {
         // Initialize the database
         metadataRepository.save(metadata);
 
-        int databaseSizeBeforeUpdate = metadataRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the metadata using partial update
         Metadata partialUpdatedMetadata = new Metadata();
@@ -319,24 +300,19 @@ class MetadataResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, partialUpdatedMetadata.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(partialUpdatedMetadata))
+                    .content(om.writeValueAsBytes(partialUpdatedMetadata))
             )
             .andExpect(status().isOk());
 
         // Validate the Metadata in the database
-        List<Metadata> metadataList = metadataRepository.findAll();
-        assertThat(metadataList).hasSize(databaseSizeBeforeUpdate);
-        Metadata testMetadata = metadataList.get(metadataList.size() - 1);
-        assertThat(testMetadata.getCreatedBy()).isEqualTo(UPDATED_CREATED_BY);
-        assertThat(testMetadata.getModifiedBy()).isEqualTo(UPDATED_MODIFIED_BY);
-        assertThat(testMetadata.getCreatedDate()).isEqualTo(UPDATED_CREATED_DATE);
-        assertThat(testMetadata.getModifiedDate()).isEqualTo(UPDATED_MODIFIED_DATE);
-        assertThat(testMetadata.getData()).isEqualTo(UPDATED_DATA);
+
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertMetadataUpdatableFieldsEquals(partialUpdatedMetadata, getPersistedMetadata(partialUpdatedMetadata));
     }
 
     @Test
     void patchNonExistingMetadata() throws Exception {
-        int databaseSizeBeforeUpdate = metadataRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         metadata.setId(UUID.randomUUID().toString());
 
         // If the entity doesn't have an ID, it will throw BadRequestAlertException
@@ -344,18 +320,17 @@ class MetadataResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, metadata.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(metadata))
+                    .content(om.writeValueAsBytes(metadata))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the Metadata in the database
-        List<Metadata> metadataList = metadataRepository.findAll();
-        assertThat(metadataList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void patchWithIdMismatchMetadata() throws Exception {
-        int databaseSizeBeforeUpdate = metadataRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         metadata.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
@@ -363,28 +338,26 @@ class MetadataResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(metadata))
+                    .content(om.writeValueAsBytes(metadata))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the Metadata in the database
-        List<Metadata> metadataList = metadataRepository.findAll();
-        assertThat(metadataList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void patchWithMissingIdPathParamMetadata() throws Exception {
-        int databaseSizeBeforeUpdate = metadataRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         metadata.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
         restMetadataMockMvc
-            .perform(patch(ENTITY_API_URL).contentType("application/merge-patch+json").content(TestUtil.convertObjectToJsonBytes(metadata)))
+            .perform(patch(ENTITY_API_URL).contentType("application/merge-patch+json").content(om.writeValueAsBytes(metadata)))
             .andExpect(status().isMethodNotAllowed());
 
         // Validate the Metadata in the database
-        List<Metadata> metadataList = metadataRepository.findAll();
-        assertThat(metadataList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
@@ -392,7 +365,7 @@ class MetadataResourceIT {
         // Initialize the database
         metadataRepository.save(metadata);
 
-        int databaseSizeBeforeDelete = metadataRepository.findAll().size();
+        long databaseSizeBeforeDelete = getRepositoryCount();
 
         // Delete the metadata
         restMetadataMockMvc
@@ -400,25 +373,34 @@ class MetadataResourceIT {
             .andExpect(status().isNoContent());
 
         // Validate the database contains one less item
-        List<Metadata> metadataList = metadataRepository.findAll();
-        assertThat(metadataList).hasSize(databaseSizeBeforeDelete - 1);
+        assertDecrementedRepositoryCount(databaseSizeBeforeDelete);
     }
 
-    @Test
-    void searchMetadata() throws Exception {
-        // Initialize the database
-        metadata = metadataRepository.save(metadata);
+    protected long getRepositoryCount() {
+        return metadataRepository.count();
+    }
 
-        // Search the metadata
-        restMetadataMockMvc
-            .perform(get(ENTITY_SEARCH_API_URL + "?query=id:" + metadata.getId()))
-            .andExpect(status().isOk())
-            .andExpect(content().contentType(MediaType.APPLICATION_JSON_VALUE))
-            .andExpect(jsonPath("$.[*].id").value(hasItem(metadata.getId())))
-            .andExpect(jsonPath("$.[*].createdBy").value(hasItem(DEFAULT_CREATED_BY)))
-            .andExpect(jsonPath("$.[*].modifiedBy").value(hasItem(DEFAULT_MODIFIED_BY)))
-            .andExpect(jsonPath("$.[*].createdDate").value(hasItem(DEFAULT_CREATED_DATE.toString())))
-            .andExpect(jsonPath("$.[*].modifiedDate").value(hasItem(DEFAULT_MODIFIED_DATE.toString())))
-            .andExpect(jsonPath("$.[*].data").value(hasItem(DEFAULT_DATA)));
+    protected void assertIncrementedRepositoryCount(long countBefore) {
+        assertThat(countBefore + 1).isEqualTo(getRepositoryCount());
+    }
+
+    protected void assertDecrementedRepositoryCount(long countBefore) {
+        assertThat(countBefore - 1).isEqualTo(getRepositoryCount());
+    }
+
+    protected void assertSameRepositoryCount(long countBefore) {
+        assertThat(countBefore).isEqualTo(getRepositoryCount());
+    }
+
+    protected Metadata getPersistedMetadata(Metadata metadata) {
+        return metadataRepository.findById(metadata.getId()).orElseThrow();
+    }
+
+    protected void assertPersistedMetadataToMatchAllProperties(Metadata expectedMetadata) {
+        assertMetadataAllPropertiesEquals(expectedMetadata, getPersistedMetadata(expectedMetadata));
+    }
+
+    protected void assertPersistedMetadataToMatchUpdatableProperties(Metadata expectedMetadata) {
+        assertMetadataAllUpdatablePropertiesEquals(expectedMetadata, getPersistedMetadata(expectedMetadata));
     }
 }

@@ -8,6 +8,10 @@
   "entityTableName": "report",
   "fields": [
     {
+      "fieldName": "id",
+      "fieldType": "String"
+    },
+    {
       "fieldName": "category",
       "fieldType": "String"
     },
@@ -49,6 +53,6 @@
   "pagination": "no",
   "readOnly": false,
   "relationships": [],
-  "searchEngine": true,
+  "searchEngine": "no",
   "service": "no"
 }

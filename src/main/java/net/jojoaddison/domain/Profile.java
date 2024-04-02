@@ -208,7 +208,8 @@ public class Profile implements Serializable {
         this.address = address;
     }
 
-    // jhipster-needle-entity-add-getters-setters - JHipster will add getters and setters here
+    // jhipster-needle-entity-add-getters-setters - JHipster will add getters and
+    // setters here
 
     @Override
     public boolean equals(Object o) {
@@ -223,7 +224,8 @@ public class Profile implements Serializable {
 
     @Override
     public int hashCode() {
-        // see https://vladmihalcea.com/how-to-implement-equals-and-hashcode-using-the-jpa-entity-identifier/
+        // see
+        // https://vladmihalcea.com/how-to-implement-equals-and-hashcode-using-the-jpa-entity-identifier/
         return getClass().hashCode();
     }
 
@@ -231,18 +233,18 @@ public class Profile implements Serializable {
     @Override
     public String toString() {
         return "Profile{" +
-            "id=" + getId() +
-            ", firstName='" + getFirstName() + "'" +
-            ", middleNames='" + getMiddleNames() + "'" +
-            ", lastName='" + getLastName() + "'" +
-            ", birthDate='" + getBirthDate() + "'" +
-            ", sex='" + getSex() + "'" +
-            ", mobilePhone='" + getMobilePhone() + "'" +
-            ", phoneNumber='" + getPhoneNumber() + "'" +
-            ", email='" + getEmail() + "'" +
-            ", cardType='" + getCardType() + "'" +
-            ", cardNumber='" + getCardNumber() + "'" +
-            ", address='" + getAddress() + "'" +
-            "}";
+                "id=" + getId() +
+                ", firstName='" + getFirstName() + "'" +
+                ", middleNames='" + getMiddleNames() + "'" +
+                ", lastName='" + getLastName() + "'" +
+                ", birthDate='" + getBirthDate() + "'" +
+                ", sex='" + getSex() + "'" +
+                ", mobilePhone='" + getMobilePhone() + "'" +
+                ", phoneNumber='" + getPhoneNumber() + "'" +
+                ", email='" + getEmail() + "'" +
+                ", cardType='" + getCardType() + "'" +
+                ", cardNumber='" + getCardNumber() + "'" +
+                ", address='" + getAddress() + "'" +
+                "}";
     }
 }

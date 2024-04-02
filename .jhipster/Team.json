@@ -8,6 +8,10 @@
   "entityTableName": "team",
   "fields": [
     {
+      "fieldName": "id",
+      "fieldType": "String"
+    },
+    {
       "fieldName": "name",
       "fieldType": "String"
     },
@@ -33,6 +37,6 @@
   "pagination": "no",
   "readOnly": false,
   "relationships": [],
-  "searchEngine": true,
+  "searchEngine": "no",
   "service": "no"
 }

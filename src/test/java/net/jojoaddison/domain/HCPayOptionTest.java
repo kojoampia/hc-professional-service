@@ -1,7 +1,6 @@
 package net.jojoaddison.domain;
 
-import static net.jojoaddison.domain.HCPayOptionTestSamples.getHCPayOptionSample1;
-import static net.jojoaddison.domain.HCPayOptionTestSamples.getHCPayOptionSample2;
+import static net.jojoaddison.domain.HCPayOptionTestSamples.*;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import net.jojoaddison.web.rest.TestUtil;

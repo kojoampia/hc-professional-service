@@ -1,7 +1,6 @@
 package net.jojoaddison.domain;
 
-import static net.jojoaddison.domain.HCCredentialTestSamples.getHCCredentialSample1;
-import static net.jojoaddison.domain.HCCredentialTestSamples.getHCCredentialSample2;
+import static net.jojoaddison.domain.HCCredentialTestSamples.*;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import net.jojoaddison.web.rest.TestUtil;

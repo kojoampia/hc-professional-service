@@ -48,7 +48,6 @@ management:
           - loggers
           - prometheus
           - threaddump
-          - caches
   endpoint:
     health:
       show-details: when_authorized

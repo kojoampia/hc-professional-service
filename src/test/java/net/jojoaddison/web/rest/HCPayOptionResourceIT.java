@@ -1,17 +1,13 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.domain.HCPayOptionAsserts.*;
+import static net.jojoaddison.web.rest.TestUtil.createUpdateProxyForBean;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-import java.util.List;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.UUID;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.HCPayOption;
@@ -43,7 +39,9 @@ class HCPayOptionResourceIT {
 
     private static final String ENTITY_API_URL = "/api/hc-pay-options";
     private static final String ENTITY_API_URL_ID = ENTITY_API_URL + "/{id}";
-    private static final String ENTITY_SEARCH_API_URL = "/api/hc-pay-options/_search";
+
+    @Autowired
+    private ObjectMapper om;
 
     @Autowired
     private HCPayOptionRepository hCPayOptionRepository;
@@ -83,19 +81,21 @@ class HCPayOptionResourceIT {
 
     @Test
     void createHCPayOption() throws Exception {
-        int databaseSizeBeforeCreate = hCPayOptionRepository.findAll().size();
+        long databaseSizeBeforeCreate = getRepositoryCount();
         // Create the HCPayOption
-        restHCPayOptionMockMvc
-            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(hCPayOption)))
-            .andExpect(status().isCreated());
+        var returnedHCPayOption = om.readValue(
+            restHCPayOptionMockMvc
+                .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(hCPayOption)))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(),
+            HCPayOption.class
+        );
 
         // Validate the HCPayOption in the database
-        List<HCPayOption> hCPayOptionList = hCPayOptionRepository.findAll();
-        assertThat(hCPayOptionList).hasSize(databaseSizeBeforeCreate + 1);
-        HCPayOption testHCPayOption = hCPayOptionList.get(hCPayOptionList.size() - 1);
-        assertThat(testHCPayOption.getType()).isEqualTo(DEFAULT_TYPE);
-        assertThat(testHCPayOption.getUserID()).isEqualTo(DEFAULT_USER_ID);
-        assertThat(testHCPayOption.getMetadata()).isEqualTo(DEFAULT_METADATA);
+        assertIncrementedRepositoryCount(databaseSizeBeforeCreate);
+        assertHCPayOptionUpdatableFieldsEquals(returnedHCPayOption, getPersistedHCPayOption(returnedHCPayOption));
     }
 
     @Test
@@ -103,16 +103,15 @@ class HCPayOptionResourceIT {
         // Create the HCPayOption with an existing ID
         hCPayOption.setId("existing_id");
 
-        int databaseSizeBeforeCreate = hCPayOptionRepository.findAll().size();
+        long databaseSizeBeforeCreate = getRepositoryCount();
 
         // An entity with an existing ID cannot be created, so this API call must fail
         restHCPayOptionMockMvc
-            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(hCPayOption)))
+            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(hCPayOption)))
             .andExpect(status().isBadRequest());
 
         // Validate the HCPayOption in the database
-        List<HCPayOption> hCPayOptionList = hCPayOptionRepository.findAll();
-        assertThat(hCPayOptionList).hasSize(databaseSizeBeforeCreate);
+        assertSameRepositoryCount(databaseSizeBeforeCreate);
     }
 
     @Test
@@ -158,7 +157,7 @@ class HCPayOptionResourceIT {
         // Initialize the database
         hCPayOptionRepository.save(hCPayOption);
 
-        int databaseSizeBeforeUpdate = hCPayOptionRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the hCPayOption
         HCPayOption updatedHCPayOption = hCPayOptionRepository.findById(hCPayOption.getId()).orElseThrow();
@@ -168,22 +167,18 @@ class HCPayOptionResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, updatedHCPayOption.getId())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(updatedHCPayOption))
+                    .content(om.writeValueAsBytes(updatedHCPayOption))
             )
             .andExpect(status().isOk());
 
         // Validate the HCPayOption in the database
-        List<HCPayOption> hCPayOptionList = hCPayOptionRepository.findAll();
-        assertThat(hCPayOptionList).hasSize(databaseSizeBeforeUpdate);
-        HCPayOption testHCPayOption = hCPayOptionList.get(hCPayOptionList.size() - 1);
-        assertThat(testHCPayOption.getType()).isEqualTo(UPDATED_TYPE);
-        assertThat(testHCPayOption.getUserID()).isEqualTo(UPDATED_USER_ID);
-        assertThat(testHCPayOption.getMetadata()).isEqualTo(UPDATED_METADATA);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertPersistedHCPayOptionToMatchAllProperties(updatedHCPayOption);
     }
 
     @Test
     void putNonExistingHCPayOption() throws Exception {
-        int databaseSizeBeforeUpdate = hCPayOptionRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         hCPayOption.setId(UUID.randomUUID().toString());
 
         // If the entity doesn't have an ID, it will throw BadRequestAlertException
@@ -191,18 +186,17 @@ class HCPayOptionResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, hCPayOption.getId())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(hCPayOption))
+                    .content(om.writeValueAsBytes(hCPayOption))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the HCPayOption in the database
-        List<HCPayOption> hCPayOptionList = hCPayOptionRepository.findAll();
-        assertThat(hCPayOptionList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void putWithIdMismatchHCPayOption() throws Exception {
-        int databaseSizeBeforeUpdate = hCPayOptionRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         hCPayOption.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
@@ -210,28 +204,26 @@ class HCPayOptionResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(hCPayOption))
+                    .content(om.writeValueAsBytes(hCPayOption))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the HCPayOption in the database
-        List<HCPayOption> hCPayOptionList = hCPayOptionRepository.findAll();
-        assertThat(hCPayOptionList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void putWithMissingIdPathParamHCPayOption() throws Exception {
-        int databaseSizeBeforeUpdate = hCPayOptionRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         hCPayOption.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
         restHCPayOptionMockMvc
-            .perform(put(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(hCPayOption)))
+            .perform(put(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(hCPayOption)))
             .andExpect(status().isMethodNotAllowed());
 
         // Validate the HCPayOption in the database
-        List<HCPayOption> hCPayOptionList = hCPayOptionRepository.findAll();
-        assertThat(hCPayOptionList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
@@ -239,7 +231,7 @@ class HCPayOptionResourceIT {
         // Initialize the database
         hCPayOptionRepository.save(hCPayOption);
 
-        int databaseSizeBeforeUpdate = hCPayOptionRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the hCPayOption using partial update
         HCPayOption partialUpdatedHCPayOption = new HCPayOption();
@@ -251,17 +243,17 @@ class HCPayOptionResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, partialUpdatedHCPayOption.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(partialUpdatedHCPayOption))
+                    .content(om.writeValueAsBytes(partialUpdatedHCPayOption))
             )
             .andExpect(status().isOk());
 
         // Validate the HCPayOption in the database
-        List<HCPayOption> hCPayOptionList = hCPayOptionRepository.findAll();
-        assertThat(hCPayOptionList).hasSize(databaseSizeBeforeUpdate);
-        HCPayOption testHCPayOption = hCPayOptionList.get(hCPayOptionList.size() - 1);
-        assertThat(testHCPayOption.getType()).isEqualTo(UPDATED_TYPE);
-        assertThat(testHCPayOption.getUserID()).isEqualTo(UPDATED_USER_ID);
-        assertThat(testHCPayOption.getMetadata()).isEqualTo(DEFAULT_METADATA);
+
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertHCPayOptionUpdatableFieldsEquals(
+            createUpdateProxyForBean(partialUpdatedHCPayOption, hCPayOption),
+            getPersistedHCPayOption(hCPayOption)
+        );
     }
 
     @Test
@@ -269,7 +261,7 @@ class HCPayOptionResourceIT {
         // Initialize the database
         hCPayOptionRepository.save(hCPayOption);
 
-        int databaseSizeBeforeUpdate = hCPayOptionRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the hCPayOption using partial update
         HCPayOption partialUpdatedHCPayOption = new HCPayOption();
@@ -281,22 +273,19 @@ class HCPayOptionResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, partialUpdatedHCPayOption.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(partialUpdatedHCPayOption))
+                    .content(om.writeValueAsBytes(partialUpdatedHCPayOption))
             )
             .andExpect(status().isOk());
 
         // Validate the HCPayOption in the database
-        List<HCPayOption> hCPayOptionList = hCPayOptionRepository.findAll();
-        assertThat(hCPayOptionList).hasSize(databaseSizeBeforeUpdate);
-        HCPayOption testHCPayOption = hCPayOptionList.get(hCPayOptionList.size() - 1);
-        assertThat(testHCPayOption.getType()).isEqualTo(UPDATED_TYPE);
-        assertThat(testHCPayOption.getUserID()).isEqualTo(UPDATED_USER_ID);
-        assertThat(testHCPayOption.getMetadata()).isEqualTo(UPDATED_METADATA);
+
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertHCPayOptionUpdatableFieldsEquals(partialUpdatedHCPayOption, getPersistedHCPayOption(partialUpdatedHCPayOption));
     }
 
     @Test
     void patchNonExistingHCPayOption() throws Exception {
-        int databaseSizeBeforeUpdate = hCPayOptionRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         hCPayOption.setId(UUID.randomUUID().toString());
 
         // If the entity doesn't have an ID, it will throw BadRequestAlertException
@@ -304,18 +293,17 @@ class HCPayOptionResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, hCPayOption.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(hCPayOption))
+                    .content(om.writeValueAsBytes(hCPayOption))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the HCPayOption in the database
-        List<HCPayOption> hCPayOptionList = hCPayOptionRepository.findAll();
-        assertThat(hCPayOptionList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void patchWithIdMismatchHCPayOption() throws Exception {
-        int databaseSizeBeforeUpdate = hCPayOptionRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         hCPayOption.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
@@ -323,30 +311,26 @@ class HCPayOptionResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(hCPayOption))
+                    .content(om.writeValueAsBytes(hCPayOption))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the HCPayOption in the database
-        List<HCPayOption> hCPayOptionList = hCPayOptionRepository.findAll();
-        assertThat(hCPayOptionList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void patchWithMissingIdPathParamHCPayOption() throws Exception {
-        int databaseSizeBeforeUpdate = hCPayOptionRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         hCPayOption.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
         restHCPayOptionMockMvc
-            .perform(
-                patch(ENTITY_API_URL).contentType("application/merge-patch+json").content(TestUtil.convertObjectToJsonBytes(hCPayOption))
-            )
+            .perform(patch(ENTITY_API_URL).contentType("application/merge-patch+json").content(om.writeValueAsBytes(hCPayOption)))
             .andExpect(status().isMethodNotAllowed());
 
         // Validate the HCPayOption in the database
-        List<HCPayOption> hCPayOptionList = hCPayOptionRepository.findAll();
-        assertThat(hCPayOptionList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
@@ -354,7 +338,7 @@ class HCPayOptionResourceIT {
         // Initialize the database
         hCPayOptionRepository.save(hCPayOption);
 
-        int databaseSizeBeforeDelete = hCPayOptionRepository.findAll().size();
+        long databaseSizeBeforeDelete = getRepositoryCount();
 
         // Delete the hCPayOption
         restHCPayOptionMockMvc
@@ -362,23 +346,34 @@ class HCPayOptionResourceIT {
             .andExpect(status().isNoContent());
 
         // Validate the database contains one less item
-        List<HCPayOption> hCPayOptionList = hCPayOptionRepository.findAll();
-        assertThat(hCPayOptionList).hasSize(databaseSizeBeforeDelete - 1);
+        assertDecrementedRepositoryCount(databaseSizeBeforeDelete);
     }
 
-    @Test
-    void searchHCPayOption() throws Exception {
-        // Initialize the database
-        hCPayOption = hCPayOptionRepository.save(hCPayOption);
+    protected long getRepositoryCount() {
+        return hCPayOptionRepository.count();
+    }
 
-        // Search the hCPayOption
-        restHCPayOptionMockMvc
-            .perform(get(ENTITY_SEARCH_API_URL + "?query=id:" + hCPayOption.getId()))
-            .andExpect(status().isOk())
-            .andExpect(content().contentType(MediaType.APPLICATION_JSON_VALUE))
-            .andExpect(jsonPath("$.[*].id").value(hasItem(hCPayOption.getId())))
-            .andExpect(jsonPath("$.[*].type").value(hasItem(DEFAULT_TYPE)))
-            .andExpect(jsonPath("$.[*].userID").value(hasItem(DEFAULT_USER_ID)))
-            .andExpect(jsonPath("$.[*].metadata").value(hasItem(DEFAULT_METADATA)));
+    protected void assertIncrementedRepositoryCount(long countBefore) {
+        assertThat(countBefore + 1).isEqualTo(getRepositoryCount());
+    }
+
+    protected void assertDecrementedRepositoryCount(long countBefore) {
+        assertThat(countBefore - 1).isEqualTo(getRepositoryCount());
+    }
+
+    protected void assertSameRepositoryCount(long countBefore) {
+        assertThat(countBefore).isEqualTo(getRepositoryCount());
+    }
+
+    protected HCPayOption getPersistedHCPayOption(HCPayOption hCPayOption) {
+        return hCPayOptionRepository.findById(hCPayOption.getId()).orElseThrow();
+    }
+
+    protected void assertPersistedHCPayOptionToMatchAllProperties(HCPayOption expectedHCPayOption) {
+        assertHCPayOptionAllPropertiesEquals(expectedHCPayOption, getPersistedHCPayOption(expectedHCPayOption));
+    }
+
+    protected void assertPersistedHCPayOptionToMatchUpdatableProperties(HCPayOption expectedHCPayOption) {
+        assertHCPayOptionAllUpdatablePropertiesEquals(expectedHCPayOption, getPersistedHCPayOption(expectedHCPayOption));
     }
 }

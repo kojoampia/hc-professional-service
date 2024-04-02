@@ -12,15 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import tech.jhipster.web.util.HeaderUtil;
 import tech.jhipster.web.util.ResponseUtil;
 
@@ -57,11 +49,10 @@ public class ActivityResource {
         if (activity.getId() != null) {
             throw new BadRequestAlertException("A new activity cannot already have an ID", ENTITY_NAME, "idexists");
         }
-        Activity result = activityRepository.save(activity);
-        return ResponseEntity
-            .created(new URI("/api/activities/" + result.getId()))
-            .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, result.getId()))
-            .body(result);
+        activity = activityRepository.save(activity);
+        return ResponseEntity.created(new URI("/api/activities/" + activity.getId()))
+            .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, activity.getId()))
+            .body(activity);
     }
 
     /**
@@ -91,11 +82,10 @@ public class ActivityResource {
             throw new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound");
         }
 
-        Activity result = activityRepository.save(activity);
-        return ResponseEntity
-            .ok()
+        activity = activityRepository.save(activity);
+        return ResponseEntity.ok()
             .headers(HeaderUtil.createEntityUpdateAlert(applicationName, true, ENTITY_NAME, activity.getId()))
-            .body(result);
+            .body(activity);
     }
 
     /**

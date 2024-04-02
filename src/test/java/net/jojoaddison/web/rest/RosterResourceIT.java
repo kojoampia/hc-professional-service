@@ -1,20 +1,16 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.domain.RosterAsserts.*;
+import static net.jojoaddison.web.rest.TestUtil.createUpdateProxyForBean;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.List;
 import java.util.UUID;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.Roster;
@@ -67,6 +63,9 @@ class RosterResourceIT {
 
     private static final String ENTITY_API_URL = "/api/rosters";
     private static final String ENTITY_API_URL_ID = ENTITY_API_URL + "/{id}";
+
+    @Autowired
+    private ObjectMapper om;
 
     @Autowired
     private RosterRepository rosterRepository;
@@ -126,26 +125,21 @@ class RosterResourceIT {
 
     @Test
     void createRoster() throws Exception {
-        int databaseSizeBeforeCreate = rosterRepository.findAll().size();
+        long databaseSizeBeforeCreate = getRepositoryCount();
         // Create the Roster
-        restRosterMockMvc
-            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(roster)))
-            .andExpect(status().isCreated());
+        var returnedRoster = om.readValue(
+            restRosterMockMvc
+                .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(roster)))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(),
+            Roster.class
+        );
 
         // Validate the Roster in the database
-        List<Roster> rosterList = rosterRepository.findAll();
-        assertThat(rosterList).hasSize(databaseSizeBeforeCreate + 1);
-        Roster testRoster = rosterList.get(rosterList.size() - 1);
-        assertThat(testRoster.getName()).isEqualTo(DEFAULT_NAME);
-        assertThat(testRoster.getDescription()).isEqualTo(DEFAULT_DESCRIPTION);
-        assertThat(testRoster.getProfessionalId()).isEqualTo(DEFAULT_PROFESSIONAL_ID);
-        assertThat(testRoster.getSchedule()).isEqualTo(DEFAULT_SCHEDULE);
-        assertThat(testRoster.getDuration()).isEqualTo(DEFAULT_DURATION);
-        assertThat(testRoster.getTasks()).isEqualTo(DEFAULT_TASKS);
-        assertThat(testRoster.getCreatedDate()).isEqualTo(DEFAULT_CREATED_DATE);
-        assertThat(testRoster.getModifiedDate()).isEqualTo(DEFAULT_MODIFIED_DATE);
-        assertThat(testRoster.getCreatedBy()).isEqualTo(DEFAULT_CREATED_BY);
-        assertThat(testRoster.getModifiedBy()).isEqualTo(DEFAULT_MODIFIED_BY);
+        assertIncrementedRepositoryCount(databaseSizeBeforeCreate);
+        assertRosterUpdatableFieldsEquals(returnedRoster, getPersistedRoster(returnedRoster));
     }
 
     @Test
@@ -153,16 +147,15 @@ class RosterResourceIT {
         // Create the Roster with an existing ID
         roster.setId("existing_id");
 
-        int databaseSizeBeforeCreate = rosterRepository.findAll().size();
+        long databaseSizeBeforeCreate = getRepositoryCount();
 
         // An entity with an existing ID cannot be created, so this API call must fail
         restRosterMockMvc
-            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(roster)))
+            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(roster)))
             .andExpect(status().isBadRequest());
 
         // Validate the Roster in the database
-        List<Roster> rosterList = rosterRepository.findAll();
-        assertThat(rosterList).hasSize(databaseSizeBeforeCreate);
+        assertSameRepositoryCount(databaseSizeBeforeCreate);
     }
 
     @Test
@@ -222,7 +215,7 @@ class RosterResourceIT {
         // Initialize the database
         rosterRepository.save(roster);
 
-        int databaseSizeBeforeUpdate = rosterRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the roster
         Roster updatedRoster = rosterRepository.findById(roster.getId()).orElseThrow();
@@ -242,48 +235,32 @@ class RosterResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, updatedRoster.getId())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(updatedRoster))
+                    .content(om.writeValueAsBytes(updatedRoster))
             )
             .andExpect(status().isOk());
 
         // Validate the Roster in the database
-        List<Roster> rosterList = rosterRepository.findAll();
-        assertThat(rosterList).hasSize(databaseSizeBeforeUpdate);
-        Roster testRoster = rosterList.get(rosterList.size() - 1);
-        assertThat(testRoster.getName()).isEqualTo(UPDATED_NAME);
-        assertThat(testRoster.getDescription()).isEqualTo(UPDATED_DESCRIPTION);
-        assertThat(testRoster.getProfessionalId()).isEqualTo(UPDATED_PROFESSIONAL_ID);
-        assertThat(testRoster.getSchedule()).isEqualTo(UPDATED_SCHEDULE);
-        assertThat(testRoster.getDuration()).isEqualTo(UPDATED_DURATION);
-        assertThat(testRoster.getTasks()).isEqualTo(UPDATED_TASKS);
-        assertThat(testRoster.getCreatedDate()).isEqualTo(UPDATED_CREATED_DATE);
-        assertThat(testRoster.getModifiedDate()).isEqualTo(UPDATED_MODIFIED_DATE);
-        assertThat(testRoster.getCreatedBy()).isEqualTo(UPDATED_CREATED_BY);
-        assertThat(testRoster.getModifiedBy()).isEqualTo(UPDATED_MODIFIED_BY);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertPersistedRosterToMatchAllProperties(updatedRoster);
     }
 
     @Test
     void putNonExistingRoster() throws Exception {
-        int databaseSizeBeforeUpdate = rosterRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         roster.setId(UUID.randomUUID().toString());
 
         // If the entity doesn't have an ID, it will throw BadRequestAlertException
         restRosterMockMvc
-            .perform(
-                put(ENTITY_API_URL_ID, roster.getId())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(roster))
-            )
+            .perform(put(ENTITY_API_URL_ID, roster.getId()).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(roster)))
             .andExpect(status().isBadRequest());
 
         // Validate the Roster in the database
-        List<Roster> rosterList = rosterRepository.findAll();
-        assertThat(rosterList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void putWithIdMismatchRoster() throws Exception {
-        int databaseSizeBeforeUpdate = rosterRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         roster.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
@@ -291,28 +268,26 @@ class RosterResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(roster))
+                    .content(om.writeValueAsBytes(roster))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the Roster in the database
-        List<Roster> rosterList = rosterRepository.findAll();
-        assertThat(rosterList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void putWithMissingIdPathParamRoster() throws Exception {
-        int databaseSizeBeforeUpdate = rosterRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         roster.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
         restRosterMockMvc
-            .perform(put(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(roster)))
+            .perform(put(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(roster)))
             .andExpect(status().isMethodNotAllowed());
 
         // Validate the Roster in the database
-        List<Roster> rosterList = rosterRepository.findAll();
-        assertThat(rosterList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
@@ -320,7 +295,7 @@ class RosterResourceIT {
         // Initialize the database
         rosterRepository.save(roster);
 
-        int databaseSizeBeforeUpdate = rosterRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the roster using partial update
         Roster partialUpdatedRoster = new Roster();
@@ -336,24 +311,14 @@ class RosterResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, partialUpdatedRoster.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(partialUpdatedRoster))
+                    .content(om.writeValueAsBytes(partialUpdatedRoster))
             )
             .andExpect(status().isOk());
 
         // Validate the Roster in the database
-        List<Roster> rosterList = rosterRepository.findAll();
-        assertThat(rosterList).hasSize(databaseSizeBeforeUpdate);
-        Roster testRoster = rosterList.get(rosterList.size() - 1);
-        assertThat(testRoster.getName()).isEqualTo(DEFAULT_NAME);
-        assertThat(testRoster.getDescription()).isEqualTo(DEFAULT_DESCRIPTION);
-        assertThat(testRoster.getProfessionalId()).isEqualTo(UPDATED_PROFESSIONAL_ID);
-        assertThat(testRoster.getSchedule()).isEqualTo(DEFAULT_SCHEDULE);
-        assertThat(testRoster.getDuration()).isEqualTo(DEFAULT_DURATION);
-        assertThat(testRoster.getTasks()).isEqualTo(UPDATED_TASKS);
-        assertThat(testRoster.getCreatedDate()).isEqualTo(DEFAULT_CREATED_DATE);
-        assertThat(testRoster.getModifiedDate()).isEqualTo(UPDATED_MODIFIED_DATE);
-        assertThat(testRoster.getCreatedBy()).isEqualTo(UPDATED_CREATED_BY);
-        assertThat(testRoster.getModifiedBy()).isEqualTo(DEFAULT_MODIFIED_BY);
+
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertRosterUpdatableFieldsEquals(createUpdateProxyForBean(partialUpdatedRoster, roster), getPersistedRoster(roster));
     }
 
     @Test
@@ -361,7 +326,7 @@ class RosterResourceIT {
         // Initialize the database
         rosterRepository.save(roster);
 
-        int databaseSizeBeforeUpdate = rosterRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the roster using partial update
         Roster partialUpdatedRoster = new Roster();
@@ -383,48 +348,35 @@ class RosterResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, partialUpdatedRoster.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(partialUpdatedRoster))
+                    .content(om.writeValueAsBytes(partialUpdatedRoster))
             )
             .andExpect(status().isOk());
 
         // Validate the Roster in the database
-        List<Roster> rosterList = rosterRepository.findAll();
-        assertThat(rosterList).hasSize(databaseSizeBeforeUpdate);
-        Roster testRoster = rosterList.get(rosterList.size() - 1);
-        assertThat(testRoster.getName()).isEqualTo(UPDATED_NAME);
-        assertThat(testRoster.getDescription()).isEqualTo(UPDATED_DESCRIPTION);
-        assertThat(testRoster.getProfessionalId()).isEqualTo(UPDATED_PROFESSIONAL_ID);
-        assertThat(testRoster.getSchedule()).isEqualTo(UPDATED_SCHEDULE);
-        assertThat(testRoster.getDuration()).isEqualTo(UPDATED_DURATION);
-        assertThat(testRoster.getTasks()).isEqualTo(UPDATED_TASKS);
-        assertThat(testRoster.getCreatedDate()).isEqualTo(UPDATED_CREATED_DATE);
-        assertThat(testRoster.getModifiedDate()).isEqualTo(UPDATED_MODIFIED_DATE);
-        assertThat(testRoster.getCreatedBy()).isEqualTo(UPDATED_CREATED_BY);
-        assertThat(testRoster.getModifiedBy()).isEqualTo(UPDATED_MODIFIED_BY);
+
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertRosterUpdatableFieldsEquals(partialUpdatedRoster, getPersistedRoster(partialUpdatedRoster));
     }
 
     @Test
     void patchNonExistingRoster() throws Exception {
-        int databaseSizeBeforeUpdate = rosterRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         roster.setId(UUID.randomUUID().toString());
 
         // If the entity doesn't have an ID, it will throw BadRequestAlertException
         restRosterMockMvc
             .perform(
-                patch(ENTITY_API_URL_ID, roster.getId())
-                    .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(roster))
+                patch(ENTITY_API_URL_ID, roster.getId()).contentType("application/merge-patch+json").content(om.writeValueAsBytes(roster))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the Roster in the database
-        List<Roster> rosterList = rosterRepository.findAll();
-        assertThat(rosterList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void patchWithIdMismatchRoster() throws Exception {
-        int databaseSizeBeforeUpdate = rosterRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         roster.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
@@ -432,28 +384,26 @@ class RosterResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(roster))
+                    .content(om.writeValueAsBytes(roster))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the Roster in the database
-        List<Roster> rosterList = rosterRepository.findAll();
-        assertThat(rosterList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void patchWithMissingIdPathParamRoster() throws Exception {
-        int databaseSizeBeforeUpdate = rosterRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         roster.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
         restRosterMockMvc
-            .perform(patch(ENTITY_API_URL).contentType("application/merge-patch+json").content(TestUtil.convertObjectToJsonBytes(roster)))
+            .perform(patch(ENTITY_API_URL).contentType("application/merge-patch+json").content(om.writeValueAsBytes(roster)))
             .andExpect(status().isMethodNotAllowed());
 
         // Validate the Roster in the database
-        List<Roster> rosterList = rosterRepository.findAll();
-        assertThat(rosterList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
@@ -461,7 +411,7 @@ class RosterResourceIT {
         // Initialize the database
         rosterRepository.save(roster);
 
-        int databaseSizeBeforeDelete = rosterRepository.findAll().size();
+        long databaseSizeBeforeDelete = getRepositoryCount();
 
         // Delete the roster
         restRosterMockMvc
@@ -469,7 +419,34 @@ class RosterResourceIT {
             .andExpect(status().isNoContent());
 
         // Validate the database contains one less item
-        List<Roster> rosterList = rosterRepository.findAll();
-        assertThat(rosterList).hasSize(databaseSizeBeforeDelete - 1);
+        assertDecrementedRepositoryCount(databaseSizeBeforeDelete);
+    }
+
+    protected long getRepositoryCount() {
+        return rosterRepository.count();
+    }
+
+    protected void assertIncrementedRepositoryCount(long countBefore) {
+        assertThat(countBefore + 1).isEqualTo(getRepositoryCount());
+    }
+
+    protected void assertDecrementedRepositoryCount(long countBefore) {
+        assertThat(countBefore - 1).isEqualTo(getRepositoryCount());
+    }
+
+    protected void assertSameRepositoryCount(long countBefore) {
+        assertThat(countBefore).isEqualTo(getRepositoryCount());
+    }
+
+    protected Roster getPersistedRoster(Roster roster) {
+        return rosterRepository.findById(roster.getId()).orElseThrow();
+    }
+
+    protected void assertPersistedRosterToMatchAllProperties(Roster expectedRoster) {
+        assertRosterAllPropertiesEquals(expectedRoster, getPersistedRoster(expectedRoster));
+    }
+
+    protected void assertPersistedRosterToMatchUpdatableProperties(Roster expectedRoster) {
+        assertRosterAllUpdatablePropertiesEquals(expectedRoster, getPersistedRoster(expectedRoster));
     }
 }

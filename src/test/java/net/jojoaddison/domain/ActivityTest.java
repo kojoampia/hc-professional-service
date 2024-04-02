@@ -1,7 +1,6 @@
 package net.jojoaddison.domain;
 
-import static net.jojoaddison.domain.ActivityTestSamples.getActivitySample1;
-import static net.jojoaddison.domain.ActivityTestSamples.getActivitySample2;
+import static net.jojoaddison.domain.ActivityTestSamples.*;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import net.jojoaddison.web.rest.TestUtil;

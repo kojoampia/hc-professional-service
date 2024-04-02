@@ -1,24 +1,16 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.domain.TeamAsserts.*;
+import static net.jojoaddison.web.rest.TestUtil.createUpdateProxyForBean;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-import java.util.List;
-import java.util.Set;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.UUID;
 import net.jojoaddison.IntegrationTest;
-import net.jojoaddison.domain.Profile;
-import net.jojoaddison.domain.ProfileTestSamples;
 import net.jojoaddison.domain.Team;
-import net.jojoaddison.domain.TeamTestSamples;
 import net.jojoaddison.repository.TeamRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,18 +34,20 @@ class TeamResourceIT {
     private static final String DEFAULT_DESCRIPTION = "AAAAAAAAAA";
     private static final String UPDATED_DESCRIPTION = "BBBBBBBBBB";
 
-    private static final Set<Profile> DEFAULT_MEMBERS = TeamTestSamples.getTeamSample1().getMembers();
-    private static final Set<Profile> UPDATED_MEMBERS = TeamTestSamples.getTeamSample2().getMembers();
+    private static final String DEFAULT_MEMBERS = "AAAAAAAAAA";
+    private static final String UPDATED_MEMBERS = "BBBBBBBBBB";
 
-    private static final Profile DEFAULT_SUPERVISOR = ProfileTestSamples.getProfileRandomSampleGenerator();
-    private static final Profile UPDATED_SUPERVISOR = ProfileTestSamples.getProfileRandomSampleGenerator();
+    private static final String DEFAULT_SUPERVISOR = "AAAAAAAAAA";
+    private static final String UPDATED_SUPERVISOR = "BBBBBBBBBB";
 
-    private static final Profile DEFAULT_MANAGER = ProfileTestSamples.getProfileRandomSampleGenerator();
-    private static final Profile UPDATED_MANAGER = ProfileTestSamples.getProfileRandomSampleGenerator();
+    private static final String DEFAULT_MANAGER = "AAAAAAAAAA";
+    private static final String UPDATED_MANAGER = "BBBBBBBBBB";
 
     private static final String ENTITY_API_URL = "/api/teams";
     private static final String ENTITY_API_URL_ID = ENTITY_API_URL + "/{id}";
-    private static final String ENTITY_SEARCH_API_URL = "/api/teams/_search";
+
+    @Autowired
+    private ObjectMapper om;
 
     @Autowired
     private TeamRepository teamRepository;
@@ -103,21 +97,21 @@ class TeamResourceIT {
 
     @Test
     void createTeam() throws Exception {
-        int databaseSizeBeforeCreate = teamRepository.findAll().size();
+        long databaseSizeBeforeCreate = getRepositoryCount();
         // Create the Team
-        restTeamMockMvc
-            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(team)))
-            .andExpect(status().isCreated());
+        var returnedTeam = om.readValue(
+            restTeamMockMvc
+                .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(team)))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString(),
+            Team.class
+        );
 
         // Validate the Team in the database
-        List<Team> teamList = teamRepository.findAll();
-        assertThat(teamList).hasSize(databaseSizeBeforeCreate + 1);
-        Team testTeam = teamList.get(teamList.size() - 1);
-        assertThat(testTeam.getName()).isEqualTo(DEFAULT_NAME);
-        assertThat(testTeam.getDescription()).isEqualTo(DEFAULT_DESCRIPTION);
-        assertThat(testTeam.getMembers()).isEqualTo(DEFAULT_MEMBERS);
-        assertThat(testTeam.getSupervisor()).isEqualTo(DEFAULT_SUPERVISOR);
-        assertThat(testTeam.getManager()).isEqualTo(DEFAULT_MANAGER);
+        assertIncrementedRepositoryCount(databaseSizeBeforeCreate);
+        assertTeamUpdatableFieldsEquals(returnedTeam, getPersistedTeam(returnedTeam));
     }
 
     @Test
@@ -125,16 +119,15 @@ class TeamResourceIT {
         // Create the Team with an existing ID
         team.setId("existing_id");
 
-        int databaseSizeBeforeCreate = teamRepository.findAll().size();
+        long databaseSizeBeforeCreate = getRepositoryCount();
 
         // An entity with an existing ID cannot be created, so this API call must fail
         restTeamMockMvc
-            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(team)))
+            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(team)))
             .andExpect(status().isBadRequest());
 
         // Validate the Team in the database
-        List<Team> teamList = teamRepository.findAll();
-        assertThat(teamList).hasSize(databaseSizeBeforeCreate);
+        assertSameRepositoryCount(databaseSizeBeforeCreate);
     }
 
     @Test
@@ -184,7 +177,7 @@ class TeamResourceIT {
         // Initialize the database
         teamRepository.save(team);
 
-        int databaseSizeBeforeUpdate = teamRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the team
         Team updatedTeam = teamRepository.findById(team.getId()).orElseThrow();
@@ -199,43 +192,32 @@ class TeamResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, updatedTeam.getId())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(updatedTeam))
+                    .content(om.writeValueAsBytes(updatedTeam))
             )
             .andExpect(status().isOk());
 
         // Validate the Team in the database
-        List<Team> teamList = teamRepository.findAll();
-        assertThat(teamList).hasSize(databaseSizeBeforeUpdate);
-        Team testTeam = teamList.get(teamList.size() - 1);
-        assertThat(testTeam.getName()).isEqualTo(UPDATED_NAME);
-        assertThat(testTeam.getDescription()).isEqualTo(UPDATED_DESCRIPTION);
-        assertThat(testTeam.getMembers()).isEqualTo(UPDATED_MEMBERS);
-        assertThat(testTeam.getSupervisor()).isEqualTo(UPDATED_SUPERVISOR);
-        assertThat(testTeam.getManager()).isEqualTo(UPDATED_MANAGER);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertPersistedTeamToMatchAllProperties(updatedTeam);
     }
 
     @Test
     void putNonExistingTeam() throws Exception {
-        int databaseSizeBeforeUpdate = teamRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         team.setId(UUID.randomUUID().toString());
 
         // If the entity doesn't have an ID, it will throw BadRequestAlertException
         restTeamMockMvc
-            .perform(
-                put(ENTITY_API_URL_ID, team.getId())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(team))
-            )
+            .perform(put(ENTITY_API_URL_ID, team.getId()).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(team)))
             .andExpect(status().isBadRequest());
 
         // Validate the Team in the database
-        List<Team> teamList = teamRepository.findAll();
-        assertThat(teamList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void putWithIdMismatchTeam() throws Exception {
-        int databaseSizeBeforeUpdate = teamRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         team.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
@@ -243,28 +225,26 @@ class TeamResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(team))
+                    .content(om.writeValueAsBytes(team))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the Team in the database
-        List<Team> teamList = teamRepository.findAll();
-        assertThat(teamList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void putWithMissingIdPathParamTeam() throws Exception {
-        int databaseSizeBeforeUpdate = teamRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         team.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
         restTeamMockMvc
-            .perform(put(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(team)))
+            .perform(put(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(team)))
             .andExpect(status().isMethodNotAllowed());
 
         // Validate the Team in the database
-        List<Team> teamList = teamRepository.findAll();
-        assertThat(teamList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
@@ -272,7 +252,7 @@ class TeamResourceIT {
         // Initialize the database
         teamRepository.save(team);
 
-        int databaseSizeBeforeUpdate = teamRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the team using partial update
         Team partialUpdatedTeam = new Team();
@@ -284,19 +264,14 @@ class TeamResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, partialUpdatedTeam.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(partialUpdatedTeam))
+                    .content(om.writeValueAsBytes(partialUpdatedTeam))
             )
             .andExpect(status().isOk());
 
         // Validate the Team in the database
-        List<Team> teamList = teamRepository.findAll();
-        assertThat(teamList).hasSize(databaseSizeBeforeUpdate);
-        Team testTeam = teamList.get(teamList.size() - 1);
-        assertThat(testTeam.getName()).isEqualTo(UPDATED_NAME);
-        assertThat(testTeam.getDescription()).isEqualTo(DEFAULT_DESCRIPTION);
-        assertThat(testTeam.getMembers()).isEqualTo(DEFAULT_MEMBERS);
-        assertThat(testTeam.getSupervisor()).isEqualTo(UPDATED_SUPERVISOR);
-        assertThat(testTeam.getManager()).isEqualTo(UPDATED_MANAGER);
+
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertTeamUpdatableFieldsEquals(createUpdateProxyForBean(partialUpdatedTeam, team), getPersistedTeam(team));
     }
 
     @Test
@@ -304,7 +279,7 @@ class TeamResourceIT {
         // Initialize the database
         teamRepository.save(team);
 
-        int databaseSizeBeforeUpdate = teamRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the team using partial update
         Team partialUpdatedTeam = new Team();
@@ -321,43 +296,33 @@ class TeamResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, partialUpdatedTeam.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(partialUpdatedTeam))
+                    .content(om.writeValueAsBytes(partialUpdatedTeam))
             )
             .andExpect(status().isOk());
 
         // Validate the Team in the database
-        List<Team> teamList = teamRepository.findAll();
-        assertThat(teamList).hasSize(databaseSizeBeforeUpdate);
-        Team testTeam = teamList.get(teamList.size() - 1);
-        assertThat(testTeam.getName()).isEqualTo(UPDATED_NAME);
-        assertThat(testTeam.getDescription()).isEqualTo(UPDATED_DESCRIPTION);
-        assertThat(testTeam.getMembers()).isEqualTo(UPDATED_MEMBERS);
-        assertThat(testTeam.getSupervisor()).isEqualTo(UPDATED_SUPERVISOR);
-        assertThat(testTeam.getManager()).isEqualTo(UPDATED_MANAGER);
+
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
+        assertTeamUpdatableFieldsEquals(partialUpdatedTeam, getPersistedTeam(partialUpdatedTeam));
     }
 
     @Test
     void patchNonExistingTeam() throws Exception {
-        int databaseSizeBeforeUpdate = teamRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         team.setId(UUID.randomUUID().toString());
 
         // If the entity doesn't have an ID, it will throw BadRequestAlertException
         restTeamMockMvc
-            .perform(
-                patch(ENTITY_API_URL_ID, team.getId())
-                    .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(team))
-            )
+            .perform(patch(ENTITY_API_URL_ID, team.getId()).contentType("application/merge-patch+json").content(om.writeValueAsBytes(team)))
             .andExpect(status().isBadRequest());
 
         // Validate the Team in the database
-        List<Team> teamList = teamRepository.findAll();
-        assertThat(teamList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void patchWithIdMismatchTeam() throws Exception {
-        int databaseSizeBeforeUpdate = teamRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         team.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
@@ -365,28 +330,26 @@ class TeamResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(team))
+                    .content(om.writeValueAsBytes(team))
             )
             .andExpect(status().isBadRequest());
 
         // Validate the Team in the database
-        List<Team> teamList = teamRepository.findAll();
-        assertThat(teamList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
     void patchWithMissingIdPathParamTeam() throws Exception {
-        int databaseSizeBeforeUpdate = teamRepository.findAll().size();
+        long databaseSizeBeforeUpdate = getRepositoryCount();
         team.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
         restTeamMockMvc
-            .perform(patch(ENTITY_API_URL).contentType("application/merge-patch+json").content(TestUtil.convertObjectToJsonBytes(team)))
+            .perform(patch(ENTITY_API_URL).contentType("application/merge-patch+json").content(om.writeValueAsBytes(team)))
             .andExpect(status().isMethodNotAllowed());
 
         // Validate the Team in the database
-        List<Team> teamList = teamRepository.findAll();
-        assertThat(teamList).hasSize(databaseSizeBeforeUpdate);
+        assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
     @Test
@@ -394,7 +357,7 @@ class TeamResourceIT {
         // Initialize the database
         teamRepository.save(team);
 
-        int databaseSizeBeforeDelete = teamRepository.findAll().size();
+        long databaseSizeBeforeDelete = getRepositoryCount();
 
         // Delete the team
         restTeamMockMvc
@@ -402,25 +365,34 @@ class TeamResourceIT {
             .andExpect(status().isNoContent());
 
         // Validate the database contains one less item
-        List<Team> teamList = teamRepository.findAll();
-        assertThat(teamList).hasSize(databaseSizeBeforeDelete - 1);
+        assertDecrementedRepositoryCount(databaseSizeBeforeDelete);
     }
 
-    @Test
-    void searchTeam() throws Exception {
-        // Initialize the database
-        team = teamRepository.save(team);
+    protected long getRepositoryCount() {
+        return teamRepository.count();
+    }
 
-        // Search the team
-        restTeamMockMvc
-            .perform(get(ENTITY_SEARCH_API_URL + "?query=id:" + team.getId()))
-            .andExpect(status().isOk())
-            .andExpect(content().contentType(MediaType.APPLICATION_JSON_VALUE))
-            .andExpect(jsonPath("$.[*].id").value(hasItem(team.getId())))
-            .andExpect(jsonPath("$.[*].name").value(hasItem(DEFAULT_NAME)))
-            .andExpect(jsonPath("$.[*].description").value(hasItem(DEFAULT_DESCRIPTION)))
-            .andExpect(jsonPath("$.[*].members").value(hasItem(DEFAULT_MEMBERS)))
-            .andExpect(jsonPath("$.[*].supervisor").value(hasItem(DEFAULT_SUPERVISOR)))
-            .andExpect(jsonPath("$.[*].manager").value(hasItem(DEFAULT_MANAGER)));
+    protected void assertIncrementedRepositoryCount(long countBefore) {
+        assertThat(countBefore + 1).isEqualTo(getRepositoryCount());
+    }
+
+    protected void assertDecrementedRepositoryCount(long countBefore) {
+        assertThat(countBefore - 1).isEqualTo(getRepositoryCount());
+    }
+
+    protected void assertSameRepositoryCount(long countBefore) {
+        assertThat(countBefore).isEqualTo(getRepositoryCount());
+    }
+
+    protected Team getPersistedTeam(Team team) {
+        return teamRepository.findById(team.getId()).orElseThrow();
+    }
+
+    protected void assertPersistedTeamToMatchAllProperties(Team expectedTeam) {
+        assertTeamAllPropertiesEquals(expectedTeam, getPersistedTeam(expectedTeam));
+    }
+
+    protected void assertPersistedTeamToMatchUpdatableProperties(Team expectedTeam) {
+        assertTeamAllUpdatablePropertiesEquals(expectedTeam, getPersistedTeam(expectedTeam));
     }
 }

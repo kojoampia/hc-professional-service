@@ -1,7 +1,6 @@
 package net.jojoaddison.domain;
 
-import static net.jojoaddison.domain.MetadataTestSamples.getMetadataSample1;
-import static net.jojoaddison.domain.MetadataTestSamples.getMetadataSample2;
+import static net.jojoaddison.domain.MetadataTestSamples.*;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import net.jojoaddison.web.rest.TestUtil;

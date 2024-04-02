@@ -8,9 +8,10 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
 /**
- * A Document.
+ * A HCDocument.
  */
-@Document(collection = "jhi_document")
+@Document(collection = "jhi_hc_document")
+@SuppressWarnings("common-java:DuplicatedBlocks")
 public class HCDocument implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -183,7 +184,7 @@ public class HCDocument implements Serializable {
     // prettier-ignore
     @Override
     public String toString() {
-        return "Document{" +
+        return "HCDocument{" +
             "id=" + getId() +
             ", name='" + getName() + "'" +
             ", profileId='" + getProfileId() + "'" +

@@ -12,16 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import tech.jhipster.web.util.HeaderUtil;
 import tech.jhipster.web.util.ResponseUtil;
 
@@ -58,11 +49,10 @@ public class TeamResource {
         if (team.getId() != null) {
             throw new BadRequestAlertException("A new team cannot already have an ID", ENTITY_NAME, "idexists");
         }
-        Team result = teamRepository.save(team);
-        return ResponseEntity
-            .created(new URI("/api/teams/" + result.getId()))
-            .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, result.getId()))
-            .body(result);
+        team = teamRepository.save(team);
+        return ResponseEntity.created(new URI("/api/teams/" + team.getId()))
+            .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, team.getId()))
+            .body(team);
     }
 
     /**
@@ -90,11 +80,8 @@ public class TeamResource {
             throw new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound");
         }
 
-        Team result = teamRepository.save(team);
-        return ResponseEntity
-            .ok()
-            .headers(HeaderUtil.createEntityUpdateAlert(applicationName, true, ENTITY_NAME, team.getId()))
-            .body(result);
+        team = teamRepository.save(team);
+        return ResponseEntity.ok().headers(HeaderUtil.createEntityUpdateAlert(applicationName, true, ENTITY_NAME, team.getId())).body(team);
     }
 
     /**
@@ -184,22 +171,5 @@ public class TeamResource {
         log.debug("REST request to delete Team : {}", id);
         teamRepository.deleteById(id);
         return ResponseEntity.noContent().headers(HeaderUtil.createEntityDeletionAlert(applicationName, true, ENTITY_NAME, id)).build();
-    }
-
-    /**
-     * {@code SEARCH  /teams/_search?query=:query} : search for the team corresponding
-     * to the query.
-     *
-     * @param query the query of the team search.
-     * @return the result of the search.
-     */
-    @GetMapping("/_search")
-    public List<Team> searchTeams(@RequestParam("query") String query) {
-        log.debug("REST request to search Teams for query {}", query);
-        try {
-            return teamRepository.search(query);
-        } catch (RuntimeException e) {
-            throw e;
-        }
     }
 }

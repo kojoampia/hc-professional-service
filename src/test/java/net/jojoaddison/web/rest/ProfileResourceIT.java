@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
@@ -71,10 +72,12 @@ class ProfileResourceIT {
 
     private static final String ENTITY_API_URL = "/api/profiles";
     private static final String ENTITY_API_URL_ID = ENTITY_API_URL + "/{id}";
-    private static final String ENTITY_SEARCH_API_URL = "/api/profiles/_search";
 
     @Autowired
     private ProfileRepository profileRepository;
+
+    @Autowired
+    private ObjectMapper om;
 
     @Autowired
     private MockMvc restProfileMockMvc;
@@ -136,7 +139,7 @@ class ProfileResourceIT {
         int databaseSizeBeforeCreate = profileRepository.findAll().size();
         // Create the Profile
         restProfileMockMvc
-            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(profile)))
+            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(profile)))
             .andExpect(status().isCreated());
 
         // Validate the Profile in the database
@@ -165,7 +168,7 @@ class ProfileResourceIT {
 
         // An entity with an existing ID cannot be created, so this API call must fail
         restProfileMockMvc
-            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(profile)))
+            .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(profile)))
             .andExpect(status().isBadRequest());
 
         // Validate the Profile in the database
@@ -193,8 +196,7 @@ class ProfileResourceIT {
             .andExpect(jsonPath("$.[*].phoneNumber").value(hasItem(DEFAULT_PHONE_NUMBER)))
             .andExpect(jsonPath("$.[*].email").value(hasItem(DEFAULT_EMAIL)))
             .andExpect(jsonPath("$.[*].cardType").value(hasItem(DEFAULT_CARD_TYPE)))
-            .andExpect(jsonPath("$.[*].cardNumber").value(hasItem(DEFAULT_CARD_NUMBER)))
-            .andExpect(jsonPath("$.[*].address").value(hasItem(DEFAULT_ADDRESS)));
+            .andExpect(jsonPath("$.[*].cardNumber").value(hasItem(DEFAULT_CARD_NUMBER)));
     }
 
     @Test
@@ -253,7 +255,7 @@ class ProfileResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, updatedProfile.getId())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(updatedProfile))
+                    .content(om.writeValueAsBytes(updatedProfile))
             )
             .andExpect(status().isOk());
 
@@ -281,11 +283,7 @@ class ProfileResourceIT {
 
         // If the entity doesn't have an ID, it will throw BadRequestAlertException
         restProfileMockMvc
-            .perform(
-                put(ENTITY_API_URL_ID, profile.getId())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(profile))
-            )
+            .perform(put(ENTITY_API_URL_ID, profile.getId()).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(profile)))
             .andExpect(status().isBadRequest());
 
         // Validate the Profile in the database
@@ -303,7 +301,7 @@ class ProfileResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(TestUtil.convertObjectToJsonBytes(profile))
+                    .content(om.writeValueAsBytes(profile))
             )
             .andExpect(status().isBadRequest());
 
@@ -319,7 +317,7 @@ class ProfileResourceIT {
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
         restProfileMockMvc
-            .perform(put(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(TestUtil.convertObjectToJsonBytes(profile)))
+            .perform(put(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(profile)))
             .andExpect(status().isMethodNotAllowed());
 
         // Validate the Profile in the database
@@ -349,7 +347,7 @@ class ProfileResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, partialUpdatedProfile.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(partialUpdatedProfile))
+                    .content(om.writeValueAsBytes(partialUpdatedProfile))
             )
             .andExpect(status().isOk());
 
@@ -398,7 +396,7 @@ class ProfileResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, partialUpdatedProfile.getId())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(partialUpdatedProfile))
+                    .content(om.writeValueAsBytes(partialUpdatedProfile))
             )
             .andExpect(status().isOk());
 
@@ -427,9 +425,7 @@ class ProfileResourceIT {
         // If the entity doesn't have an ID, it will throw BadRequestAlertException
         restProfileMockMvc
             .perform(
-                patch(ENTITY_API_URL_ID, profile.getId())
-                    .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(profile))
+                patch(ENTITY_API_URL_ID, profile.getId()).contentType("application/merge-patch+json").content(om.writeValueAsBytes(profile))
             )
             .andExpect(status().isBadRequest());
 
@@ -448,7 +444,7 @@ class ProfileResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType("application/merge-patch+json")
-                    .content(TestUtil.convertObjectToJsonBytes(profile))
+                    .content(om.writeValueAsBytes(profile))
             )
             .andExpect(status().isBadRequest());
 
@@ -464,7 +460,7 @@ class ProfileResourceIT {
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
         restProfileMockMvc
-            .perform(patch(ENTITY_API_URL).contentType("application/merge-patch+json").content(TestUtil.convertObjectToJsonBytes(profile)))
+            .perform(patch(ENTITY_API_URL).contentType("application/merge-patch+json").content(om.writeValueAsBytes(profile)))
             .andExpect(status().isMethodNotAllowed());
 
         // Validate the Profile in the database
@@ -487,29 +483,5 @@ class ProfileResourceIT {
         // Validate the database contains one less item
         List<Profile> profileList = profileRepository.findAll();
         assertThat(profileList).hasSize(databaseSizeBeforeDelete - 1);
-    }
-
-    @Test
-    void searchProfile() throws Exception {
-        // Initialize the database
-        profile = profileRepository.save(profile);
-
-        // Search the profile
-        restProfileMockMvc
-            .perform(get(ENTITY_SEARCH_API_URL + "?query=id:" + profile.getId()))
-            .andExpect(status().isOk())
-            .andExpect(content().contentType(MediaType.APPLICATION_JSON_VALUE))
-            .andExpect(jsonPath("$.[*].id").value(hasItem(profile.getId())))
-            .andExpect(jsonPath("$.[*].firstName").value(hasItem(DEFAULT_FIRST_NAME)))
-            .andExpect(jsonPath("$.[*].middleNames").value(hasItem(DEFAULT_MIDDLE_NAMES)))
-            .andExpect(jsonPath("$.[*].lastName").value(hasItem(DEFAULT_LAST_NAME)))
-            .andExpect(jsonPath("$.[*].birthDate").value(hasItem(DEFAULT_BIRTH_DATE.toString())))
-            .andExpect(jsonPath("$.[*].sex").value(hasItem(DEFAULT_SEX)))
-            .andExpect(jsonPath("$.[*].mobilePhone").value(hasItem(DEFAULT_MOBILE_PHONE)))
-            .andExpect(jsonPath("$.[*].phoneNumber").value(hasItem(DEFAULT_PHONE_NUMBER)))
-            .andExpect(jsonPath("$.[*].email").value(hasItem(DEFAULT_EMAIL)))
-            .andExpect(jsonPath("$.[*].cardType").value(hasItem(DEFAULT_CARD_TYPE)))
-            .andExpect(jsonPath("$.[*].cardNumber").value(hasItem(DEFAULT_CARD_NUMBER)))
-            .andExpect(jsonPath("$.[*].address").value(hasItem(DEFAULT_ADDRESS)));
     }
 }

@@ -8,6 +8,10 @@
   "entityTableName": "address",
   "fields": [
     {
+      "fieldName": "id",
+      "fieldType": "String"
+    },
+    {
       "fieldName": "digitalAddress",
       "fieldType": "String"
     },
@@ -60,11 +64,11 @@
       "fieldType": "String"
     }
   ],
-  "microserviceName": "professionalMS",
+  "microserviceName": "hcProfessionalMs",
   "name": "Address",
   "pagination": "no",
   "readOnly": false,
   "relationships": [],
-  "searchEngine": true,
+  "searchEngine": "no",
   "service": "no"
 }
