@@ -16,7 +16,7 @@
             The spring-boot version should match the one managed by https://mvnrepository.com/artifact/tech.jhipster/jhipster-dependencies/${jhipster-dependencies.version}
         -->
         <maven.version>3.2.5</maven.version>
-        <java.version>17</java.version>
+        <java.version>26</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <maven.build.timestamp.format>yyyyMMddHHmmss</maven.build.timestamp.format>
@@ -514,8 +514,8 @@
                                 <version>[${maven.version},)</version>
                             </requireMavenVersion>
                             <requireJavaVersion>
-                                <message>You are running an incompatible version of Java. JHipster supports JDK 17 to 21.</message>
-                                <version>[17,18),[18,19),[19,20),[20,21),[21,22)</version>
+                                <message>You are running an incompatible version of Java. JHipster supports JDK ${java.version}.</message>
+                                <version>[17,18),[18,19),[19,20),[20,21),[21,26)</version>
                             </requireJavaVersion>
                         </rules>
                     </configuration>
