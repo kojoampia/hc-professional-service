@@ -1,6 +1,5 @@
 package net.jojoaddison.config;
 
-import io.mongock.runner.springboot.EnableMongock;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration;
@@ -19,7 +18,6 @@ import tech.jhipster.domain.util.JSR310DateConverters.DateToZonedDateTimeConvert
 import tech.jhipster.domain.util.JSR310DateConverters.ZonedDateTimeToDateConverter;
 
 @Configuration
-@EnableMongock
 @EnableMongoRepositories("net.jojoaddison.repository")
 @Profile("!" + JHipsterConstants.SPRING_PROFILE_CLOUD)
 @Import(value = MongoAutoConfiguration.class)
