@@ -94,10 +94,6 @@ management:
         autotime:
           enabled: true
 
-mongock:
-  migration-scan-package:
-    - net.jojoaddison.config.dbmigrations
-
 spring:
   application:
     name: hcProfessionalMs
