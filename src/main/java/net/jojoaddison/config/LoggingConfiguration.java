@@ -5,6 +5,7 @@ import static tech.jhipster.config.logging.LoggingUtils.*;
 import ch.qos.logback.classic.LoggerContext;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import java.util.HashMap;
 import java.util.Map;
 import org.slf4j.LoggerFactory;
@@ -29,9 +30,10 @@ public class LoggingConfiguration {
         JHipsterProperties jHipsterProperties,
         ObjectProvider<ConsulRegistration> consulRegistration,
         ObjectProvider<BuildProperties> buildProperties,
-        ObjectMapper mapper
+        ObjectProvider<ObjectMapper> mapperProvider
     ) throws JsonProcessingException {
         LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+        ObjectMapper mapper = mapperProvider.getIfAvailable(() -> JsonMapper.builder().findAndAddModules().build());
 
         Map<String, String> map = new HashMap<>();
         map.put("app_name", appName);

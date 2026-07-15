@@ -96,7 +96,7 @@ management:
 
 spring:
   application:
-    name: hcProfessionalMs
+    name: HC-Professional-Service
   cloud:
     consul:
       discovery:
@@ -184,7 +184,7 @@ info:
 
 jhipster:
   clientApp:
-    name: 'hcProfessionalMsApp'
+    name: 'hcProfessionalServiceApp'
   # By default CORS is disabled. Uncomment to enable.
   # cors:
   #   allowed-origins: "http://localhost:8100,http://localhost:9000"
@@ -194,12 +194,12 @@ jhipster:
   #   allow-credentials: true
   #   max-age: 1800
   mail:
-    from: hcProfessionalMs@localhost
+    from: hcProfessionalService@localhost
   api-docs:
     default-include-pattern: /api/**
     management-include-pattern: /management/**
-    title: Hc Professional Ms API
-    description: Hc Professional Ms API documentation
+    title: Hc Professional Service API
+    description: Hc Professional Service API documentation
     version: 0.0.1
     terms-of-service-url:
     contact-name:
@@ -207,7 +207,6 @@ jhipster:
     contact-email:
     license: unlicensed
     license-url:
-  security:
 # ===================================================================
 # Application specific properties
 # Add your own application properties here, see the ApplicationProperties class

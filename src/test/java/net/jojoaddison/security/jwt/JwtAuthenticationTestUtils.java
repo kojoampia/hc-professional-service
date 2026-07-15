@@ -12,6 +12,7 @@ import java.util.Collections;
 import javax.crypto.Mac;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.security.crypto.codec.Hex;
 import org.springframework.security.oauth2.jwt.JwsHeader;
@@ -21,22 +22,23 @@ import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.web.servlet.handler.HandlerMappingIntrospector;
 
+@TestConfiguration(proxyBeanMethods = false)
 public class JwtAuthenticationTestUtils {
 
     public static final String BEARER = "Bearer ";
 
     @Bean
-    private HandlerMappingIntrospector mvcHandlerMappingIntrospector() {
+    HandlerMappingIntrospector mvcHandlerMappingIntrospector() {
         return new HandlerMappingIntrospector();
     }
 
     @Bean
-    private TestAuthenticationResource authenticationResource() {
+    TestAuthenticationResource authenticationResource() {
         return new TestAuthenticationResource();
     }
 
     @Bean
-    private MeterRegistry meterRegistry() {
+    MeterRegistry meterRegistry() {
         return new SimpleMeterRegistry();
     }
 
