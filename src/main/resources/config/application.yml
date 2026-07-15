@@ -104,13 +104,13 @@ spring:
     consul:
       discovery:
         healthCheckPath: /management/health
-        instanceId: hcprofessionalms:${spring.application.instance-id:${random.value}}
-        service-name: hcprofessionalms
+        instanceId: hc-professional-service:${spring.application.instance-id:${random.value}}
+        service-name: hc-professional-service
       config:
         watch:
           enabled: false
-    function:
-      definition: kafkaConsumer;kafkaProducer
+    #    function:
+    #      definition: kafkaConsumer; kafkaProducer
     stream:
       kafka:
         binder:
@@ -140,7 +140,7 @@ spring:
         # Uncomment to activate TLS for the dev profile
         #- tls
   jmx:
-    enabled: false
+    enabled: true
   messages:
     basename: i18n/messages
   main:
