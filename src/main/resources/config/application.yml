@@ -20,6 +20,9 @@ spring:
   config:
     activate:
       on-profile: '!api-docs'
+  threads:
+    virtual:
+      enabled: true
 springdoc:
   api-docs:
     enabled: false
