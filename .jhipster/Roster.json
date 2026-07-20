@@ -2,7 +2,7 @@
   "annotations": {
     "changelogDate": "20240326172739"
   },
-  "clientRootFolder": "hcProfessionalMs",
+  "clientRootFolder": "professionalService",
   "databaseType": "mongodb",
   "entityTableName": "roster",
   "fields": [
@@ -51,7 +51,7 @@
       "fieldType": "String"
     }
   ],
-  "microserviceName": "hcProfessionalMs",
+  "microserviceName": "professionalService",
   "name": "Roster",
   "pagination": "no",
   "readOnly": false,

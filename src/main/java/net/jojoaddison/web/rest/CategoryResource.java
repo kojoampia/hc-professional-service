@@ -25,7 +25,7 @@ public class CategoryResource {
 
     private final Logger log = LoggerFactory.getLogger(CategoryResource.class);
 
-    private static final String ENTITY_NAME = "hcProfessionalMsCategory";
+    private static final String ENTITY_NAME = "professionalServiceCategory";
 
     @Value("${jhipster.clientApp.name}")
     private String applicationName;

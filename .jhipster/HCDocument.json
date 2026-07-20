@@ -2,10 +2,10 @@
   "annotations": {
     "changelogDate": "20240320235005"
   },
-  "clientRootFolder": "hcProfessionalMs",
+  "clientRootFolder": "professionalService",
   "databaseType": "mongodb",
   "dto": "no",
-  "entityTableName": "jhi_hc_document",
+  "entityTableName": "hc_document",
   "fields": [
     {
       "fieldName": "id",
@@ -42,7 +42,7 @@
       "fieldType": "String"
     }
   ],
-  "microserviceName": "hcProfessionalMs",
+  "microserviceName": "professionalService",
   "name": "HCDocument",
   "pagination": "no",
   "readOnly": false,

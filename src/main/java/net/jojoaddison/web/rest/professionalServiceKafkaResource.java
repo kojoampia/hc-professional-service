@@ -10,15 +10,15 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter
 
 @RestController
 @RequestMapping("/api/hc-professional-ms-kafka")
-public class HcProfessionalMsKafkaResource {
+public class professionalServiceKafkaResource {
 
     private static final String PRODUCER_BINDING_NAME = "binding-out-0";
 
-    private final Logger log = LoggerFactory.getLogger(HcProfessionalMsKafkaResource.class);
+    private final Logger log = LoggerFactory.getLogger(professionalServiceKafkaResource.class);
     private final KafkaConsumer kafkaConsumer;
     private final StreamBridge streamBridge;
 
-    public HcProfessionalMsKafkaResource(StreamBridge streamBridge, KafkaConsumer kafkaConsumer) {
+    public professionalServiceKafkaResource(StreamBridge streamBridge, KafkaConsumer kafkaConsumer) {
         this.streamBridge = streamBridge;
         this.kafkaConsumer = kafkaConsumer;
     }

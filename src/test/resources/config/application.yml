@@ -24,7 +24,7 @@ mongock:
 
 spring:
   application:
-    name: hcProfessionalMs
+    name: professionalService
   cloud:
     consul:
       discovery:
@@ -54,6 +54,10 @@ spring:
   jackson:
     serialization:
       write-durations-as-timestamps: false
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+      fail-on-empty-beans: false
   mail:
     host: localhost
   main:
@@ -85,9 +89,9 @@ server:
 # ===================================================================
 jhipster:
   clientApp:
-    name: 'hcProfessionalMsApp'
+    name: 'ProfessionalServiceApp'
   mail:
-    from: hcProfessionalMs@localhost.com
+    from: professionalService@localhost.com
     base-url: http://127.0.0.1:8080
   logging:
     # To test json console appender

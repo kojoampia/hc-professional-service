@@ -20,18 +20,18 @@ import tech.jhipster.config.JHipsterConstants;
 
 @SpringBootApplication
 @EnableConfigurationProperties({ ApplicationProperties.class })
-public class HcProfessionalMsApp {
+public class ProfessionalServiceApp {
 
-    private static final Logger log = LoggerFactory.getLogger(HcProfessionalMsApp.class);
+    private static final Logger log = LoggerFactory.getLogger(ProfessionalServiceApp.class);
 
     private final Environment env;
 
-    public HcProfessionalMsApp(Environment env) {
+    public ProfessionalServiceApp(Environment env) {
         this.env = env;
     }
 
     /**
-     * Initializes hcProfessionalMs.
+     * Initializes professionalService.
      * <p>
      * Spring profiles can be configured with a program argument --spring.profiles.active=your-active-profile
      * <p>
@@ -64,7 +64,7 @@ public class HcProfessionalMsApp {
      * @param args the command line arguments.
      */
     public static void main(String[] args) {
-        SpringApplication app = new SpringApplication(HcProfessionalMsApp.class);
+        SpringApplication app = new SpringApplication(ProfessionalServiceApp.class);
         DefaultProfileUtil.addDefaultProfile(app);
         Environment env = app.run(args).getEnvironment();
         logApplicationStartup(env);

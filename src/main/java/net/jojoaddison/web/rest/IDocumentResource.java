@@ -5,9 +5,9 @@ import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import net.jojoaddison.domain.HCDocument;
-import net.jojoaddison.repository.HCDocumentRepository;
-import net.jojoaddison.service.HCDocumentService;
+import net.jojoaddison.domain.IDocument;
+import net.jojoaddison.repository.IDocumentRepository;
+import net.jojoaddison.service.IDocumentService;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,26 +18,26 @@ import tech.jhipster.web.util.HeaderUtil;
 import tech.jhipster.web.util.ResponseUtil;
 
 /**
- * REST controller for managing {@link net.jojoaddison.domain.HCDocument}.
+ * REST controller for managing {@link net.jojoaddison.domain.IDocument}.
  */
 @RestController
 @RequestMapping("/api/hc-documents")
-public class HCDocumentResource {
+public class IDocumentResource {
 
-    private final Logger log = LoggerFactory.getLogger(HCDocumentResource.class);
+    private final Logger log = LoggerFactory.getLogger(IDocumentResource.class);
 
-    private static final String ENTITY_NAME = "hcProfessionalMsHcDocument";
+    private static final String ENTITY_NAME = "professionalServiceHcDocument";
 
     @Value("${jhipster.clientApp.name}")
     private String applicationName;
 
-    private final HCDocumentService hCDocumentService;
+    private final IDocumentService hCDocumentService;
 
-    private final HCDocumentRepository hCDocumentRepository;
+    private final IDocumentRepository iDocumentRepository;
 
-    public HCDocumentResource(HCDocumentService hCDocumentService, HCDocumentRepository hCDocumentRepository) {
+    public IDocumentResource(IDocumentService hCDocumentService, IDocumentRepository iDocumentRepository) {
         this.hCDocumentService = hCDocumentService;
-        this.hCDocumentRepository = hCDocumentRepository;
+        this.iDocumentRepository = iDocumentRepository;
     }
 
     /**
@@ -48,7 +48,7 @@ public class HCDocumentResource {
      * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PostMapping("")
-    public ResponseEntity<HCDocument> createHCDocument(@RequestBody HCDocument hCDocument) throws URISyntaxException {
+    public ResponseEntity<IDocument> createHCDocument(@RequestBody IDocument hCDocument) throws URISyntaxException {
         log.debug("REST request to save HCDocument : {}", hCDocument);
         if (hCDocument.getId() != null) {
             throw new BadRequestAlertException("A new hCDocument cannot already have an ID", ENTITY_NAME, "idexists");
@@ -70,9 +70,9 @@ public class HCDocumentResource {
      * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PutMapping("/{id}")
-    public ResponseEntity<HCDocument> updateHCDocument(
+    public ResponseEntity<IDocument> updateHCDocument(
         @PathVariable(value = "id", required = false) final String id,
-        @RequestBody HCDocument hCDocument
+        @RequestBody IDocument hCDocument
     ) throws URISyntaxException {
         log.debug("REST request to update HCDocument : {}, {}", id, hCDocument);
         if (hCDocument.getId() == null) {
@@ -82,7 +82,7 @@ public class HCDocumentResource {
             throw new BadRequestAlertException("Invalid ID", ENTITY_NAME, "idinvalid");
         }
 
-        if (!hCDocumentRepository.existsById(id)) {
+        if (!iDocumentRepository.existsById(id)) {
             throw new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound");
         }
 
@@ -104,9 +104,9 @@ public class HCDocumentResource {
      * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PatchMapping(value = "/{id}", consumes = { "application/json", "application/merge-patch+json" })
-    public ResponseEntity<HCDocument> partialUpdateHCDocument(
+    public ResponseEntity<IDocument> partialUpdateHCDocument(
         @PathVariable(value = "id", required = false) final String id,
-        @RequestBody HCDocument hCDocument
+        @RequestBody IDocument hCDocument
     ) throws URISyntaxException {
         log.debug("REST request to partial update HCDocument partially : {}, {}", id, hCDocument);
         if (hCDocument.getId() == null) {
@@ -116,11 +116,11 @@ public class HCDocumentResource {
             throw new BadRequestAlertException("Invalid ID", ENTITY_NAME, "idinvalid");
         }
 
-        if (!hCDocumentRepository.existsById(id)) {
+        if (!iDocumentRepository.existsById(id)) {
             throw new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound");
         }
 
-        Optional<HCDocument> result = hCDocumentService.partialUpdate(hCDocument);
+        Optional<IDocument> result = hCDocumentService.partialUpdate(hCDocument);
 
         return ResponseUtil.wrapOrNotFound(
             result,
@@ -134,7 +134,7 @@ public class HCDocumentResource {
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and the list of hCDocuments in body.
      */
     @GetMapping("")
-    public List<HCDocument> getAllHCDocuments() {
+    public List<IDocument> getAllHCDocuments() {
         log.debug("REST request to get all HCDocuments");
         return hCDocumentService.findAll();
     }
@@ -146,9 +146,9 @@ public class HCDocumentResource {
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the hCDocument, or with status {@code 404 (Not Found)}.
      */
     @GetMapping("/{id}")
-    public ResponseEntity<HCDocument> getHCDocument(@PathVariable("id") String id) {
+    public ResponseEntity<IDocument> getHCDocument(@PathVariable("id") String id) {
         log.debug("REST request to get HCDocument : {}", id);
-        Optional<HCDocument> hCDocument = hCDocumentService.findOne(id);
+        Optional<IDocument> hCDocument = hCDocumentService.findOne(id);
         return ResponseUtil.wrapOrNotFound(hCDocument);
     }
 

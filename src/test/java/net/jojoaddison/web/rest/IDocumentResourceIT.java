@@ -1,6 +1,6 @@
 package net.jojoaddison.web.rest;
 
-import static net.jojoaddison.domain.HCDocumentAsserts.*;
+import static net.jojoaddison.domain.IDocumentAsserts.*;
 import static net.jojoaddison.web.rest.TestUtil.createUpdateProxyForBean;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
@@ -13,9 +13,9 @@ import java.time.ZoneId;
 import java.util.Base64;
 import java.util.UUID;
 import net.jojoaddison.IntegrationTest;
-import net.jojoaddison.domain.HCDocument;
+import net.jojoaddison.domain.IDocument;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.repository.HCDocumentRepository;
+import net.jojoaddison.repository.IDocumentRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,12 +25,12 @@ import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * Integration tests for the {@link HCDocumentResource} REST controller.
+ * Integration tests for the {@link IDocumentResource} REST controller.
  */
 @IntegrationTest
 @AutoConfigureMockMvc
 @WithMockUser
-class HCDocumentResourceIT {
+class IDocumentResourceIT {
 
     private static final String DEFAULT_NAME = "AAAAAAAAAA";
     private static final String UPDATED_NAME = "BBBBBBBBBB";
@@ -62,12 +62,12 @@ class HCDocumentResourceIT {
     private ObjectMapper om;
 
     @Autowired
-    private HCDocumentRepository hCDocumentRepository;
+    private IDocumentRepository iDocumentRepository;
 
     @Autowired
-    private MockMvc restHCDocumentMockMvc;
+    private MockMvc restIDocumentMockMvc;
 
-    private HCDocument hCDocument;
+    private IDocument hCDocument;
 
     /**
      * Create an entity for this test.
@@ -75,8 +75,8 @@ class HCDocumentResourceIT {
      * This is a static method, as tests for other entities might also need it,
      * if they test an entity which requires the current entity.
      */
-    public static HCDocument createEntity() {
-        HCDocument hCDocument = new HCDocument()
+    public static IDocument createEntity() {
+        IDocument hCDocument = new IDocument()
             .name(DEFAULT_NAME)
             .profileId(DEFAULT_PROFILE_ID)
             .data(DEFAULT_DATA)
@@ -94,8 +94,8 @@ class HCDocumentResourceIT {
      * This is a static method, as tests for other entities might also need it,
      * if they test an entity which requires the current entity.
      */
-    public static HCDocument createUpdatedEntity() {
-        HCDocument hCDocument = new HCDocument()
+    public static IDocument createUpdatedEntity() {
+        IDocument hCDocument = new IDocument()
             .name(UPDATED_NAME)
             .profileId(UPDATED_PROFILE_ID)
             .data(UPDATED_DATA)
@@ -109,7 +109,7 @@ class HCDocumentResourceIT {
 
     @BeforeEach
     public void initTest() {
-        hCDocumentRepository.deleteAll();
+        iDocumentRepository.deleteAll();
         hCDocument = createEntity();
     }
 
@@ -118,13 +118,13 @@ class HCDocumentResourceIT {
         long databaseSizeBeforeCreate = getRepositoryCount();
         // Create the HCDocument
         var returnedHCDocument = om.readValue(
-            restHCDocumentMockMvc
+            restIDocumentMockMvc
                 .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(hCDocument)))
                 .andExpect(status().isCreated())
                 .andReturn()
                 .getResponse()
                 .getContentAsString(),
-            HCDocument.class
+            IDocument.class
         );
 
         // Validate the HCDocument in the database
@@ -140,7 +140,7 @@ class HCDocumentResourceIT {
         long databaseSizeBeforeCreate = getRepositoryCount();
 
         // An entity with an existing ID cannot be created, so this API call must fail
-        restHCDocumentMockMvc
+        restIDocumentMockMvc
             .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(hCDocument)))
             .andExpect(status().isBadRequest());
 
@@ -151,10 +151,10 @@ class HCDocumentResourceIT {
     @Test
     void getAllHCDocuments() throws Exception {
         // Initialize the database
-        hCDocumentRepository.save(hCDocument);
+        iDocumentRepository.save(hCDocument);
 
         // Get all the hCDocumentList
-        restHCDocumentMockMvc
+        restIDocumentMockMvc
             .perform(get(ENTITY_API_URL + "?sort=id,desc"))
             .andExpect(status().isOk())
             .andExpect(content().contentType(MediaType.APPLICATION_JSON_VALUE))
@@ -172,10 +172,10 @@ class HCDocumentResourceIT {
     @Test
     void getHCDocument() throws Exception {
         // Initialize the database
-        hCDocumentRepository.save(hCDocument);
+        iDocumentRepository.save(hCDocument);
 
         // Get the hCDocument
-        restHCDocumentMockMvc
+        restIDocumentMockMvc
             .perform(get(ENTITY_API_URL_ID, hCDocument.getId()))
             .andExpect(status().isOk())
             .andExpect(content().contentType(MediaType.APPLICATION_JSON_VALUE))
@@ -193,18 +193,18 @@ class HCDocumentResourceIT {
     @Test
     void getNonExistingHCDocument() throws Exception {
         // Get the hCDocument
-        restHCDocumentMockMvc.perform(get(ENTITY_API_URL_ID, Long.MAX_VALUE)).andExpect(status().isNotFound());
+        restIDocumentMockMvc.perform(get(ENTITY_API_URL_ID, Long.MAX_VALUE)).andExpect(status().isNotFound());
     }
 
     @Test
     void putExistingHCDocument() throws Exception {
         // Initialize the database
-        hCDocumentRepository.save(hCDocument);
+        iDocumentRepository.save(hCDocument);
 
         long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the hCDocument
-        HCDocument updatedHCDocument = hCDocumentRepository.findById(hCDocument.getId()).orElseThrow();
+        IDocument updatedHCDocument = iDocumentRepository.findById(hCDocument.getId()).orElseThrow();
         updatedHCDocument
             .name(UPDATED_NAME)
             .profileId(UPDATED_PROFILE_ID)
@@ -215,7 +215,7 @@ class HCDocumentResourceIT {
             .modifiedDate(UPDATED_MODIFIED_DATE)
             .lastModifiedBy(UPDATED_LAST_MODIFIED_BY);
 
-        restHCDocumentMockMvc
+        restIDocumentMockMvc
             .perform(
                 put(ENTITY_API_URL_ID, updatedHCDocument.getId())
                     .contentType(MediaType.APPLICATION_JSON)
@@ -234,7 +234,7 @@ class HCDocumentResourceIT {
         hCDocument.setId(UUID.randomUUID().toString());
 
         // If the entity doesn't have an ID, it will throw BadRequestAlertException
-        restHCDocumentMockMvc
+        restIDocumentMockMvc
             .perform(
                 put(ENTITY_API_URL_ID, hCDocument.getId()).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(hCDocument))
             )
@@ -250,7 +250,7 @@ class HCDocumentResourceIT {
         hCDocument.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
-        restHCDocumentMockMvc
+        restIDocumentMockMvc
             .perform(
                 put(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType(MediaType.APPLICATION_JSON)
@@ -268,7 +268,7 @@ class HCDocumentResourceIT {
         hCDocument.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
-        restHCDocumentMockMvc
+        restIDocumentMockMvc
             .perform(put(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(hCDocument)))
             .andExpect(status().isMethodNotAllowed());
 
@@ -279,17 +279,17 @@ class HCDocumentResourceIT {
     @Test
     void partialUpdateHCDocumentWithPatch() throws Exception {
         // Initialize the database
-        hCDocumentRepository.save(hCDocument);
+        iDocumentRepository.save(hCDocument);
 
         long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the hCDocument using partial update
-        HCDocument partialUpdatedHCDocument = new HCDocument();
+        IDocument partialUpdatedHCDocument = new IDocument();
         partialUpdatedHCDocument.setId(hCDocument.getId());
 
         partialUpdatedHCDocument.createdDate(UPDATED_CREATED_DATE).lastModifiedBy(UPDATED_LAST_MODIFIED_BY);
 
-        restHCDocumentMockMvc
+        restIDocumentMockMvc
             .perform(
                 patch(ENTITY_API_URL_ID, partialUpdatedHCDocument.getId())
                     .contentType("application/merge-patch+json")
@@ -309,12 +309,12 @@ class HCDocumentResourceIT {
     @Test
     void fullUpdateHCDocumentWithPatch() throws Exception {
         // Initialize the database
-        hCDocumentRepository.save(hCDocument);
+        iDocumentRepository.save(hCDocument);
 
         long databaseSizeBeforeUpdate = getRepositoryCount();
 
         // Update the hCDocument using partial update
-        HCDocument partialUpdatedHCDocument = new HCDocument();
+        IDocument partialUpdatedHCDocument = new IDocument();
         partialUpdatedHCDocument.setId(hCDocument.getId());
 
         partialUpdatedHCDocument
@@ -327,7 +327,7 @@ class HCDocumentResourceIT {
             .modifiedDate(UPDATED_MODIFIED_DATE)
             .lastModifiedBy(UPDATED_LAST_MODIFIED_BY);
 
-        restHCDocumentMockMvc
+        restIDocumentMockMvc
             .perform(
                 patch(ENTITY_API_URL_ID, partialUpdatedHCDocument.getId())
                     .contentType("application/merge-patch+json")
@@ -347,7 +347,7 @@ class HCDocumentResourceIT {
         hCDocument.setId(UUID.randomUUID().toString());
 
         // If the entity doesn't have an ID, it will throw BadRequestAlertException
-        restHCDocumentMockMvc
+        restIDocumentMockMvc
             .perform(
                 patch(ENTITY_API_URL_ID, hCDocument.getId())
                     .contentType("application/merge-patch+json")
@@ -365,7 +365,7 @@ class HCDocumentResourceIT {
         hCDocument.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
-        restHCDocumentMockMvc
+        restIDocumentMockMvc
             .perform(
                 patch(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType("application/merge-patch+json")
@@ -383,7 +383,7 @@ class HCDocumentResourceIT {
         hCDocument.setId(UUID.randomUUID().toString());
 
         // If url ID doesn't match entity ID, it will throw BadRequestAlertException
-        restHCDocumentMockMvc
+        restIDocumentMockMvc
             .perform(patch(ENTITY_API_URL).contentType("application/merge-patch+json").content(om.writeValueAsBytes(hCDocument)))
             .andExpect(status().isMethodNotAllowed());
 
@@ -394,12 +394,12 @@ class HCDocumentResourceIT {
     @Test
     void deleteHCDocument() throws Exception {
         // Initialize the database
-        hCDocumentRepository.save(hCDocument);
+        iDocumentRepository.save(hCDocument);
 
         long databaseSizeBeforeDelete = getRepositoryCount();
 
         // Delete the hCDocument
-        restHCDocumentMockMvc
+        restIDocumentMockMvc
             .perform(delete(ENTITY_API_URL_ID, hCDocument.getId()).accept(MediaType.APPLICATION_JSON))
             .andExpect(status().isNoContent());
 
@@ -408,7 +408,7 @@ class HCDocumentResourceIT {
     }
 
     protected long getRepositoryCount() {
-        return hCDocumentRepository.count();
+        return iDocumentRepository.count();
     }
 
     protected void assertIncrementedRepositoryCount(long countBefore) {
@@ -423,15 +423,15 @@ class HCDocumentResourceIT {
         assertThat(countBefore).isEqualTo(getRepositoryCount());
     }
 
-    protected HCDocument getPersistedHCDocument(HCDocument hCDocument) {
-        return hCDocumentRepository.findById(hCDocument.getId()).orElseThrow();
+    protected IDocument getPersistedHCDocument(IDocument hCDocument) {
+        return iDocumentRepository.findById(hCDocument.getId()).orElseThrow();
     }
 
-    protected void assertPersistedHCDocumentToMatchAllProperties(HCDocument expectedHCDocument) {
+    protected void assertPersistedHCDocumentToMatchAllProperties(IDocument expectedHCDocument) {
         assertHCDocumentAllPropertiesEquals(expectedHCDocument, getPersistedHCDocument(expectedHCDocument));
     }
 
-    protected void assertPersistedHCDocumentToMatchUpdatableProperties(HCDocument expectedHCDocument) {
+    protected void assertPersistedHCDocumentToMatchUpdatableProperties(IDocument expectedHCDocument) {
         assertHCDocumentAllUpdatablePropertiesEquals(expectedHCDocument, getPersistedHCDocument(expectedHCDocument));
     }
 }

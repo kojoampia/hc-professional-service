@@ -10,9 +10,9 @@ import org.springframework.data.mongodb.core.mapping.Field;
 /**
  * A HCDocument.
  */
-@Document(collection = "jhi_hc_document")
+@Document(collection = "hc_document")
 @SuppressWarnings("common-java:DuplicatedBlocks")
-public class HCDocument implements Serializable {
+public class IDocument implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -49,7 +49,7 @@ public class HCDocument implements Serializable {
         return this.id;
     }
 
-    public HCDocument id(String id) {
+    public IDocument id(String id) {
         this.setId(id);
         return this;
     }
@@ -62,7 +62,7 @@ public class HCDocument implements Serializable {
         return this.name;
     }
 
-    public HCDocument name(String name) {
+    public IDocument name(String name) {
         this.setName(name);
         return this;
     }
@@ -75,7 +75,7 @@ public class HCDocument implements Serializable {
         return this.profileId;
     }
 
-    public HCDocument profileId(String profileId) {
+    public IDocument profileId(String profileId) {
         this.setProfileId(profileId);
         return this;
     }
@@ -88,7 +88,7 @@ public class HCDocument implements Serializable {
         return this.data;
     }
 
-    public HCDocument data(byte[] data) {
+    public IDocument data(byte[] data) {
         this.setData(data);
         return this;
     }
@@ -101,7 +101,7 @@ public class HCDocument implements Serializable {
         return this.dataContentType;
     }
 
-    public HCDocument dataContentType(String dataContentType) {
+    public IDocument dataContentType(String dataContentType) {
         this.dataContentType = dataContentType;
         return this;
     }
@@ -114,7 +114,7 @@ public class HCDocument implements Serializable {
         return this.type;
     }
 
-    public HCDocument type(DocumentType type) {
+    public IDocument type(DocumentType type) {
         this.setType(type);
         return this;
     }
@@ -127,7 +127,7 @@ public class HCDocument implements Serializable {
         return this.createdDate;
     }
 
-    public HCDocument createdDate(LocalDate createdDate) {
+    public IDocument createdDate(LocalDate createdDate) {
         this.setCreatedDate(createdDate);
         return this;
     }
@@ -140,7 +140,7 @@ public class HCDocument implements Serializable {
         return this.modifiedDate;
     }
 
-    public HCDocument modifiedDate(LocalDate modifiedDate) {
+    public IDocument modifiedDate(LocalDate modifiedDate) {
         this.setModifiedDate(modifiedDate);
         return this;
     }
@@ -153,7 +153,7 @@ public class HCDocument implements Serializable {
         return this.lastModifiedBy;
     }
 
-    public HCDocument lastModifiedBy(String lastModifiedBy) {
+    public IDocument lastModifiedBy(String lastModifiedBy) {
         this.setLastModifiedBy(lastModifiedBy);
         return this;
     }
@@ -169,10 +169,10 @@ public class HCDocument implements Serializable {
         if (this == o) {
             return true;
         }
-        if (!(o instanceof HCDocument)) {
+        if (!(o instanceof IDocument)) {
             return false;
         }
-        return getId() != null && getId().equals(((HCDocument) o).getId());
+        return getId() != null && getId().equals(((IDocument) o).getId());
     }
 
     @Override

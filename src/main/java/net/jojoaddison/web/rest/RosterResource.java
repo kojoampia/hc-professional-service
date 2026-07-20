@@ -25,7 +25,7 @@ public class RosterResource {
 
     private final Logger log = LoggerFactory.getLogger(RosterResource.class);
 
-    private static final String ENTITY_NAME = "hcProfessionalMsRoster";
+    private static final String ENTITY_NAME = "professionalServiceRoster";
 
     @Value("${jhipster.clientApp.name}")
     private String applicationName;

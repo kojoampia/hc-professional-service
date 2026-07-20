@@ -1,18 +1,18 @@
 package net.jojoaddison.domain;
 
-import static net.jojoaddison.domain.HCDocumentTestSamples.*;
+import static net.jojoaddison.domain.IDocumentTestSamples.*;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import net.jojoaddison.web.rest.TestUtil;
 import org.junit.jupiter.api.Test;
 
-class HCDocumentTest {
+class IDocumentTest {
 
     @Test
     void equalsVerifier() throws Exception {
-        TestUtil.equalsVerifier(HCDocument.class);
-        HCDocument hCDocument1 = getHCDocumentSample1();
-        HCDocument hCDocument2 = new HCDocument();
+        TestUtil.equalsVerifier(IDocument.class);
+        IDocument hCDocument1 = getHCDocumentSample1();
+        IDocument hCDocument2 = new IDocument();
         assertThat(hCDocument1).isNotEqualTo(hCDocument2);
 
         hCDocument2.setId(hCDocument1.getId());

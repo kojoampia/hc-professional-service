@@ -56,7 +56,7 @@
       "fieldType": "String"
     }
   ],
-  "microserviceName": "hcProfessionalMs",
+  "microserviceName": "professionalService",
   "name": "Profile",
   "pagination": "pagination",
   "readOnly": false,

@@ -1,5 +1,5 @@
 # This configuration is intended for development purpose, it's **your** responsibility to harden it for production
-name: hcprofessionalms
+name: professionalService
 services:
   mongodb:
     image: mongo:7.0.6
@@ -7,7 +7,7 @@ services:
     # remove the "127.0.0.1:" prefix
     ports:
       - 127.0.0.1:27017:27017
-    command: mongos --configdb csvr/hcprofessionalms-mongodb-config --bind_ip 0.0.0.0
+    command: mongos --configdb csvr/professionalService-mongodb-config --bind_ip 0.0.0.0
   mongodb-node:
     build:
       context: .
@@ -15,5 +15,5 @@ services:
     command: mongod --shardsvr --replSet rs1
   mongodb-config:
     image: mongo:7.0.6
-    container_name: hcprofessionalms-mongodb-config
+    container_name: professionalService-mongodb-config
     command: mongod --configsvr --dbpath /data/db --replSet csvr

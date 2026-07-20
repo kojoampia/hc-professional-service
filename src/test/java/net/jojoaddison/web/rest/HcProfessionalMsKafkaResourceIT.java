@@ -30,7 +30,7 @@ import org.springframework.util.MimeTypeUtils;
 @WithMockUser
 @EmbeddedKafka
 @ImportAutoConfiguration(TestChannelBinderConfiguration.class)
-class HcProfessionalMsKafkaResourceIT {
+class professionalServiceKafkaResourceIT {
 
     @Autowired
     private MockMvc restMockMvc;

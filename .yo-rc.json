@@ -2,7 +2,7 @@
   "generator-jhipster": {
     "applicationType": "microservice",
     "authenticationType": "jwt",
-    "baseName": "hcProfessionalMs",
+    "baseName": "professionalService",
     "buildTool": "maven",
     "cacheProvider": "no",
     "clientFramework": "no",

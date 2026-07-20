@@ -2,23 +2,23 @@ package net.jojoaddison.service;
 
 import java.util.List;
 import java.util.Optional;
-import net.jojoaddison.domain.HCDocument;
-import net.jojoaddison.repository.HCDocumentRepository;
+import net.jojoaddison.domain.IDocument;
+import net.jojoaddison.repository.IDocumentRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Service Implementation for managing {@link net.jojoaddison.domain.HCDocument}.
+ * Service Implementation for managing {@link net.jojoaddison.domain.IDocument}.
  */
 @Service
-public class HCDocumentService {
+public class IDocumentService {
 
-    private final Logger log = LoggerFactory.getLogger(HCDocumentService.class);
+    private final Logger log = LoggerFactory.getLogger(IDocumentService.class);
 
-    private final HCDocumentRepository hCDocumentRepository;
+    private final IDocumentRepository hCDocumentRepository;
 
-    public HCDocumentService(HCDocumentRepository hCDocumentRepository) {
+    public IDocumentService(IDocumentRepository hCDocumentRepository) {
         this.hCDocumentRepository = hCDocumentRepository;
     }
 
@@ -28,7 +28,7 @@ public class HCDocumentService {
      * @param hCDocument the entity to save.
      * @return the persisted entity.
      */
-    public HCDocument save(HCDocument hCDocument) {
+    public IDocument save(IDocument hCDocument) {
         log.debug("Request to save HCDocument : {}", hCDocument);
         return hCDocumentRepository.save(hCDocument);
     }
@@ -39,7 +39,7 @@ public class HCDocumentService {
      * @param hCDocument the entity to save.
      * @return the persisted entity.
      */
-    public HCDocument update(HCDocument hCDocument) {
+    public IDocument update(IDocument hCDocument) {
         log.debug("Request to update HCDocument : {}", hCDocument);
         return hCDocumentRepository.save(hCDocument);
     }
@@ -50,7 +50,7 @@ public class HCDocumentService {
      * @param hCDocument the entity to update partially.
      * @return the persisted entity.
      */
-    public Optional<HCDocument> partialUpdate(HCDocument hCDocument) {
+    public Optional<IDocument> partialUpdate(IDocument hCDocument) {
         log.debug("Request to partially update HCDocument : {}", hCDocument);
 
         return hCDocumentRepository
@@ -91,7 +91,7 @@ public class HCDocumentService {
      *
      * @return the list of entities.
      */
-    public List<HCDocument> findAll() {
+    public List<IDocument> findAll() {
         log.debug("Request to get all HCDocuments");
         return hCDocumentRepository.findAll();
     }
@@ -102,7 +102,7 @@ public class HCDocumentService {
      * @param id the id of the entity.
      * @return the entity.
      */
-    public Optional<HCDocument> findOne(String id) {
+    public Optional<IDocument> findOne(String id) {
         log.debug("Request to get HCDocument : {}", id);
         return hCDocumentRepository.findById(id);
     }

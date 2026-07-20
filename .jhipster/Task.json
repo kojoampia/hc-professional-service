@@ -60,7 +60,7 @@
       "fieldType": "String"
     }
   ],
-  "microserviceName": "hcProfessionalMs",
+  "microserviceName": "professionalService",
   "name": "Task",
   "pagination": "no",
   "readOnly": false,
