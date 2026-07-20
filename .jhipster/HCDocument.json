@@ -21,7 +21,7 @@
     },
     {
       "fieldName": "data",
-      "fieldType": "byte[]",
+      "fieldType": "ByteBuffer",
       "fieldTypeBlobContent": "data"
     },
     {
