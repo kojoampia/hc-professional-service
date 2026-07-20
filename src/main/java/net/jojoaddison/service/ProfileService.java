@@ -119,6 +119,38 @@ public class ProfileService {
     }
 
     /**
+     * Get one profile by email.
+     *
+     * @param email the email of the entity.
+     * @return the entity.
+     */
+    public Optional<Profile> findByEmail(String email) {
+        log.debug("Request to get Profile : {}", email);
+        return profileRepository.findByEmail(email);
+    }
+
+    /**
+     * Get one profile by accountId.
+     *
+     * @param accountId the accountId of the entity.
+     * @return the entity.
+     */
+    public Optional<Profile> findByAccountId(String accountId) {
+        log.debug("Request to get Profile : {}", accountId);
+        return profileRepository.findByAccountId(accountId);
+    }
+
+    /**
+     * Count all profiles.
+     *
+     * @return the number of profiles.
+     */
+    public long count() {
+        log.debug("Request to count all Profiles");
+        return profileRepository.count();
+    }
+
+    /**
      * Delete the profile by id.
      *
      * @param id the id of the entity.

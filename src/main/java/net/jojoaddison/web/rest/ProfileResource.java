@@ -16,7 +16,15 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import tech.jhipster.web.util.HeaderUtil;
 import tech.jhipster.web.util.PaginationUtil;
@@ -52,7 +60,7 @@ public class ProfileResource {
      * @return the {@link ResponseEntity} with status {@code 201 (Created)} and with body the new profile, or with status {@code 400 (Bad Request)} if the profile has already an ID.
      * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
-    @PostMapping("")
+    @PostMapping
     public ResponseEntity<Profile> createProfile(@RequestBody Profile profile) throws URISyntaxException {
         log.debug("REST request to save Profile : {}", profile);
         if (profile.getId() != null) {
@@ -136,7 +144,7 @@ public class ProfileResource {
      * @param pageable the pagination information.
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and the list of profiles in body.
      */
-    @GetMapping("")
+    @GetMapping
     public ResponseEntity<List<Profile>> getAllProfiles(@org.springdoc.core.annotations.ParameterObject Pageable pageable) {
         log.debug("REST request to get a page of Profiles");
         Page<Profile> page = profileService.findAll(pageable);
@@ -154,6 +162,32 @@ public class ProfileResource {
     public ResponseEntity<Profile> getProfile(@PathVariable("id") String id) {
         log.debug("REST request to get Profile : {}", id);
         Optional<Profile> profile = profileService.findOne(id);
+        return ResponseUtil.wrapOrNotFound(profile);
+    }
+
+    /**
+     * {@code GET  /profiles/account/:accountId} : get the "accountId" profile.
+
+     * @param accountId the accountId of the profile to retrieve.
+     * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the profile, or with status {@code 404 (Not Found)}.
+     */
+    @GetMapping("/account/{accountId}")
+    public ResponseEntity<Profile> getProfileByAccountId(@PathVariable("accountId") String accountId) {
+        log.debug("REST request to get Profile by accountId : {}", accountId);
+        Optional<Profile> profile = profileService.findByAccountId(accountId);
+        return ResponseUtil.wrapOrNotFound(profile);
+    }
+
+    /**
+     * {@code GET  /profiles/email/:email} : get the "email" profile.
+     *
+     * @param email the email of the profile to retrieve.
+     * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the profile, or with status {@code 404 (Not Found)}.
+     */
+    @GetMapping("/email/{email}")
+    public ResponseEntity<Profile> getProfileByEmail(@PathVariable("email") String email) {
+        log.debug("REST request to get Profile by email : {}", email);
+        Optional<Profile> profile = profileService.findByEmail(email);
         return ResponseUtil.wrapOrNotFound(profile);
     }
 

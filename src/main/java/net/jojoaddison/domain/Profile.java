@@ -17,6 +17,9 @@ public class Profile implements Serializable {
     @Id
     private String id;
 
+    @Field("account_id")
+    private String accountId;
+
     @Field("first_name")
     private String firstName;
 
@@ -63,6 +66,19 @@ public class Profile implements Serializable {
 
     public void setId(String id) {
         this.id = id;
+    }
+
+    public String getAccountId() {
+        return this.accountId;
+    }
+
+    public Profile accountId(String accountId) {
+        this.setAccountId(accountId);
+        return this;
+    }
+
+    public void setAccountId(String accountId) {
+        this.accountId = accountId;
     }
 
     public String getFirstName() {
