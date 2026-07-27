@@ -272,6 +272,13 @@
             <artifactId>testcontainers</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <!-- Required at runtime by testcontainers' Kafka container; not pulled transitively on the SB4/JDK26 path. -->
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
+            <version>2.18.0</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

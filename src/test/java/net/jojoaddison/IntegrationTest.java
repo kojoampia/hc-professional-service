@@ -8,6 +8,7 @@ import net.jojoaddison.config.AsyncSyncConfiguration;
 import net.jojoaddison.config.EmbeddedKafka;
 import net.jojoaddison.config.EmbeddedMongo;
 import net.jojoaddison.config.JacksonConfiguration;
+import net.jojoaddison.config.TestJacksonConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.annotation.DirtiesContext;
 
@@ -16,7 +17,9 @@ import org.springframework.test.annotation.DirtiesContext;
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
-@SpringBootTest(classes = { ProfessionalServiceApp.class, JacksonConfiguration.class, AsyncSyncConfiguration.class })
+@SpringBootTest(
+    classes = { ProfessionalServiceApp.class, JacksonConfiguration.class, TestJacksonConfiguration.class, AsyncSyncConfiguration.class }
+)
 @EmbeddedMongo
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @EmbeddedKafka

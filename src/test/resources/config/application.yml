@@ -51,13 +51,10 @@ spring:
         kafkaProducer-out-0:
           content-type: text/plain
           group: hc-professional-ms
-  jackson:
-    serialization:
-      write-durations-as-timestamps: false
-      write-dates-as-timestamps: false
-    deserialization:
-      fail-on-unknown-properties: false
-      fail-on-empty-beans: false
+  # spring.jackson feature overrides removed on the Boot 4 / Jackson 3 upgrade:
+  # the old keys (write-dates/durations-as-timestamps, fail-on-empty-beans,
+  # fail-on-unknown-properties) either moved off SerializationFeature or are
+  # Jackson 3 defaults, and strict property binding rejects the stale names.
   mail:
     host: localhost
   main:

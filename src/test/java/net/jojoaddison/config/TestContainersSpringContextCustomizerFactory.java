@@ -30,6 +30,8 @@ public class TestContainersSpringContextCustomizerFactory implements ContextCust
                     beanFactory.registerSingleton(MongoDbTestContainer.class.getName(), mongoDbBean);
                     // ((DefaultListableBeanFactory)beanFactory).registerDisposableBean(MongoDbTestContainer.class.getName(), mongoDbBean);
                 }
+                // Spring Boot 4 moved the Mongo namespace to spring.mongodb.*; keep the old key too for safety.
+                testValues = testValues.and("spring.mongodb.uri=" + mongoDbBean.getMongoDBContainer().getReplicaSetUrl());
                 testValues = testValues.and("spring.data.mongodb.uri=" + mongoDbBean.getMongoDBContainer().getReplicaSetUrl());
             }
             testValues.applyTo(context);
