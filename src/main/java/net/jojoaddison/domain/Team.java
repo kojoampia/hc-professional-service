@@ -1,6 +1,8 @@
 package net.jojoaddison.domain;
 
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -23,8 +25,9 @@ public class Team implements Serializable {
     @Field("description")
     private String description;
 
+    /** Profile ids of team members (normalized from a free string in WP2). */
     @Field("members")
-    private String members;
+    private List<String> members = new ArrayList<>();
 
     @Field("supervisor")
     private String supervisor;
@@ -73,16 +76,16 @@ public class Team implements Serializable {
         this.description = description;
     }
 
-    public String getMembers() {
+    public List<String> getMembers() {
         return this.members;
     }
 
-    public Team members(String members) {
+    public Team members(List<String> members) {
         this.setMembers(members);
         return this;
     }
 
-    public void setMembers(String members) {
+    public void setMembers(List<String> members) {
         this.members = members;
     }
 

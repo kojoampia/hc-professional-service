@@ -34,8 +34,8 @@ class TeamResourceIT {
     private static final String DEFAULT_DESCRIPTION = "AAAAAAAAAA";
     private static final String UPDATED_DESCRIPTION = "BBBBBBBBBB";
 
-    private static final String DEFAULT_MEMBERS = "AAAAAAAAAA";
-    private static final String UPDATED_MEMBERS = "BBBBBBBBBB";
+    private static final java.util.List<String> DEFAULT_MEMBERS = java.util.List.of("AAAAAAAAAA");
+    private static final java.util.List<String> UPDATED_MEMBERS = java.util.List.of("BBBBBBBBBB");
 
     private static final String DEFAULT_SUPERVISOR = "AAAAAAAAAA";
     private static final String UPDATED_SUPERVISOR = "BBBBBBBBBB";
@@ -161,7 +161,7 @@ class TeamResourceIT {
             .andExpect(jsonPath("$.id").value(team.getId()))
             .andExpect(jsonPath("$.name").value(DEFAULT_NAME))
             .andExpect(jsonPath("$.description").value(DEFAULT_DESCRIPTION))
-            .andExpect(jsonPath("$.members").value(DEFAULT_MEMBERS))
+            .andExpect(jsonPath("$.members", org.hamcrest.Matchers.contains(DEFAULT_MEMBERS.toArray())))
             .andExpect(jsonPath("$.supervisor").value(DEFAULT_SUPERVISOR))
             .andExpect(jsonPath("$.manager").value(DEFAULT_MANAGER));
     }

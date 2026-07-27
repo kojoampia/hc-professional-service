@@ -2,7 +2,10 @@ package net.jojoaddison.domain;
 
 import java.io.Serializable;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
@@ -17,6 +20,7 @@ public class Profile implements Serializable {
     @Id
     private String id;
 
+    @Indexed(unique = true, sparse = true)
     @Field("account_id")
     private String accountId;
 
@@ -52,6 +56,18 @@ public class Profile implements Serializable {
 
     @Field("address")
     private Address address;
+
+    @Field("title")
+    private String title;
+
+    @Field("emergency_contact")
+    private EmergencyContact emergencyContact;
+
+    @Field("specialty_category_id")
+    private String specialtyCategoryId;
+
+    @Field("team_ids")
+    private List<String> teamIds = new ArrayList<>();
 
     // jhipster-needle-entity-add-field - JHipster will add fields here
 
@@ -224,6 +240,58 @@ public class Profile implements Serializable {
         this.address = address;
     }
 
+    public String getTitle() {
+        return this.title;
+    }
+
+    public Profile title(String title) {
+        this.setTitle(title);
+        return this;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
+    }
+
+    public EmergencyContact getEmergencyContact() {
+        return this.emergencyContact;
+    }
+
+    public Profile emergencyContact(EmergencyContact emergencyContact) {
+        this.setEmergencyContact(emergencyContact);
+        return this;
+    }
+
+    public void setEmergencyContact(EmergencyContact emergencyContact) {
+        this.emergencyContact = emergencyContact;
+    }
+
+    public String getSpecialtyCategoryId() {
+        return this.specialtyCategoryId;
+    }
+
+    public Profile specialtyCategoryId(String specialtyCategoryId) {
+        this.setSpecialtyCategoryId(specialtyCategoryId);
+        return this;
+    }
+
+    public void setSpecialtyCategoryId(String specialtyCategoryId) {
+        this.specialtyCategoryId = specialtyCategoryId;
+    }
+
+    public List<String> getTeamIds() {
+        return this.teamIds;
+    }
+
+    public Profile teamIds(List<String> teamIds) {
+        this.setTeamIds(teamIds);
+        return this;
+    }
+
+    public void setTeamIds(List<String> teamIds) {
+        this.teamIds = teamIds;
+    }
+
     // jhipster-needle-entity-add-getters-setters - JHipster will add getters and
     // setters here
 
@@ -261,6 +329,10 @@ public class Profile implements Serializable {
                 ", cardType='" + getCardType() + "'" +
                 ", cardNumber='" + getCardNumber() + "'" +
                 ", address='" + getAddress() + "'" +
+                ", title='" + getTitle() + "'" +
+                ", emergencyContact='" + getEmergencyContact() + "'" +
+                ", specialtyCategoryId='" + getSpecialtyCategoryId() + "'" +
+                ", teamIds='" + getTeamIds() + "'" +
                 "}";
     }
 }
