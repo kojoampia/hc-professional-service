@@ -8,11 +8,11 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
 /**
- * A HCDocument.
+ * A PersonalDocument.
  */
-@Document(collection = "hc_document")
+@Document(collection = "personal_document")
 @SuppressWarnings("common-java:DuplicatedBlocks")
-public class IDocument implements Serializable {
+public class PersonalDocument implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -49,7 +49,7 @@ public class IDocument implements Serializable {
         return this.id;
     }
 
-    public IDocument id(String id) {
+    public PersonalDocument id(String id) {
         this.setId(id);
         return this;
     }
@@ -62,7 +62,7 @@ public class IDocument implements Serializable {
         return this.name;
     }
 
-    public IDocument name(String name) {
+    public PersonalDocument name(String name) {
         this.setName(name);
         return this;
     }
@@ -75,7 +75,7 @@ public class IDocument implements Serializable {
         return this.profileId;
     }
 
-    public IDocument profileId(String profileId) {
+    public PersonalDocument profileId(String profileId) {
         this.setProfileId(profileId);
         return this;
     }
@@ -88,7 +88,7 @@ public class IDocument implements Serializable {
         return this.data;
     }
 
-    public IDocument data(byte[] data) {
+    public PersonalDocument data(byte[] data) {
         this.setData(data);
         return this;
     }
@@ -101,7 +101,7 @@ public class IDocument implements Serializable {
         return this.dataContentType;
     }
 
-    public IDocument dataContentType(String dataContentType) {
+    public PersonalDocument dataContentType(String dataContentType) {
         this.dataContentType = dataContentType;
         return this;
     }
@@ -114,7 +114,7 @@ public class IDocument implements Serializable {
         return this.type;
     }
 
-    public IDocument type(DocumentType type) {
+    public PersonalDocument type(DocumentType type) {
         this.setType(type);
         return this;
     }
@@ -127,7 +127,7 @@ public class IDocument implements Serializable {
         return this.createdDate;
     }
 
-    public IDocument createdDate(LocalDate createdDate) {
+    public PersonalDocument createdDate(LocalDate createdDate) {
         this.setCreatedDate(createdDate);
         return this;
     }
@@ -140,7 +140,7 @@ public class IDocument implements Serializable {
         return this.modifiedDate;
     }
 
-    public IDocument modifiedDate(LocalDate modifiedDate) {
+    public PersonalDocument modifiedDate(LocalDate modifiedDate) {
         this.setModifiedDate(modifiedDate);
         return this;
     }
@@ -153,7 +153,7 @@ public class IDocument implements Serializable {
         return this.lastModifiedBy;
     }
 
-    public IDocument lastModifiedBy(String lastModifiedBy) {
+    public PersonalDocument lastModifiedBy(String lastModifiedBy) {
         this.setLastModifiedBy(lastModifiedBy);
         return this;
     }
@@ -169,10 +169,10 @@ public class IDocument implements Serializable {
         if (this == o) {
             return true;
         }
-        if (!(o instanceof IDocument)) {
+        if (!(o instanceof PersonalDocument)) {
             return false;
         }
-        return getId() != null && getId().equals(((IDocument) o).getId());
+        return getId() != null && getId().equals(((PersonalDocument) o).getId());
     }
 
     @Override
@@ -184,7 +184,7 @@ public class IDocument implements Serializable {
     // prettier-ignore
     @Override
     public String toString() {
-        return "HCDocument{" +
+        return "PersonalDocument{" +
             "id=" + getId() +
             ", name='" + getName() + "'" +
             ", profileId='" + getProfileId() + "'" +

@@ -5,12 +5,8 @@
   "clientRootFolder": "professionalService",
   "databaseType": "mongodb",
   "dto": "no",
-  "entityTableName": "hc_document",
+  "entityTableName": "personal_document",
   "fields": [
-    {
-      "fieldName": "id",
-      "fieldType": "String"
-    },
     {
       "fieldName": "name",
       "fieldType": "String"
@@ -38,12 +34,16 @@
       "fieldType": "LocalDate"
     },
     {
-      "fieldName": "lastModifiedBy",
+      "fieldName": "createdBy",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "modifiedBy",
       "fieldType": "String"
     }
   ],
   "microserviceName": "professionalService",
-  "name": "IDocument",
+  "name": "PersonalDocument",
   "pagination": "no",
   "readOnly": false,
   "relationships": [],
