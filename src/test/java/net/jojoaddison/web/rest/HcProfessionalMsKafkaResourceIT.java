@@ -27,7 +27,7 @@ import org.springframework.util.MimeTypeUtils;
 
 @IntegrationTest
 @AutoConfigureMockMvc
-@WithMockUser
+@WithMockUser(authorities = { "ROLE_DOCTOR" })
 @EmbeddedKafka
 @ImportAutoConfiguration(TestChannelBinderConfiguration.class)
 class professionalServiceKafkaResourceIT {

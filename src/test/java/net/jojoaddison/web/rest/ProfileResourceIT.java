@@ -34,7 +34,7 @@ import org.springframework.test.web.servlet.MockMvc;
  */
 @IntegrationTest
 @AutoConfigureMockMvc
-@WithMockUser
+@WithMockUser(authorities = { "ROLE_DOCTOR" })
 class ProfileResourceIT {
 
     private static final String DEFAULT_FIRST_NAME = "AAAAAAAAAA";

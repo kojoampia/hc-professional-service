@@ -27,7 +27,7 @@ import org.springframework.test.web.servlet.MockMvc;
  */
 @IntegrationTest
 @AutoConfigureMockMvc
-@WithMockUser
+@WithMockUser(authorities = { "ROLE_DOCTOR" })
 class MetadataResourceIT {
 
     private static final String DEFAULT_CREATED_BY = "AAAAAAAAAA";

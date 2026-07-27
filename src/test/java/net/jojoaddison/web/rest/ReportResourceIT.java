@@ -27,7 +27,7 @@ import org.springframework.test.web.servlet.MockMvc;
  */
 @IntegrationTest
 @AutoConfigureMockMvc
-@WithMockUser
+@WithMockUser(authorities = { "ROLE_DOCTOR" })
 class ReportResourceIT {
 
     private static final String DEFAULT_CATEGORY = "AAAAAAAAAA";

@@ -158,6 +158,13 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <!-- Boot 4 split: applies the spring-security-test configurer to auto-configured MockMvc;
+                 without it @WithMockUser is ignored and every IT request gets 401. -->
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-api</artifactId>
         </dependency>
