@@ -179,6 +179,12 @@ public class OnboardingService {
         return saved;
     }
 
+    public Profile getOwnProfile(String accountId) {
+        return profileRepository
+            .findByAccountId(accountId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No profile for this account yet"));
+    }
+
     public ProfessionalApplication getOwnApplication(String accountId) {
         return applicationRepository
             .findByAccountId(accountId)

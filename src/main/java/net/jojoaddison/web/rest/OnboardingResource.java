@@ -60,6 +60,11 @@ public class OnboardingResource {
         return ResponseEntity.status(HttpStatus.CREATED).body(application);
     }
 
+    @GetMapping("/profile")
+    public net.jojoaddison.domain.Profile getOwnProfile() {
+        return onboardingService.getOwnProfile(currentAccountId());
+    }
+
     @PutMapping("/profile")
     public net.jojoaddison.domain.Profile upsertOwnProfile(@RequestBody net.jojoaddison.domain.Profile profile) {
         return onboardingService.upsertOwnProfile(currentAccountId(), profile);
