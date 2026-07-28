@@ -140,6 +140,45 @@ public class OnboardingService {
         return application;
     }
 
+    /**
+     * Applicant profile upsert (WP4 support): applicants hold only ROLE_USER,
+     * which the WP1 mutation matrix blocks from POST /api/profiles — their
+     * profile is written through the onboarding surface instead. accountId is
+     * always forced to the caller; an existing profile keeps its id.
+     */
+    public Profile upsertOwnProfile(String accountId, Profile incoming) {
+        Profile profile = profileRepository.findByAccountId(accountId).orElse(null);
+        boolean created = profile == null;
+        if (created) {
+            profile = new Profile();
+        }
+        profile
+            .accountId(accountId)
+            .firstName(incoming.getFirstName())
+            .middleNames(incoming.getMiddleNames())
+            .lastName(incoming.getLastName())
+            .birthDate(incoming.getBirthDate())
+            .sex(incoming.getSex())
+            .mobilePhone(incoming.getMobilePhone())
+            .phoneNumber(incoming.getPhoneNumber())
+            .email(incoming.getEmail())
+            .cardType(incoming.getCardType())
+            .cardNumber(incoming.getCardNumber())
+            .title(incoming.getTitle())
+            .address(incoming.getAddress())
+            .emergencyContact(incoming.getEmergencyContact());
+        Profile saved = profileRepository.save(profile);
+        if (created) {
+            domainEventPublisher.publishEntityCreated(
+                "Profile",
+                saved.getId(),
+                saved.getAccountId(),
+                net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
+            );
+        }
+        return saved;
+    }
+
     public ProfessionalApplication getOwnApplication(String accountId) {
         return applicationRepository
             .findByAccountId(accountId)

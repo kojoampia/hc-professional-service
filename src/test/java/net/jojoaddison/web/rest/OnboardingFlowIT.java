@@ -149,6 +149,43 @@ class OnboardingFlowIT {
     }
 
     @Test
+    @WithMockUser(username = "fresh-applicant", authorities = { "ROLE_USER" })
+    void applicantUpsertsOwnProfileThroughOnboardingSurface() throws Exception {
+        restMockMvc
+            .perform(
+                put("/api/onboarding/profile")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"firstName\":\"Fresh\",\"lastName\":\"Applicant\",\"accountId\":\"spoofed\",\"title\":\"RN\"}")
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.accountId").value("fresh-applicant"))
+            .andExpect(jsonPath("$.title").value("RN"));
+        // update keeps the same profile (no duplicate)
+        restMockMvc
+            .perform(
+                put("/api/onboarding/profile")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"firstName\":\"Fresher\",\"lastName\":\"Applicant\"}")
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.firstName").value("Fresher"));
+        assertThat(profileRepository.findByAccountId("fresh-applicant")).isPresent();
+    }
+
+    @Test
+    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    void applicantListsOwnDocumentsWithoutBytes() throws Exception {
+        PersonalDocument doc = doc(DocumentType.CERTIFICATE, null);
+        doc.setData("%PDF".getBytes());
+        personalDocumentRepository.save(doc);
+        restMockMvc
+            .perform(get("/api/onboarding/documents"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].type").value("CERTIFICATE"))
+            .andExpect(jsonPath("$[0].data").isEmpty());
+    }
+
+    @Test
     @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
     void submitRequiresMandatoryDocumentSet() throws Exception {
         startApplication();

@@ -100,6 +100,18 @@ public class OnboardingDocumentResource {
         return ResponseEntity.status(HttpStatus.CREATED).body(saved);
     }
 
+    @GetMapping
+    public java.util.List<PersonalDocument> listOwnDocuments() {
+        return personalDocumentRepository
+            .findByProfileId(ownProfile().getId())
+            .stream()
+            .map(document -> {
+                document.setData(null);
+                return document;
+            })
+            .toList();
+    }
+
     @GetMapping("/{id}/content")
     public ResponseEntity<byte[]> streamContent(@PathVariable String id) {
         PersonalDocument document = personalDocumentRepository
