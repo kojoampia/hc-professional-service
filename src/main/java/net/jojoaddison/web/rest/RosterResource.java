@@ -5,6 +5,7 @@ import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.Roster;
 import net.jojoaddison.repository.RosterRepository;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
@@ -32,8 +33,11 @@ public class RosterResource {
 
     private final RosterRepository rosterRepository;
 
-    public RosterResource(RosterRepository rosterRepository) {
+    private final DomainEventPublisher domainEventPublisher;
+
+    public RosterResource(RosterRepository rosterRepository, DomainEventPublisher domainEventPublisher) {
         this.rosterRepository = rosterRepository;
+        this.domainEventPublisher = domainEventPublisher;
     }
 
     /**
@@ -50,6 +54,12 @@ public class RosterResource {
             throw new BadRequestAlertException("A new roster cannot already have an ID", ENTITY_NAME, "idexists");
         }
         roster = rosterRepository.save(roster);
+        domainEventPublisher.publishEntityCreated(
+            "Roster",
+            roster.getId(),
+            null,
+            net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
+        );
         return ResponseEntity.created(new URI("/api/rosters/" + roster.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, roster.getId()))
             .body(roster);

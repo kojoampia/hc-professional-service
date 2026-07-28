@@ -51,6 +51,9 @@ spring:
         kafkaProducer-out-0:
           content-type: text/plain
           group: hc-professional-ms
+        entityEvents-out-0:
+          destination: hc.professional.entity
+          content-type: application/json
   # spring.jackson feature overrides removed on the Boot 4 / Jackson 3 upgrade:
   # the old keys (write-dates/durations-as-timestamps, fail-on-empty-beans,
   # fail-on-unknown-properties) either moved off SerializationFeature or are

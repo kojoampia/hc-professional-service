@@ -5,6 +5,7 @@ import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.Address;
 import net.jojoaddison.repository.AddressRepository;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
@@ -32,8 +33,11 @@ public class AddressResource {
 
     private final AddressRepository addressRepository;
 
-    public AddressResource(AddressRepository addressRepository) {
+    private final DomainEventPublisher domainEventPublisher;
+
+    public AddressResource(AddressRepository addressRepository, DomainEventPublisher domainEventPublisher) {
         this.addressRepository = addressRepository;
+        this.domainEventPublisher = domainEventPublisher;
     }
 
     /**
@@ -50,6 +54,12 @@ public class AddressResource {
             throw new BadRequestAlertException("A new address cannot already have an ID", ENTITY_NAME, "idexists");
         }
         address = addressRepository.save(address);
+        domainEventPublisher.publishEntityCreated(
+            "Address",
+            address.getId(),
+            null,
+            net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
+        );
         return ResponseEntity.created(new URI("/api/addresses/" + address.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, address.getId()))
             .body(address);

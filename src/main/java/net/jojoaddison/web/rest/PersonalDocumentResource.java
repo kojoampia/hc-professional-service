@@ -5,6 +5,7 @@ import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.service.PersonalDocumentService;
@@ -35,12 +36,16 @@ public class PersonalDocumentResource {
 
     private final PersonalDocumentRepository personalDocumentRepository;
 
+    private final DomainEventPublisher domainEventPublisher;
+
     public PersonalDocumentResource(
         PersonalDocumentService personalDocumentService,
-        PersonalDocumentRepository personalDocumentRepository
+        PersonalDocumentRepository personalDocumentRepository,
+        DomainEventPublisher domainEventPublisher
     ) {
         this.personalDocumentService = personalDocumentService;
         this.personalDocumentRepository = personalDocumentRepository;
+        this.domainEventPublisher = domainEventPublisher;
     }
 
     /**
@@ -58,6 +63,12 @@ public class PersonalDocumentResource {
             throw new BadRequestAlertException("A new personalDocument cannot already have an ID", ENTITY_NAME, "idexists");
         }
         personalDocument = personalDocumentService.save(personalDocument);
+        domainEventPublisher.publishEntityCreated(
+            "PersonalDocument",
+            personalDocument.getId(),
+            null,
+            net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
+        );
         return ResponseEntity.created(new URI("/api/personal-documents/" + personalDocument.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, personalDocument.getId()))
             .body(personalDocument);

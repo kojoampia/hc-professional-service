@@ -5,6 +5,7 @@ import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.service.ProfileService;
@@ -48,9 +49,12 @@ public class ProfileResource {
 
     private final ProfileRepository profileRepository;
 
-    public ProfileResource(ProfileService profileService, ProfileRepository profileRepository) {
+    private final DomainEventPublisher domainEventPublisher;
+
+    public ProfileResource(ProfileService profileService, ProfileRepository profileRepository, DomainEventPublisher domainEventPublisher) {
         this.profileService = profileService;
         this.profileRepository = profileRepository;
+        this.domainEventPublisher = domainEventPublisher;
     }
 
     /**
@@ -67,6 +71,12 @@ public class ProfileResource {
             throw new BadRequestAlertException("A new profile cannot already have an ID", ENTITY_NAME, "idexists");
         }
         profile = profileService.save(profile);
+        domainEventPublisher.publishEntityCreated(
+            "Profile",
+            profile.getId(),
+            profile.getAccountId(),
+            net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
+        );
         return ResponseEntity.created(new URI("/api/profiles/" + profile.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, profile.getId()))
             .body(profile);

@@ -6,6 +6,7 @@ package net.jojoaddison.domain.enumeration;
 public enum DocumentType {
     PASSPORT,
     CERTIFICATE,
+    LICENSE,
     GHANACARD,
     PASSPHOTO,
     DRIVERLICENSE,

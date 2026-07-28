@@ -5,6 +5,7 @@ import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.Activity;
 import net.jojoaddison.repository.ActivityRepository;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
@@ -32,8 +33,11 @@ public class ActivityResource {
 
     private final ActivityRepository activityRepository;
 
-    public ActivityResource(ActivityRepository activityRepository) {
+    private final DomainEventPublisher domainEventPublisher;
+
+    public ActivityResource(ActivityRepository activityRepository, DomainEventPublisher domainEventPublisher) {
         this.activityRepository = activityRepository;
+        this.domainEventPublisher = domainEventPublisher;
     }
 
     /**
@@ -50,6 +54,12 @@ public class ActivityResource {
             throw new BadRequestAlertException("A new activity cannot already have an ID", ENTITY_NAME, "idexists");
         }
         activity = activityRepository.save(activity);
+        domainEventPublisher.publishEntityCreated(
+            "Activity",
+            activity.getId(),
+            null,
+            net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
+        );
         return ResponseEntity.created(new URI("/api/activities/" + activity.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, activity.getId()))
             .body(activity);

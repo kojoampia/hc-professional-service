@@ -5,6 +5,7 @@ import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.Task;
 import net.jojoaddison.repository.TaskRepository;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
@@ -32,8 +33,11 @@ public class TaskResource {
 
     private final TaskRepository taskRepository;
 
-    public TaskResource(TaskRepository taskRepository) {
+    private final DomainEventPublisher domainEventPublisher;
+
+    public TaskResource(TaskRepository taskRepository, DomainEventPublisher domainEventPublisher) {
         this.taskRepository = taskRepository;
+        this.domainEventPublisher = domainEventPublisher;
     }
 
     /**
@@ -50,6 +54,12 @@ public class TaskResource {
             throw new BadRequestAlertException("A new task cannot already have an ID", ENTITY_NAME, "idexists");
         }
         task = taskRepository.save(task);
+        domainEventPublisher.publishEntityCreated(
+            "Task",
+            task.getId(),
+            null,
+            net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
+        );
         return ResponseEntity.created(new URI("/api/tasks/" + task.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, task.getId()))
             .body(task);

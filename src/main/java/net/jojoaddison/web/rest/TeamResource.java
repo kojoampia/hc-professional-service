@@ -5,6 +5,7 @@ import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.Team;
 import net.jojoaddison.repository.TeamRepository;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
@@ -32,8 +33,11 @@ public class TeamResource {
 
     private final TeamRepository teamRepository;
 
-    public TeamResource(TeamRepository teamRepository) {
+    private final DomainEventPublisher domainEventPublisher;
+
+    public TeamResource(TeamRepository teamRepository, DomainEventPublisher domainEventPublisher) {
         this.teamRepository = teamRepository;
+        this.domainEventPublisher = domainEventPublisher;
     }
 
     /**
@@ -50,6 +54,12 @@ public class TeamResource {
             throw new BadRequestAlertException("A new team cannot already have an ID", ENTITY_NAME, "idexists");
         }
         team = teamRepository.save(team);
+        domainEventPublisher.publishEntityCreated(
+            "Team",
+            team.getId(),
+            null,
+            net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
+        );
         return ResponseEntity.created(new URI("/api/teams/" + team.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, team.getId()))
             .body(team);

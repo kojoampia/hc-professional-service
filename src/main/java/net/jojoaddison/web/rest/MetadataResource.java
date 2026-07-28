@@ -5,6 +5,7 @@ import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.Metadata;
 import net.jojoaddison.repository.MetadataRepository;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
@@ -32,8 +33,11 @@ public class MetadataResource {
 
     private final MetadataRepository metadataRepository;
 
-    public MetadataResource(MetadataRepository metadataRepository) {
+    private final DomainEventPublisher domainEventPublisher;
+
+    public MetadataResource(MetadataRepository metadataRepository, DomainEventPublisher domainEventPublisher) {
         this.metadataRepository = metadataRepository;
+        this.domainEventPublisher = domainEventPublisher;
     }
 
     /**
@@ -50,6 +54,12 @@ public class MetadataResource {
             throw new BadRequestAlertException("A new metadata cannot already have an ID", ENTITY_NAME, "idexists");
         }
         metadata = metadataRepository.save(metadata);
+        domainEventPublisher.publishEntityCreated(
+            "Metadata",
+            metadata.getId(),
+            null,
+            net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
+        );
         return ResponseEntity.created(new URI("/api/metadata/" + metadata.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, metadata.getId()))
             .body(metadata);

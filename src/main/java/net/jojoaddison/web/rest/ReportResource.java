@@ -5,6 +5,7 @@ import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.Report;
 import net.jojoaddison.repository.ReportRepository;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
@@ -32,8 +33,11 @@ public class ReportResource {
 
     private final ReportRepository reportRepository;
 
-    public ReportResource(ReportRepository reportRepository) {
+    private final DomainEventPublisher domainEventPublisher;
+
+    public ReportResource(ReportRepository reportRepository, DomainEventPublisher domainEventPublisher) {
         this.reportRepository = reportRepository;
+        this.domainEventPublisher = domainEventPublisher;
     }
 
     /**
@@ -50,6 +54,12 @@ public class ReportResource {
             throw new BadRequestAlertException("A new report cannot already have an ID", ENTITY_NAME, "idexists");
         }
         report = reportRepository.save(report);
+        domainEventPublisher.publishEntityCreated(
+            "Report",
+            report.getId(),
+            null,
+            net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
+        );
         return ResponseEntity.created(new URI("/api/reports/" + report.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, report.getId()))
             .body(report);

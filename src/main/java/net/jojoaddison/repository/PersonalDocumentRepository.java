@@ -9,4 +9,6 @@ import org.springframework.stereotype.Repository;
  */
 @SuppressWarnings("unused")
 @Repository
-public interface PersonalDocumentRepository extends MongoRepository<PersonalDocument, String> {}
+public interface PersonalDocumentRepository extends MongoRepository<PersonalDocument, String> {
+    java.util.List<PersonalDocument> findByProfileId(String profileId);
+}
