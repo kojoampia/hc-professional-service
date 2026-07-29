@@ -11,4 +11,9 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface PersonalDocumentRepository extends MongoRepository<PersonalDocument, String> {
     java.util.List<PersonalDocument> findByProfileId(String profileId);
+
+    java.util.List<PersonalDocument> findByTypeAndExpiryDateLessThan(
+        net.jojoaddison.domain.enumeration.DocumentType type,
+        java.time.LocalDate date
+    );
 }

@@ -13,4 +13,6 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface OnboardingEventRepository extends MongoRepository<OnboardingEvent, String> {
     List<OnboardingEvent> findByApplicationIdOrderByAtAsc(String applicationId);
+
+    List<OnboardingEvent> findTop50ByOrderByAtDesc();
 }

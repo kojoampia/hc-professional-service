@@ -56,4 +56,30 @@ public class DomainEventPublisher {
             log.error("Failed to publish entity.created for {} {}", entityType, entityId, e);
         }
     }
+
+    /** WP7 compliance sweep: same topic and envelope, eventType {@code compliance.alert}. */
+    public void publishComplianceAlert(String alertType, String entityId, String accountId, String actor) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("alertType", alertType);
+        payload.put("entityId", entityId);
+        if (accountId != null) {
+            payload.put("accountId", accountId);
+        }
+        DomainEventEnvelope envelope = new DomainEventEnvelope(
+            UUID.randomUUID().toString(),
+            "compliance.alert",
+            Instant.now(),
+            SOURCE,
+            actor,
+            payload
+        );
+        try {
+            streamBridge.send(
+                ENTITY_TOPIC_BINDING,
+                MessageBuilder.withPayload(envelope).setHeader(KafkaHeaders.KEY, entityId.getBytes()).build()
+            );
+        } catch (RuntimeException e) {
+            log.error("Failed to publish compliance.alert for {} {}", alertType, entityId, e);
+        }
+    }
 }

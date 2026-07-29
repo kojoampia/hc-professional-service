@@ -269,7 +269,27 @@ public class OnboardingService {
     }
 
     public ProfessionalApplication markStatus(String applicationId, OnboardingStatus target, String reason, String actor) {
-        return transition(getById(applicationId), target, actor, reason);
+        ProfessionalApplication application = getById(applicationId);
+        // WP7 reactivation guard: leaving SUSPENDED requires a current verified license
+        if (target == OnboardingStatus.ACTIVE && application.getStatus() == OnboardingStatus.SUSPENDED) {
+            requireCurrentVerifiedLicense(application);
+        }
+        return transition(application, target, actor, reason);
+    }
+
+    private void requireCurrentVerifiedLicense(ProfessionalApplication application) {
+        boolean hasCurrentLicense = documentsFor(application)
+            .stream()
+            .anyMatch(
+                d ->
+                    d.getType() == DocumentType.LICENSE &&
+                    d.getVerificationStatus() == VerificationStatus.VERIFIED &&
+                    d.getExpiryDate() != null &&
+                    !d.getExpiryDate().isBefore(java.time.LocalDate.now())
+            );
+        if (!hasCurrentLicense) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Reactivation requires a verified, unexpired license");
+        }
     }
 
     public List<ProfessionalApplication> listApplications(OnboardingStatus status) {
