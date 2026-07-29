@@ -15,7 +15,7 @@
       "fieldName": "duty",
       "fieldType": "DutyRole",
       "fieldValidateRules": ["required"],
-      "fieldValues": "DOCTOR,NURSE,CARER,MEDIC,THERAPIST,VENDOR,TECHNICIAN,ADMINISTRATOR,OTHER"
+      "fieldValues": "DOCTOR,NURSE,PARAMEDIC,PHARMACIST,THERAPIST,CARER,ANGEL,CHEMIST,TECHNICIAN,OTHER"
     },
     {
       "fieldName": "professionalId",
@@ -36,11 +36,6 @@
     {
       "fieldName": "description",
       "fieldType": "String"
-    },
-    {
-      "fieldName": "patientId",
-      "fieldType": "String",
-      "fieldValidateRules": ["required"]
     }
   ],
   "microserviceName": "professionalService",

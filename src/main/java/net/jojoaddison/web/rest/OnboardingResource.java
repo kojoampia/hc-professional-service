@@ -92,6 +92,18 @@ public class OnboardingResource {
             .toList();
     }
 
+    public record AcknowledgementStatus(boolean acknowledged) {}
+
+    @GetMapping("/acknowledgement")
+    public AcknowledgementStatus acknowledgementStatus() {
+        return new AcknowledgementStatus(onboardingService.hasAcknowledgedFirstLogin(currentAccountId()));
+    }
+
+    @PostMapping("/acknowledgement")
+    public ResponseEntity<OnboardingEvent> acknowledge() {
+        return ResponseEntity.status(HttpStatus.CREATED).body(onboardingService.acknowledgeFirstLogin(currentAccountId()));
+    }
+
     @GetMapping("/applications/me")
     public ProfessionalApplication getOwnApplication() {
         return onboardingService.getOwnApplication(currentAccountId());

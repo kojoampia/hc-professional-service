@@ -307,6 +307,43 @@ public class OnboardingService {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found"));
     }
 
+    /** Reason marker for the step-11 first-login acknowledgement event. */
+    public static final String ACKNOWLEDGEMENT_REASON = "first-login-acknowledgement";
+
+    /** First-login orientation (workflow step 11): recorded as an OnboardingEvent, idempotent. */
+    public OnboardingEvent acknowledgeFirstLogin(String accountId) {
+        ProfessionalApplication application = getOwnApplication(accountId);
+        boolean already = eventRepository
+            .findByApplicationIdOrderByAtAsc(application.getId())
+            .stream()
+            .anyMatch(event -> ACKNOWLEDGEMENT_REASON.equals(event.getReason()));
+        if (already) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Already acknowledged");
+        }
+        return eventRepository.save(
+            new OnboardingEvent()
+                .applicationId(application.getId())
+                .actor(accountId)
+                .fromStatus(application.getStatus())
+                .toStatus(application.getStatus())
+                .reason(ACKNOWLEDGEMENT_REASON)
+                .at(Instant.now())
+        );
+    }
+
+    public boolean hasAcknowledgedFirstLogin(String accountId) {
+        return applicationRepository
+            .findByAccountId(accountId)
+            .map(
+                application ->
+                    eventRepository
+                        .findByApplicationIdOrderByAtAsc(application.getId())
+                        .stream()
+                        .anyMatch(event -> ACKNOWLEDGEMENT_REASON.equals(event.getReason()))
+            )
+            .orElse(true); // no application -> nothing to acknowledge
+    }
+
     public List<OnboardingEvent> eventsFor(String applicationId) {
         return eventRepository.findByApplicationIdOrderByAtAsc(applicationId);
     }
