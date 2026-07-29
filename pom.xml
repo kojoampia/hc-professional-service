@@ -35,7 +35,8 @@
         <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
         <jib-maven-plugin.architecture>amd64</jib-maven-plugin.architecture>
         <jib-maven-plugin.image>eclipse-temurin:25-jre</jib-maven-plugin.image>
-        <jib-maven-plugin.version>3.4.1</jib-maven-plugin.version>
+        <!-- 3.4.1's bundled ASM cannot read Java 25 class files (major 69) -->
+        <jib-maven-plugin.version>3.4.6</jib-maven-plugin.version>
         <lifecycle-mapping.version>1.0.0</lifecycle-mapping.version>
         <mapstruct.version>1.6.0</mapstruct.version>
         <dropwizard-metrics.version>4.2.39</dropwizard-metrics.version>
@@ -411,6 +412,8 @@
                             </tags>
                         </to>
                         <container>
+                            <!-- explicit main class: Jib's ASM fallback scan cannot read Java 25 class files -->
+                            <mainClass>${start-class}</mainClass>
                             <entrypoint>
                                 <shell>bash</shell>
                                 <option>-c</option>
