@@ -71,6 +71,27 @@ public class OnboardingResource {
         return onboardingService.upsertOwnProfile(currentAccountId(), profile);
     }
 
+    @GetMapping("/applications")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
+    public List<ProfessionalApplication> listApplications(
+        @org.springframework.web.bind.annotation.RequestParam(value = "status", required = false) OnboardingStatus status
+    ) {
+        return onboardingService.listApplications(status);
+    }
+
+    @GetMapping("/applications/{id}/documents")
+    public List<net.jojoaddison.domain.PersonalDocument> applicationDocuments(@PathVariable String id) {
+        assertAdminOrOwner(onboardingService.getById(id));
+        return onboardingService
+            .documentsForApplication(id)
+            .stream()
+            .map(document -> {
+                document.setData(null);
+                return document;
+            })
+            .toList();
+    }
+
     @GetMapping("/applications/me")
     public ProfessionalApplication getOwnApplication() {
         return onboardingService.getOwnApplication(currentAccountId());

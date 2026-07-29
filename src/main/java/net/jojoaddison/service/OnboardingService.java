@@ -272,6 +272,41 @@ public class OnboardingService {
         return transition(getById(applicationId), target, actor, reason);
     }
 
+    public List<ProfessionalApplication> listApplications(OnboardingStatus status) {
+        if (status == null) {
+            return applicationRepository.findAll(
+                org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "submittedAt")
+            );
+        }
+        return applicationRepository.findByStatusOrderBySubmittedAtDesc(status);
+    }
+
+    /** Reviewer access to an application's documents; bytes stripped by the resource layer. */
+    public List<PersonalDocument> documentsForApplication(String applicationId) {
+        return documentsFor(getById(applicationId));
+    }
+
+    public PersonalDocument verifyDocument(String documentId, String actor) {
+        PersonalDocument document = requireDocument(documentId);
+        document.verificationStatus(VerificationStatus.VERIFIED).verifiedBy(actor).verifiedAt(Instant.now()).rejectionReason(null);
+        return personalDocumentRepository.save(document);
+    }
+
+    public PersonalDocument rejectDocument(String documentId, String reason, String actor) {
+        if (reason == null || reason.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Rejecting a document requires a reason");
+        }
+        PersonalDocument document = requireDocument(documentId);
+        document.verificationStatus(VerificationStatus.REJECTED).verifiedBy(actor).verifiedAt(Instant.now()).rejectionReason(reason);
+        return personalDocumentRepository.save(document);
+    }
+
+    private PersonalDocument requireDocument(String documentId) {
+        return personalDocumentRepository
+            .findById(documentId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found"));
+    }
+
     public List<OnboardingEvent> eventsFor(String applicationId) {
         return eventRepository.findByApplicationIdOrderByAtAsc(applicationId);
     }

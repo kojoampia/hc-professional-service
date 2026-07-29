@@ -11,4 +11,6 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface ProfessionalApplicationRepository extends MongoRepository<ProfessionalApplication, String> {
     Optional<ProfessionalApplication> findByAccountId(String accountId);
+
+    java.util.List<ProfessionalApplication> findByStatusOrderBySubmittedAtDesc(net.jojoaddison.domain.enumeration.OnboardingStatus status);
 }

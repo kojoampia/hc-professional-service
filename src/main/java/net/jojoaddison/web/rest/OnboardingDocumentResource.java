@@ -16,6 +16,7 @@ import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.security.AuthoritiesConstants;
 import net.jojoaddison.security.SecurityUtils;
+import net.jojoaddison.service.OnboardingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -54,14 +55,18 @@ public class OnboardingDocumentResource {
     private final ProfileRepository profileRepository;
     private final DomainEventPublisher domainEventPublisher;
 
+    private final OnboardingService onboardingService;
+
     public OnboardingDocumentResource(
         PersonalDocumentRepository personalDocumentRepository,
         ProfileRepository profileRepository,
-        DomainEventPublisher domainEventPublisher
+        DomainEventPublisher domainEventPublisher,
+        OnboardingService onboardingService
     ) {
         this.personalDocumentRepository = personalDocumentRepository;
         this.profileRepository = profileRepository;
         this.domainEventPublisher = domainEventPublisher;
+        this.onboardingService = onboardingService;
     }
 
     @PostMapping
@@ -110,6 +115,28 @@ public class OnboardingDocumentResource {
                 return document;
             })
             .toList();
+    }
+
+    public record RejectRequest(String reason) {}
+
+    @org.springframework.web.bind.annotation.PutMapping("/{id}/verify")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
+    public PersonalDocument verify(@PathVariable String id) {
+        PersonalDocument document = onboardingService.verifyDocument(id, currentLogin());
+        document.setData(null);
+        return document;
+    }
+
+    @org.springframework.web.bind.annotation.PutMapping("/{id}/reject")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
+    public PersonalDocument reject(@PathVariable String id, @org.springframework.web.bind.annotation.RequestBody RejectRequest request) {
+        PersonalDocument document = onboardingService.rejectDocument(id, request.reason(), currentLogin());
+        document.setData(null);
+        return document;
+    }
+
+    private String currentLogin() {
+        return SecurityUtils.getCurrentUserLogin().orElse("system");
     }
 
     @GetMapping("/{id}/content")
