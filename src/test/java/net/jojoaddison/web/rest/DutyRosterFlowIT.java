@@ -105,6 +105,28 @@ class DutyRosterFlowIT {
     }
 
     @Test
+    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    void dayAndFlexibleShiftsRoundTrip() throws Exception {
+        restMockMvc
+            .perform(
+                post("/api/onboarding/duty-rosters")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(assignmentJson().replace("\"NIGHT\"", "\"DAY\""))
+            )
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.shift").value("DAY"));
+        restMockMvc
+            .perform(
+                post("/api/onboarding/duty-rosters")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(assignmentJson().replace("\"NIGHT\"", "\"FLEXIBLE\""))
+            )
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.shift").value("FLEXIBLE"));
+        restMockMvc.perform(get("/api/onboarding/duty-rosters")).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
+    }
+
+    @Test
     @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
     void professionalsCannotAssignOrListAll() throws Exception {
         restMockMvc
