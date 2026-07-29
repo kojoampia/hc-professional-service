@@ -9,8 +9,9 @@
   "entityTableName": "profile",
   "fields": [
     {
-      "fieldName": "id",
-      "fieldType": "String"
+      "fieldName": "accountId",
+      "fieldType": "String",
+      "fieldValidateRules": ["unique"]
     },
     {
       "fieldName": "firstName",
@@ -22,10 +23,6 @@
     },
     {
       "fieldName": "lastName",
-      "fieldType": "String"
-    },
-    {
-      "fieldName": "team",
       "fieldType": "String"
     },
     {
@@ -49,15 +46,11 @@
       "fieldType": "String"
     },
     {
-      "fieldName": "idType",
+      "fieldName": "cardType",
       "fieldType": "String"
     },
     {
-      "fieldName": "idNumber",
-      "fieldType": "String"
-    },
-    {
-      "fieldName": "documents",
+      "fieldName": "cardNumber",
       "fieldType": "String"
     },
     {
@@ -65,19 +58,19 @@
       "fieldType": "String"
     },
     {
-      "fieldName": "bankAccount",
+      "fieldName": "title",
       "fieldType": "String"
     },
     {
-      "fieldName": "tenantId",
+      "fieldName": "emergencyContact",
       "fieldType": "String"
     },
     {
-      "fieldName": "rosterId",
+      "fieldName": "specialtyCategoryId",
       "fieldType": "String"
     },
     {
-      "fieldName": "teamId",
+      "fieldName": "teamIds",
       "fieldType": "String"
     }
   ],
@@ -87,5 +80,5 @@
   "readOnly": false,
   "relationships": [],
   "searchEngine": "no",
-  "service": "serviceClass"
+  "service": "no"
 }

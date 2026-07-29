@@ -17,13 +17,13 @@
     },
     {
       "fieldName": "data",
-      "fieldType": "ByteBuffer",
-      "fieldTypeBlobContent": "data"
+      "fieldType": "byte[]",
+      "fieldTypeBlobContent": "any"
     },
     {
       "fieldName": "type",
       "fieldType": "DocumentType",
-      "fieldValues": "PASSPORT,CERTIFICATE,GHANACARD,PASSPHOTO,DRIVERLICENSE,VOTERCARD,NHIS,OTHER"
+      "fieldValues": "PASSPORT,CERTIFICATE,LICENSE,GHANACARD,PASSPHOTO,DRIVERLICENSE,VOTERCARD,NHIS,OTHER"
     },
     {
       "fieldName": "createdDate",
@@ -34,11 +34,40 @@
       "fieldType": "LocalDate"
     },
     {
-      "fieldName": "createdBy",
+      "fieldName": "lastModifiedBy",
       "fieldType": "String"
     },
     {
-      "fieldName": "modifiedBy",
+      "fieldName": "sha256Checksum",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "sizeBytes",
+      "fieldType": "Long"
+    },
+    {
+      "fieldName": "otherLabel",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "expiryDate",
+      "fieldType": "LocalDate"
+    },
+    {
+      "fieldName": "verificationStatus",
+      "fieldType": "VerificationStatus",
+      "fieldValues": "PENDING,VERIFIED,REJECTED"
+    },
+    {
+      "fieldName": "verifiedBy",
+      "fieldType": "String"
+    },
+    {
+      "fieldName": "verifiedAt",
+      "fieldType": "Instant"
+    },
+    {
+      "fieldName": "rejectionReason",
       "fieldType": "String"
     }
   ],
@@ -48,5 +77,5 @@
   "readOnly": false,
   "relationships": [],
   "searchEngine": "no",
-  "service": "serviceClass"
+  "service": "no"
 }

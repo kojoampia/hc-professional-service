@@ -27,7 +27,14 @@ Server port: **8081** (dev).
 - `web/rest/` — one CRUD `*Resource` per generated entity, plus the hand-written `OnboardingResource`, `OnboardingDocumentResource`, `DutyRosterResource`, `ComplianceResource`, and `professionalServiceKafkaResource` (note the lowercase-p class name — existing quirk).
 - `service/` — thin for the **generated** entities (most `*Resource` classes call repositories directly; don't introduce a DTO/mapper layer that isn't there), but the onboarding domain has real services: `OnboardingService` (state machine, see below), `ComplianceService` + `ComplianceScheduler`, `PersonalDocumentService`, `ProfileService`. Follow whichever pattern the area you're touching already uses.
 - `broker/` — `KafkaConsumer`/`KafkaProducer` scaffold plus `DomainEventPublisher` and `DomainEventEnvelope` (see § Domain events).
-- `.jhipster/*.json` — JHipster entity definitions. `DutyRoster` was generated in WP6 (with `patientId` dropped and the enum corrected — the JDL's `MEDIC`/`VENDOR`/`ADMINISTRATOR` values are gone). **`Patient.json` still has no generated classes** — it is a planned entity, not a dead reference.
+- `.jhipster/*.json` — JHipster entity definitions, kept in sync with the domain classes as of 2026-07-30. `DutyRoster` was generated in WP6 (with `patientId` dropped and the enum corrected — the JDL's `MEDIC`/`VENDOR`/`ADMINISTRATOR` values are gone). `Patient.json` was removed: it was a mislabelled copy of an outdated `Profile` (internal `name` was `Profile`), and `Patient` belongs to `patientService`, a backend not in this workspace.
+
+  **Do not regenerate entities from these definitions without reading this first.** They describe the fields accurately, but regeneration still destroys hand-written code the templates know nothing about:
+
+  - Every `*Resource` injects `DomainEventPublisher` for WP3 `entity.created` publishing; the generated template injects only the repository. Regenerating any entity silently drops the event wiring and fails `DomainEventsKafkaIT`.
+  - `ProfileRepository` (`findByAccountId`, `findByEmail`), `PersonalDocumentRepository` (`findByProfileId`, `findByTypeAndExpiryDateLessThan` — the compliance sweep) and `DutyRosterRepository` (two ordering finders) carry hand-added methods that generation deletes.
+  - Three `Profile` fields and one on `Team` cannot be expressed in this format and are stored as `String` approximations: `Profile.address` (embedded `Address`), `Profile.emergencyContact` (embedded `EmergencyContact`), `Profile.teamIds` and `Team.members` (both `List<String>`). Regenerating those two entities would emit `String` and break their consumers.
+  - `dto` and `service` are deliberately `no` on every entity. Setting `dto: mapstruct` or `service: serviceClass` makes the generator create a DTO/mapper/service layer this repo does not use, and overwrite the hand-written `ProfileService`/`PersonalDocumentService`.
 
 ## Onboarding: the part that isn't generated code
 

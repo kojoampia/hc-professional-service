@@ -4,7 +4,7 @@
   },
   "clientRootFolder": "professionalService",
   "databaseType": "mongodb",
-  "dto": "mapstruct",
+  "dto": "no",
   "fields": [
     {
       "fieldName": "date",
@@ -44,5 +44,5 @@
   "readOnly": false,
   "relationships": [],
   "searchEngine": "no",
-  "service": "serviceClass"
+  "service": "no"
 }
