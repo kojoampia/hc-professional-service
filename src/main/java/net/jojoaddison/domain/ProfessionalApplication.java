@@ -62,6 +62,10 @@ public class ProfessionalApplication extends AbstractAuditingEntity<String> impl
     @Field("correction_notes")
     private String correctionNotes;
 
+    /** Acquisition attribution, e.g. "web-careers" (careers handoff contract §3). */
+    @Field("source")
+    private String source;
+
     @Override
     public String getId() {
         return this.id;
@@ -219,6 +223,19 @@ public class ProfessionalApplication extends AbstractAuditingEntity<String> impl
         this.decisionReason = decisionReason;
     }
 
+    public String getSource() {
+        return this.source;
+    }
+
+    public ProfessionalApplication source(String source) {
+        this.source = source;
+        return this;
+    }
+
+    public void setSource(String source) {
+        this.source = source;
+    }
+
     public String getCorrectionNotes() {
         return this.correctionNotes;
     }
@@ -261,6 +278,7 @@ public class ProfessionalApplication extends AbstractAuditingEntity<String> impl
                 ", submittedAt='" + getSubmittedAt() + "'" +
                 ", decidedBy='" + getDecidedBy() + "'" +
                 ", decidedAt='" + getDecidedAt() + "'" +
+                ", source='" + getSource() + "'" +
                 "}";
     }
 }

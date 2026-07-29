@@ -39,7 +39,7 @@ public class OnboardingResource {
         this.onboardingService = onboardingService;
     }
 
-    public record StartApplicationRequest(String requestedRole, boolean consentAccepted) {}
+    public record StartApplicationRequest(String requestedRole, boolean consentAccepted, String source) {}
 
     public record DecisionRequest(OnboardingStatus decision, String reason, String correctionNotes) {}
 
@@ -55,7 +55,8 @@ public class OnboardingResource {
             accountId,
             request.requestedRole(),
             request.consentAccepted(),
-            null
+            null,
+            request.source()
         );
         return ResponseEntity.status(HttpStatus.CREATED).body(application);
     }

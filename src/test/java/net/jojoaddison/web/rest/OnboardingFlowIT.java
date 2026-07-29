@@ -149,6 +149,25 @@ class OnboardingFlowIT {
     }
 
     @Test
+    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    void attributionSourcePersistsTruncatedAndOptional() throws Exception {
+        String longSource = "web-careers-" + "x".repeat(100);
+        restMockMvc
+            .perform(
+                post("/api/onboarding/applications")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"requestedRole\":\"ROLE_NURSE\",\"consentAccepted\":true,\"source\":\"" + longSource + "\"}")
+            )
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.source").value(longSource.substring(0, 64)));
+
+        // absent source stays null (graceful degradation for direct visitors)
+        applicationRepository.deleteAll();
+        startApplication();
+        assertThat(applicationRepository.findByAccountId(APPLICANT).orElseThrow().getSource()).isNull();
+    }
+
+    @Test
     @WithMockUser(username = "fresh-applicant", authorities = { "ROLE_USER" })
     void applicantUpsertsOwnProfileThroughOnboardingSurface() throws Exception {
         restMockMvc

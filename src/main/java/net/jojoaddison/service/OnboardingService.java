@@ -112,7 +112,13 @@ public class OnboardingService {
         this.domainEventPublisher = domainEventPublisher;
     }
 
-    public ProfessionalApplication startApplication(String accountId, String requestedRole, boolean consentAccepted, String invitedBy) {
+    public ProfessionalApplication startApplication(
+        String accountId,
+        String requestedRole,
+        boolean consentAccepted,
+        String invitedBy,
+        String source
+    ) {
         if (!consentAccepted) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Consent must be accepted to start an application");
         }
@@ -129,6 +135,7 @@ public class OnboardingService {
                 .status(OnboardingStatus.APPLICATION_STARTED)
                 .consentAcceptedAt(Instant.now())
                 .invitedBy(invitedBy)
+                .source(normalizeSource(source))
         );
         appendEvent(application, null, OnboardingStatus.APPLICATION_STARTED, "application started");
         domainEventPublisher.publishEntityCreated(
@@ -177,6 +184,15 @@ public class OnboardingService {
             );
         }
         return saved;
+    }
+
+    /** Attribution is a short opaque label; cap it so the field can't be abused as free storage. */
+    private String normalizeSource(String source) {
+        if (source == null || source.isBlank()) {
+            return null;
+        }
+        String trimmed = source.trim();
+        return trimmed.length() > 64 ? trimmed.substring(0, 64) : trimmed;
     }
 
     public Profile getOwnProfile(String accountId) {
