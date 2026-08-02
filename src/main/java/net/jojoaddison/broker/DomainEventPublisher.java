@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import net.jojoaddison.config.ApplicationProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cloud.stream.function.StreamBridge;
@@ -17,6 +18,10 @@ import org.springframework.stereotype.Component;
  * Records are keyed by entityId so per-entity ordering holds; delivery is
  * at-least-once and consumers dedupe on eventId. Publishing must never break
  * the write path — failures are logged, not propagated.
+ * <p>
+ * Deployments that run no broker set {@code application.kafka.enabled=false}; see
+ * {@link ApplicationProperties.Kafka} for why the absence of Kafka has to be stated rather than
+ * discovered.
  */
 @Component
 public class DomainEventPublisher {
@@ -27,9 +32,40 @@ public class DomainEventPublisher {
     private static final Logger log = LoggerFactory.getLogger(DomainEventPublisher.class);
 
     private final StreamBridge streamBridge;
+    private final boolean enabled;
 
-    public DomainEventPublisher(StreamBridge streamBridge) {
+    public DomainEventPublisher(StreamBridge streamBridge, ApplicationProperties properties) {
         this.streamBridge = streamBridge;
+        this.enabled = properties.getKafka().isEnabled();
+        if (!enabled) {
+            log.info(
+                "Domain event publishing is disabled (application.kafka.enabled=false); " +
+                "entity.created and compliance.alert will not be emitted"
+            );
+        }
+    }
+
+    /**
+     * Sends the envelope, or does nothing at all when publishing is disabled.
+     * <p>
+     * Returning before {@code streamBridge.send} is what makes this quiet: StreamBridge creates the
+     * producer binding lazily, on first send, so never sending means the binding is never created
+     * and {@code BindingService} never enters its 30-second retry loop. Suppressing the log without
+     * suppressing the call would have fixed the per-write ERROR and left the retry loop running.
+     */
+    private void publish(String eventType, String entityId, DomainEventEnvelope envelope, String subject) {
+        if (!enabled) {
+            log.debug("Skipping {} for {} — publishing disabled", eventType, subject);
+            return;
+        }
+        try {
+            streamBridge.send(
+                ENTITY_TOPIC_BINDING,
+                MessageBuilder.withPayload(envelope).setHeader(KafkaHeaders.KEY, entityId.getBytes()).build()
+            );
+        } catch (RuntimeException e) {
+            log.error("Failed to publish {} for {}", eventType, subject, e);
+        }
     }
 
     public void publishEntityCreated(String entityType, String entityId, String accountId, String actor) {
@@ -47,14 +83,7 @@ public class DomainEventPublisher {
             actor,
             payload
         );
-        try {
-            streamBridge.send(
-                ENTITY_TOPIC_BINDING,
-                MessageBuilder.withPayload(envelope).setHeader(KafkaHeaders.KEY, entityId.getBytes()).build()
-            );
-        } catch (RuntimeException e) {
-            log.error("Failed to publish entity.created for {} {}", entityType, entityId, e);
-        }
+        publish("entity.created", entityId, envelope, entityType + " " + entityId);
     }
 
     /** WP7 compliance sweep: same topic and envelope, eventType {@code compliance.alert}. */
@@ -73,13 +102,6 @@ public class DomainEventPublisher {
             actor,
             payload
         );
-        try {
-            streamBridge.send(
-                ENTITY_TOPIC_BINDING,
-                MessageBuilder.withPayload(envelope).setHeader(KafkaHeaders.KEY, entityId.getBytes()).build()
-            );
-        } catch (RuntimeException e) {
-            log.error("Failed to publish compliance.alert for {} {}", alertType, entityId, e);
-        }
+        publish("compliance.alert", entityId, envelope, alertType + " " + entityId);
     }
 }
