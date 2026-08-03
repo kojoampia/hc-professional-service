@@ -104,9 +104,9 @@ spring:
     consul:
       discovery:
         healthCheckPath: /management/health
-        instanceId: professionalService:${spring.application.instance-id:${random.value}}
-        # must match the frontend contract path /services/professionalService/**
-        service-name: professionalService
+        instanceId: professionalservice:${spring.application.instance-id:${random.value}}
+        # must match the frontend contract path /services/professionalservice/**
+        service-name: professionalservice
       config:
         watch:
           enabled: false

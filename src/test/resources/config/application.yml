@@ -24,7 +24,7 @@ mongock:
 
 spring:
   application:
-    name: professionalService
+    name: professionalservice
   cloud:
     consul:
       discovery:
