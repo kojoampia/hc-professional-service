@@ -130,6 +130,15 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-security</artifactId>
         </dependency>
+        <!--
+            STOMP over WebSocket, for the message.created push. Chosen over a raw socket because
+            per-user destinations (/user/queue/messages) come with it, so routing a notification to
+            one account is framework-level rather than hand-rolled session bookkeeping.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

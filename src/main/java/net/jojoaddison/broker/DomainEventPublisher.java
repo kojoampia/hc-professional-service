@@ -104,4 +104,32 @@ public class DomainEventPublisher {
         );
         publish("compliance.alert", entityId, envelope, alertType + " " + entityId);
     }
+
+    /**
+     * Messaging: one event per recipient of a new message, eventType {@code message.created}.
+     * <p>
+     * The payload is identifiers only — no subject, no body, no sender name. That is not a
+     * formality here: it is what makes the second half of the flow necessary rather than optional.
+     * A client learns only that something arrived for it and must then fetch the message through
+     * the authorized read path, so the broker never carries clinical correspondence and a consumer
+     * that should not see a message cannot see it by reading the topic.
+     * <p>
+     * Keyed by {@code recipientId} rather than message id, so everything destined for one account
+     * lands on one partition and arrives in order.
+     */
+    public void publishMessageCreated(String messageId, String conversationId, String recipientId, String actor) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("messageId", messageId);
+        payload.put("conversationId", conversationId);
+        payload.put("recipientId", recipientId);
+        DomainEventEnvelope envelope = new DomainEventEnvelope(
+            UUID.randomUUID().toString(),
+            "message.created",
+            Instant.now(),
+            SOURCE,
+            actor,
+            payload
+        );
+        publish("message.created", recipientId, envelope, "message " + messageId + " for " + recipientId);
+    }
 }

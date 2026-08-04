@@ -112,6 +112,11 @@ spring:
           enabled: false
     #    function:
     #      definition: kafkaConsumer; kafkaProducer
+    function:
+      # Only the messaging consumer is declared. The generated kafkaConsumer/kafkaProducer scaffold
+      # stays dormant, and DomainEventPublisher's producer binding is created by StreamBridge rather
+      # than by a declared function.
+      definition: messageEvents
     stream:
       kafka:
         binder:
@@ -132,6 +137,16 @@ spring:
         entityEvents-out-0:
           destination: hc.professional.entity
           content-type: application/json
+        # Consumes the same topic this service publishes to, so a message.created event becomes a
+        # websocket nudge for its recipient. A group is set on purpose: with one, a multi-instance
+        # deployment delivers each event to a single instance. That is correct only while every
+        # instance can reach every session — today there is one instance and an in-memory STOMP
+        # broker, so if this is ever scaled out either drop the group (every instance sees every
+        # event and pushes to whoever it holds) or put a real broker relay behind STOMP.
+        messageEvents-in-0:
+          destination: hc.professional.entity
+          content-type: application/json
+          group: hc-professional-ms-messaging
   profiles:
     # The commented value for `active` can be replaced with valid Spring profiles to load.
     # Otherwise, it will be filled in by maven when building the JAR file

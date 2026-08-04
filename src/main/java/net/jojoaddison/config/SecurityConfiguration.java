@@ -41,6 +41,14 @@ public class SecurityConfiguration {
                     // endpoints stay open to authenticated users, with admin-only decisions
                     // enforced via method security on OnboardingResource.
                     .requestMatchers("/api/onboarding/**").authenticated()
+                    // Messaging is correspondence, not clinical data. Under the POST /api/** rule
+                    // below, carer/angel/chemist/technician could receive a message and never
+                    // answer one; this is the same exception onboarding already makes.
+                    .requestMatchers("/api/messaging/**").authenticated()
+                    // The STOMP handshake carries no Authorization header (browsers cannot set one
+                    // on a WebSocket upgrade). It is authenticated on the CONNECT frame instead —
+                    // see WebsocketConfiguration — so the handshake itself is left open.
+                    .requestMatchers("/websocket/**").permitAll()
                     .requestMatchers(HttpMethod.POST, "/api/**").hasAnyAuthority(AuthoritiesConstants.CLINICAL_MUTATION)
                     .requestMatchers(HttpMethod.PUT, "/api/**").hasAnyAuthority(AuthoritiesConstants.CLINICAL_MUTATION)
                     .requestMatchers(HttpMethod.PATCH, "/api/**").hasAnyAuthority(AuthoritiesConstants.CLINICAL_MUTATION)
