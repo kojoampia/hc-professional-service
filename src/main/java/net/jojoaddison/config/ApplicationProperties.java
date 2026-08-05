@@ -61,9 +61,16 @@ public class ApplicationProperties {
     /**
      * Push notification settings (MOB9).
      *
-     * <p>Disabled by default, mirroring {@link Kafka}: a stack with no Firebase project must start
+     * <p>Disabled by default, mirroring {@link Kafka}: a stack with no push credentials must start
      * cleanly rather than log a stack trace per event. Absence of credentials is a supported
      * configuration, not a failure.
+     *
+     * <p><b>Two transports, on purpose.</b> iOS goes straight to APNs and Android goes through FCM.
+     * Apple offers no alternative to APNs and Google effectively none to FCM on certified devices,
+     * but neither requires Firebase on the iOS side — and {@code @capacitor/push-notifications}
+     * hands back a raw APNs token there anyway, which FCM would reject. Talking to APNs directly
+     * therefore removes a middleman rather than adding a credential: the same .p8 key would have to
+     * be uploaded to Firebase to reach iOS regardless.
      */
     public static class Notifications {
 
@@ -77,13 +84,13 @@ public class ApplicationProperties {
 
             /**
              * Defaults to FALSE, unlike kafka.enabled. Kafka has always been part of the shipped
-             * configuration; Firebase is not, and enabling push without credentials would produce
-             * a warning per event on every deployment that has not set one up.
+             * configuration; push credentials are not, and enabling push without them would warn
+             * on every event for every deployment that has not set one up.
              */
             private boolean enabled = false;
 
-            /** Path to the Firebase service-account JSON. Empty falls back to GOOGLE_APPLICATION_CREDENTIALS. */
-            private String credentialsPath = "";
+            private final Fcm fcm = new Fcm();
+            private final Apns apns = new Apns();
 
             public boolean isEnabled() {
                 return enabled;
@@ -93,12 +100,98 @@ public class ApplicationProperties {
                 this.enabled = enabled;
             }
 
-            public String getCredentialsPath() {
-                return credentialsPath;
+            public Fcm getFcm() {
+                return fcm;
             }
 
-            public void setCredentialsPath(String credentialsPath) {
-                this.credentialsPath = credentialsPath;
+            public Apns getApns() {
+                return apns;
+            }
+
+            /** Android. */
+            public static class Fcm {
+
+                /** Service-account JSON. Empty falls back to GOOGLE_APPLICATION_CREDENTIALS. */
+                private String credentialsPath = "";
+
+                public String getCredentialsPath() {
+                    return credentialsPath;
+                }
+
+                public void setCredentialsPath(String credentialsPath) {
+                    this.credentialsPath = credentialsPath;
+                }
+            }
+
+            /** iOS, spoken directly rather than through Firebase. */
+            public static class Apns {
+
+                /** Path to the .p8 token-signing key downloaded from the Apple developer portal. */
+                private String keyPath = "";
+
+                /** The 10-character Key ID that accompanies the .p8. */
+                private String keyId = "";
+
+                /** The 10-character Apple Team ID. */
+                private String teamId = "";
+
+                /** APNs topic — the app's bundle id. */
+                private String bundleId = "com.abofonsa.bridgecare.professional";
+
+                /**
+                 * True targets api.push.apple.com, false the sandbox.
+                 *
+                 * <p>This is the classic APNs foot-gun: a TestFlight or debug build registers with
+                 * the sandbox, and sending its token to the production host returns
+                 * {@code BadDeviceToken} — which looks exactly like an expired token. Set it to
+                 * match the build you are testing.
+                 */
+                private boolean production = true;
+
+                public String getKeyPath() {
+                    return keyPath;
+                }
+
+                public void setKeyPath(String keyPath) {
+                    this.keyPath = keyPath;
+                }
+
+                public String getKeyId() {
+                    return keyId;
+                }
+
+                public void setKeyId(String keyId) {
+                    this.keyId = keyId;
+                }
+
+                public String getTeamId() {
+                    return teamId;
+                }
+
+                public void setTeamId(String teamId) {
+                    this.teamId = teamId;
+                }
+
+                public String getBundleId() {
+                    return bundleId;
+                }
+
+                public void setBundleId(String bundleId) {
+                    this.bundleId = bundleId;
+                }
+
+                public boolean isProduction() {
+                    return production;
+                }
+
+                public void setProduction(boolean production) {
+                    this.production = production;
+                }
+
+                /** Usable only when every piece of the credential is present. */
+                public boolean isConfigured() {
+                    return !keyPath.isBlank() && !keyId.isBlank() && !teamId.isBlank() && !bundleId.isBlank();
+                }
             }
         }
     }

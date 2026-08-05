@@ -271,8 +271,21 @@ jhipster:
 application:
   notifications:
     push:
-      # Off by default: a stack with no Firebase project must start cleanly rather than warn per
-      # event. Production turns it on and mounts a service-account JSON — see deploy/.
+      # Off by default: a stack with no push credentials must start cleanly rather than warn per
+      # event. Production turns it on and mounts the credentials — see deploy/.
       enabled: false
-      # Empty falls back to GOOGLE_APPLICATION_CREDENTIALS, which is how the container is wired.
-      credentials-path: ''
+      # Android. Empty falls back to GOOGLE_APPLICATION_CREDENTIALS, which is how the container
+      # is wired.
+      fcm:
+        credentials-path: ''
+      # iOS, spoken directly rather than through Firebase — @capacitor/push-notifications registers
+      # with APNs on iOS, so the token it returns is an APNs token that FCM would reject.
+      apns:
+        key-path: ''
+        key-id: ''
+        team-id: ''
+        bundle-id: com.abofonsa.bridgecare.professional
+        # true = api.push.apple.com, false = the sandbox. A TestFlight or debug build registers
+        # with the sandbox and its token returns BadDeviceToken against production — which looks
+        # exactly like an expired token. Match this to the build you are testing.
+        production: true

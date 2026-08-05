@@ -21,8 +21,8 @@ import org.springframework.context.annotation.Configuration;
  * {@code PushNotificationService} takes an {@code ObjectProvider}, so its absence is expected
  * rather than an injection failure.
  *
- * <p>APNs is reached through FCM — the APNs auth key is uploaded to the Firebase console — so this
- * one credential covers both platforms.
+ * <p><b>Android only.</b> iOS is served by {@code ApnsClient} talking to Apple directly, so no
+ * Firebase project configuration ships in the iOS app.
  */
 @Configuration
 @ConditionalOnProperty(prefix = "application.notifications.push", name = "enabled", havingValue = "true")
@@ -43,7 +43,7 @@ public class FirebaseConfiguration {
             return FirebaseApp.getInstance();
         }
 
-        String path = applicationProperties.getNotifications().getPush().getCredentialsPath();
+        String path = applicationProperties.getNotifications().getPush().getFcm().getCredentialsPath();
         GoogleCredentials credentials;
         if (path == null || path.isBlank()) {
             // Falls back to GOOGLE_APPLICATION_CREDENTIALS, which is how the container is wired.

@@ -2,9 +2,6 @@ package net.jojoaddison.service;
 
 import com.google.firebase.messaging.AndroidConfig;
 import com.google.firebase.messaging.AndroidNotification;
-import com.google.firebase.messaging.ApnsConfig;
-import com.google.firebase.messaging.Aps;
-import com.google.firebase.messaging.ApsAlert;
 import com.google.firebase.messaging.BatchResponse;
 import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.firebase.messaging.MulticastMessage;
@@ -13,6 +10,7 @@ import com.google.firebase.messaging.SendResponse;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import net.jojoaddison.config.ApplicationProperties;
 import net.jojoaddison.domain.DeviceToken;
 import net.jojoaddison.repository.DeviceTokenRepository;
@@ -22,11 +20,14 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 /**
- * Sends push notifications through FCM.
+ * Sends push notifications: FCM for Android, APNs directly for iOS.
  *
- * <p><b>APNs goes through FCM too.</b> Uploading the APNs auth key into the Firebase console gives
- * one code path, one credential and one retry policy; a separate APNs HTTP/2 client would be a
- * week of work for no behavioural gain.
+ * <p><b>Why the split.</b> {@code @capacitor/push-notifications} uses the FCM SDK on Android but
+ * registers with APNs on iOS, so an iPhone hands back a raw APNs device token. FCM rejects those
+ * with {@code INVALID_ARGUMENT} — the same code a genuinely dead token produces — so sending every
+ * platform through FCM would have pruned each iOS device after its first notification, silently and
+ * permanently. Reaching iOS through FCM would in any case require uploading the same .p8 key to
+ * Firebase, so {@link ApnsClient} removes a hop rather than adding a credential.
  *
  * <p><b>Absence of credentials is a supported configuration, not a failure.</b>
  * {@code application.notifications.push.enabled} defaults to false and this returns before touching
@@ -46,11 +47,22 @@ public class PushNotificationService {
     /** FCM's per-request ceiling. Realistically a clinician has one to three devices. */
     private static final int MAX_TOKENS_PER_REQUEST = 500;
 
-    /** Errors that mean the token is dead rather than the send being transiently broken. */
-    private static final List<String> DEAD_TOKEN_ERRORS = List.of("UNREGISTERED", "INVALID_ARGUMENT", "SENDER_ID_MISMATCH");
+    /**
+     * FCM errors that mean the token is dead rather than the send being transiently broken.
+     *
+     * <p>{@code INVALID_ARGUMENT} is deliberately <em>not</em> here. FCM returns it both for a
+     * malformed token and for a malformed <em>message</em>, so treating it as fatal to the token
+     * would let one bad payload field disable every Android device in the estate. A token that is
+     * genuinely gone reports {@code UNREGISTERED}.
+     */
+    private static final List<String> DEAD_TOKEN_ERRORS = List.of("UNREGISTERED", "SENDER_ID_MISMATCH");
+
+    /** {@link DeviceToken#getPlatform()} value that routes to APNs. Anything else goes to FCM. */
+    private static final String IOS = "IOS";
 
     private final DeviceTokenRepository deviceTokenRepository;
     private final ApplicationProperties.Notifications.Push properties;
+    private final ApnsClient apnsClient;
 
     /**
      * Resolved lazily so the application starts without a Firebase project. With push disabled the
@@ -61,10 +73,12 @@ public class PushNotificationService {
     public PushNotificationService(
         DeviceTokenRepository deviceTokenRepository,
         ApplicationProperties applicationProperties,
+        ApnsClient apnsClient,
         ObjectProvider<FirebaseMessaging> firebaseMessaging
     ) {
         this.deviceTokenRepository = deviceTokenRepository;
         this.properties = applicationProperties.getNotifications().getPush();
+        this.apnsClient = apnsClient;
         this.firebaseMessaging = firebaseMessaging;
     }
 
@@ -93,22 +107,65 @@ public class PushNotificationService {
             return;
         }
 
+        List<DeviceToken> devices = deviceTokenRepository.findAllByAccountIdAndDisabledAtIsNull(accountId);
+        if (devices.isEmpty()) {
+            return;
+        }
+
+        Map<Boolean, List<DeviceToken>> byTransport = devices
+            .stream()
+            .collect(Collectors.partitioningBy(device -> IOS.equalsIgnoreCase(device.getPlatform())));
+
+        sendViaApns(byTransport.get(true), payload);
+        sendViaFcm(byTransport.get(false), accountId, payload);
+    }
+
+    /** iOS — one request per device; APNs has no multicast. */
+    private void sendViaApns(List<DeviceToken> devices, PushPayload payload) {
+        if (devices.isEmpty()) {
+            return;
+        }
+        if (!apnsClient.isConfigured()) {
+            log.warn("Push is enabled but APNs is not configured — {} iOS device(s) will not be notified", devices.size());
+            return;
+        }
+        for (DeviceToken device : devices.stream().limit(MAX_TOKENS_PER_REQUEST).toList()) {
+            try {
+                ApnsClient.ApnsResult result = apnsClient.send(
+                    device.getToken(),
+                    payload.fallbackTitle(),
+                    payload.fallbackBody(),
+                    payload.collapseKey(),
+                    payload.data()
+                );
+                if (result.tokenIsDead()) {
+                    disable(device, result.reason());
+                }
+            } catch (Exception e) {
+                // Per device, and inside the loop: one unreachable handset must not cost the
+                // clinician's other devices, and neither transport may silence the other.
+                log.error("APNs send failed for {}", device.getAccountId(), e);
+            }
+        }
+    }
+
+    /** Android — one multicast request for the account's devices. */
+    private void sendViaFcm(List<DeviceToken> devices, String accountId, PushPayload payload) {
+        if (devices.isEmpty()) {
+            return;
+        }
         FirebaseMessaging messaging = firebaseMessaging.getIfAvailable();
         if (messaging == null) {
             log.warn("Push is enabled but no FirebaseMessaging bean is available — check GOOGLE_APPLICATION_CREDENTIALS");
             return;
         }
 
-        List<DeviceToken> devices = deviceTokenRepository.findAllByAccountIdAndDisabledAtIsNull(accountId);
-        if (devices.isEmpty()) {
-            return;
-        }
-
-        List<String> tokens = devices.stream().map(DeviceToken::getToken).limit(MAX_TOKENS_PER_REQUEST).toList();
+        List<DeviceToken> targets = devices.stream().limit(MAX_TOKENS_PER_REQUEST).toList();
+        List<String> tokens = targets.stream().map(DeviceToken::getToken).toList();
 
         try {
             BatchResponse response = messaging.sendEachForMulticast(build(tokens, payload));
-            pruneDeadTokens(devices, response);
+            pruneDeadTokens(targets, response);
         } catch (Exception e) {
             // Includes FirebaseMessagingException. A push that cannot be delivered is a degraded
             // notification, not a failed operation.
@@ -137,21 +194,7 @@ public class PushNotificationService {
                     )
                     .build()
             )
-            .setApnsConfig(
-                ApnsConfig.builder()
-                    .putHeader("apns-priority", "10")
-                    .putHeader("apns-collapse-id", payload.collapseKey())
-                    .setAps(
-                        Aps.builder()
-                            .setAlert(
-                                ApsAlert.builder().setTitleLocalizationKey(payload.titleKey()).setLocalizationKey(payload.bodyKey()).build()
-                            )
-                            .setSound("default")
-                            .setMutableContent(true)
-                            .build()
-                    )
-                    .build()
-            )
+            // No ApnsConfig: only Android tokens reach this builder. iOS is served by ApnsClient.
             .build();
     }
 
@@ -173,12 +216,18 @@ public class PushNotificationService {
                 : result.getException().getMessagingErrorCode().name();
 
             if (DEAD_TOKEN_ERRORS.contains(code)) {
-                DeviceToken device = devices.get(i);
-                device.setDisabledAt(Instant.now());
-                device.setDisabledReason(code);
-                deviceTokenRepository.save(device);
-                log.info("Disabled dead device token for {} ({})", device.getAccountId(), code);
+                disable(devices.get(i), code);
+            } else {
+                log.warn("FCM rejected a notification for {}: {}", devices.get(i).getAccountId(), code);
             }
         }
+    }
+
+    /** Takes a device out of the target set. Re-registering revives it — see DeviceTokenResource. */
+    private void disable(DeviceToken device, String reason) {
+        device.setDisabledAt(Instant.now());
+        device.setDisabledReason(reason);
+        deviceTokenRepository.save(device);
+        log.info("Disabled dead device token for {} ({})", device.getAccountId(), reason);
     }
 }
