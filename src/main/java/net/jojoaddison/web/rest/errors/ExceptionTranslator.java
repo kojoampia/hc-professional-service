@@ -30,6 +30,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.context.request.NativeWebRequest;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 import tech.jhipster.config.JHipsterConstants;
 import tech.jhipster.web.rest.errors.ProblemDetailWithCause;
@@ -204,6 +205,10 @@ public class ExceptionTranslator extends ResponseEntityExceptionHandler {
         if (err instanceof AccessDeniedException) return HttpStatus.FORBIDDEN;
         if (err instanceof ConcurrencyFailureException) return HttpStatus.CONFLICT;
         if (err instanceof BadCredentialsException) return HttpStatus.UNAUTHORIZED;
+        // An over-sized upload is the client's fault, not ours. Without this it resolves to 500,
+        // because MaxUploadSizeExceededException carries no @ResponseStatus and is not an
+        // ErrorResponse — so a phone uploading a large photo would be told the server broke.
+        if (err instanceof MaxUploadSizeExceededException) return HttpStatus.CONTENT_TOO_LARGE;
         return null;
     }
 

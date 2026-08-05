@@ -88,7 +88,11 @@ jhipster:
     authentication:
       jwt:
         # This token must be encoded using Base64 and be at least 256 bits long (you can type `openssl rand -base64 64` on your command line to generate a 512 bits one)
-        base64-secret: MmE4MDQ1MDliYWI2MGM2ZDFlNDViMzVhYzNjMjEyNzQ1M2YyMjY2ODJmNDFiMGUzMjdiZjhlOTcyMjRhNzE2NTg0YWE1ZGQ0MGJjYmYxNjYzYWU5NGI3ZDMyM2IzYmFmNTkyNWEwM2ZkMmY1MDM0NzI0ZDM0NjM3M2EzMTFhZWY=
+        # MUST match the gateway's dev secret. These drifted apart, and the symptom was a
+        # successful login followed by 401s from professionalservice with a perfectly valid
+        # gateway token — an easy day to lose. Production injects the shared key from the
+        # platform-wide .env instead; see the workspace CLAUDE.md.
+        base64-secret: ZmU1MWRiODU3MjFkNjUzNzU0Yjk4YTc5NTExN2EyZGM0ODI3ZGI1ZWI0ZjlmZmI2YzFiMTBjNTc5NGI1NTg1Njg1ODNlZjc1ZDgwMjVlNDg2MzM5ZWY0MjA1NzgxNDYwMDUzOTE4MDdmYTgwYjZiMjVjNzlmZjEyZGQxZjRmMjU=
         # Token is valid 24 hours
         token-validity-in-seconds: 86400
         token-validity-in-seconds-for-remember-me: 2592000

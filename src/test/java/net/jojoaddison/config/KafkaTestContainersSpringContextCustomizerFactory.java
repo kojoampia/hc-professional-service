@@ -26,8 +26,16 @@ public class KafkaTestContainersSpringContextCustomizerFactory implements Contex
             if (null != kafkaAnnotation) {
                 log.debug("detected the EmbeddedKafka annotation on class {}", testClass.getName());
                 log.info("Warming up the kafka broker");
+                // The container itself is shared across contexts on purpose — starting a broker per
+                // context would be intolerably slow. But the REGISTRATION must happen for every
+                // context: it used to sit inside this null check, so only the first Kafka-using
+                // context ever got the bean and any later one failed to autowire it. That made the
+                // suite order-dependent, and adding a second @EmbeddedKafka context anywhere broke
+                // DomainEventsKafkaIT with a bean-not-found that pointed nowhere near the cause.
                 if (null == kafkaBean) {
                     kafkaBean = beanFactory.createBean(KafkaTestContainer.class);
+                }
+                if (!beanFactory.containsSingleton(KafkaTestContainer.class.getName())) {
                     beanFactory.registerSingleton(KafkaTestContainer.class.getName(), kafkaBean);
                 }
                 testValues = testValues.and(

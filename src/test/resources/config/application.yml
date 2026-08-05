@@ -25,6 +25,14 @@ mongock:
 spring:
   application:
     name: professionalservice
+  servlet:
+    multipart:
+      # MUST mirror src/main/resources/config/application.yml. This file REPLACES the main config on
+      # the test classpath rather than layering on top of it, so a production value added there is
+      # invisible here — which is how the 1MB default went unnoticed. DocumentUploadLimitIT asserts
+      # the two files agree, so this cannot drift silently.
+      max-file-size: 6MB
+      max-request-size: 8MB
   cloud:
     consul:
       discovery:

@@ -100,6 +100,20 @@ management:
 spring:
   application:
     name: HC-Professional-Service
+  servlet:
+    multipart:
+      # OnboardingDocumentResource documents and enforces a 5,000,000-byte limit, but Spring's
+      # DEFAULT max-file-size is 1MB and fires FIRST — at the container, before any controller code
+      # runs. Every upload between 1MB and 5MB therefore failed with an opaque
+      # MaxUploadSizeExceededException instead of the application's own clear message. Camera
+      # captures land squarely in that range, which is how MOB8 would have hit it.
+      #
+      # 6MB is deliberately ABOVE the application's own 5MB check so the app's error message wins.
+      # 8MB matches `client_max_body_size 8m` in deploy/prod-server/professional.abofonsa.com.conf
+      # and deploy/docker/web-nginx.conf — raising it beyond that would just move the failure to
+      # nginx, which returns a bare 413 with no useful body.
+      max-file-size: 6MB
+      max-request-size: 8MB
   cloud:
     consul:
       discovery:
