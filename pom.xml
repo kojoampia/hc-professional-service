@@ -17,6 +17,7 @@
         -->
         <maven.version>3.2.5</maven.version>
         <java.version>25</java.version>
+        <firebase-admin.version>9.9.0</firebase-admin.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <maven.build.timestamp.format>yyyyMMddHHmmss</maven.build.timestamp.format>
@@ -89,6 +90,17 @@
     </dependencyManagement>
 
     <dependencies>
+        <!--
+            Firebase Admin, for push notifications (MOB9). APNs is reached through FCM rather than
+            with a separate HTTP/2 client, so this one dependency and one credential cover both
+            platforms. Only loaded when application.notifications.push.enabled is true — see
+            FirebaseConfiguration.
+        -->
+        <dependency>
+            <groupId>com.google.firebase</groupId>
+            <artifactId>firebase-admin</artifactId>
+            <version>${firebase-admin.version}</version>
+        </dependency>
         <dependency>
             <groupId>tech.jhipster</groupId>
             <artifactId>jhipster-framework</artifactId>

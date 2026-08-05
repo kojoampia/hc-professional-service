@@ -45,6 +45,11 @@ public class SecurityConfiguration {
                     // below, carer/angel/chemist/technician could receive a message and never
                     // answer one; this is the same exception onboarding already makes.
                     .requestMatchers("/api/messaging/**").authenticated()
+                    // Registering a device for push is not a clinical mutation. This MUST sit
+                    // above the POST /api/** rule below: otherwise a carer, angel, chemist or
+                    // technician — every read-only role — gets a silent 403 registering a device
+                    // and simply never receives notifications, with nothing to point at.
+                    .requestMatchers("/api/notifications/**").authenticated()
                     // The STOMP handshake carries no Authorization header (browsers cannot set one
                     // on a WebSocket upgrade). It is authenticated on the CONNECT frame instead —
                     // see WebsocketConfiguration — so the handshake itself is left open.

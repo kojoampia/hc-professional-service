@@ -127,10 +127,10 @@ spring:
     #    function:
     #      definition: kafkaConsumer; kafkaProducer
     function:
-      # Only the messaging consumer is declared. The generated kafkaConsumer/kafkaProducer scaffold
-      # stays dormant, and DomainEventPublisher's producer binding is created by StreamBridge rather
-      # than by a declared function.
-      definition: messageEvents
+      # The generated kafkaConsumer/kafkaProducer scaffold stays dormant, and
+      # DomainEventPublisher's producer binding is created by StreamBridge rather than by a
+      # declared function.
+      definition: messageEvents;pushEvents
     stream:
       kafka:
         binder:
@@ -161,6 +161,20 @@ spring:
           destination: hc.professional.entity
           content-type: application/json
           group: hc-professional-ms-messaging
+        # Push notifications (MOB9), consuming the same topic.
+        #
+        # THE GROUP MUST DIFFER from messageEvents-in-0 above. Two consumers sharing a group
+        # compete for partitions, so each would see roughly half the events — producing
+        # "notifications work about half the time", with nothing logged and nothing to point at.
+        # A distinct group gives this consumer its own copy of every event.
+        #
+        # The scaling caveat on messageEvents applies here too but is less sharp: push has no
+        # per-instance session state, so a multi-instance deployment delivering each event to one
+        # instance is correct.
+        pushEvents-in-0:
+          destination: hc.professional.entity
+          content-type: application/json
+          group: hc-professional-ms-push
   profiles:
     # The commented value for `active` can be replaced with valid Spring profiles to load.
     # Otherwise, it will be filled in by maven when building the JAR file
@@ -253,3 +267,12 @@ jhipster:
 # ===================================================================
 
 # application:
+
+application:
+  notifications:
+    push:
+      # Off by default: a stack with no Firebase project must start cleanly rather than warn per
+      # event. Production turns it on and mounts a service-account JSON — see deploy/.
+      enabled: false
+      # Empty falls back to GOOGLE_APPLICATION_CREDENTIALS, which is how the container is wired.
+      credentials-path: ''

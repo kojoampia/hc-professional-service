@@ -12,11 +12,16 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class ApplicationProperties {
 
     private final Kafka kafka = new Kafka();
+    private final Notifications notifications = new Notifications();
 
     // jhipster-needle-application-properties-property
 
     public Kafka getKafka() {
         return kafka;
+    }
+
+    public Notifications getNotifications() {
+        return notifications;
     }
 
     // jhipster-needle-application-properties-property-getter
@@ -50,6 +55,51 @@ public class ApplicationProperties {
 
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
+        }
+    }
+
+    /**
+     * Push notification settings (MOB9).
+     *
+     * <p>Disabled by default, mirroring {@link Kafka}: a stack with no Firebase project must start
+     * cleanly rather than log a stack trace per event. Absence of credentials is a supported
+     * configuration, not a failure.
+     */
+    public static class Notifications {
+
+        private final Push push = new Push();
+
+        public Push getPush() {
+            return push;
+        }
+
+        public static class Push {
+
+            /**
+             * Defaults to FALSE, unlike kafka.enabled. Kafka has always been part of the shipped
+             * configuration; Firebase is not, and enabling push without credentials would produce
+             * a warning per event on every deployment that has not set one up.
+             */
+            private boolean enabled = false;
+
+            /** Path to the Firebase service-account JSON. Empty falls back to GOOGLE_APPLICATION_CREDENTIALS. */
+            private String credentialsPath = "";
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public String getCredentialsPath() {
+                return credentialsPath;
+            }
+
+            public void setCredentialsPath(String credentialsPath) {
+                this.credentialsPath = credentialsPath;
+            }
         }
     }
     // jhipster-needle-application-properties-property-class

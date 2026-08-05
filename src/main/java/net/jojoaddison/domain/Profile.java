@@ -24,6 +24,27 @@ public class Profile implements Serializable {
     @Field("account_id")
     private String accountId;
 
+    /**
+     * Push notification preferences (MOB9).
+     *
+     * <p>They live on the Profile rather than on DeviceToken so they follow the clinician across
+     * devices — someone who turns off compliance nudges on their phone means it for their tablet
+     * too. Null is treated as opted in for the two delivery flags, so existing profiles keep
+     * receiving notifications without a migration.
+     *
+     * <p>{@code pushShowSenderName} is the exception and defaults to OFF: a lock screen is visible
+     * to anyone holding the phone, and even a colleague's name is more than the default should
+     * disclose.
+     */
+    @Field("push_messages_enabled")
+    private Boolean pushMessagesEnabled;
+
+    @Field("push_compliance_enabled")
+    private Boolean pushComplianceEnabled;
+
+    @Field("push_show_sender_name")
+    private Boolean pushShowSenderName;
+
     @Field("first_name")
     private String firstName;
 
@@ -334,5 +355,44 @@ public class Profile implements Serializable {
                 ", specialtyCategoryId='" + getSpecialtyCategoryId() + "'" +
                 ", teamIds='" + getTeamIds() + "'" +
                 "}";
+    }
+
+    public Boolean getPushMessagesEnabled() {
+        return pushMessagesEnabled;
+    }
+
+    public void setPushMessagesEnabled(Boolean pushMessagesEnabled) {
+        this.pushMessagesEnabled = pushMessagesEnabled;
+    }
+
+    public Profile pushMessagesEnabled(Boolean pushMessagesEnabled) {
+        this.setPushMessagesEnabled(pushMessagesEnabled);
+        return this;
+    }
+
+    public Boolean getPushComplianceEnabled() {
+        return pushComplianceEnabled;
+    }
+
+    public void setPushComplianceEnabled(Boolean pushComplianceEnabled) {
+        this.pushComplianceEnabled = pushComplianceEnabled;
+    }
+
+    public Profile pushComplianceEnabled(Boolean pushComplianceEnabled) {
+        this.setPushComplianceEnabled(pushComplianceEnabled);
+        return this;
+    }
+
+    public Boolean getPushShowSenderName() {
+        return pushShowSenderName;
+    }
+
+    public void setPushShowSenderName(Boolean pushShowSenderName) {
+        this.pushShowSenderName = pushShowSenderName;
+    }
+
+    public Profile pushShowSenderName(Boolean pushShowSenderName) {
+        this.setPushShowSenderName(pushShowSenderName);
+        return this;
     }
 }

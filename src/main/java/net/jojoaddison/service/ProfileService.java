@@ -159,4 +159,27 @@ public class ProfileService {
         log.debug("Request to delete Profile : {}", id);
         profileRepository.deleteById(id);
     }
+
+    /**
+     * Whether this account wants message pushes. Absent preference means yes, so existing
+     * profiles keep working without a migration.
+     */
+    public boolean wantsMessagePush(String accountId) {
+        return findByAccountId(accountId).map(p -> !Boolean.FALSE.equals(p.getPushMessagesEnabled())).orElse(true);
+    }
+
+    /** Whether this account wants compliance pushes. Absent preference means yes. */
+    public boolean wantsCompliancePush(String accountId) {
+        return findByAccountId(accountId).map(p -> !Boolean.FALSE.equals(p.getPushComplianceEnabled())).orElse(true);
+    }
+
+    /**
+     * Whether the sender's name may appear on the lock screen.
+     *
+     * <p>Defaults to FALSE, unlike the two above: a notification preview is visible to anyone
+     * holding the phone, so revealing a colleague's name has to be chosen, not inherited.
+     */
+    public boolean wantsSenderNameInPush(String accountId) {
+        return findByAccountId(accountId).map(p -> Boolean.TRUE.equals(p.getPushShowSenderName())).orElse(false);
+    }
 }
