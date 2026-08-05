@@ -38,9 +38,9 @@ Server port: **8081** (dev).
 
 ## Onboarding: the part that isn't generated code
 
-`../professional-onboarding-workflow.md` (the workspace root, since it spans all three repos) is the authoritative spec — read it before touching applications, documents, authorities, or the roster. Java comments throughout this repo cite it by bare filename.
+`../docs/professional-onboarding-workflow.md` (the workspace root, since it spans all three repos) is the authoritative spec — read it before touching applications, documents, authorities, or the roster. Java comments throughout this repo cite it by bare filename.
 
-Two further cross-repo documents sit beside it and are the origin of contracts this service owes: `../professional-dashboard-migration-plan.md` (the dashboard, patient, med-case and duty-roster endpoint contracts) and `../phase_4_contract_reconciliation.md` (which frontend models still have no backend contract, classified Existing / Missing / Awaiting confirmation).
+Two further cross-repo documents sit beside it and are the origin of contracts this service owes: `../docs/professional-dashboard-migration-plan.md` (the dashboard, patient, med-case and duty-roster endpoint contracts) and `../docs/phase_4_contract_reconciliation.md` (which frontend models still have no backend contract, classified Existing / Missing / Awaiting confirmation).
 
 - **`OnboardingService` holds a server-side state machine.** The `LEGAL_TRANSITIONS` map over `OnboardingStatus` decides what may follow what; clients never do. Every accepted transition appends an `OnboardingEvent`, and illegal ones are rejected server-side (proven by `OnboardingFlowIT`). Three document gates sit on top of transition legality, each on a different operation — don't conflate them: `submitForReview` requires the mandatory documents to be **present**, an `APPROVED` decision requires them **verified**, and reactivating from `SUSPENDED` to `ACTIVE` requires a **current, verified licence**.
 - **Applicants hold only `ROLE_USER`**, so the mutation matrix below blocks them from the normal entity endpoints. `/api/onboarding/**` is therefore `.authenticated()` rather than role-gated, and an applicant's profile is written through `OnboardingService.upsertOwnProfile`, which **force-sets `accountId` to the caller** — keep that invariant in any new onboarding write path.
