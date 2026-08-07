@@ -84,7 +84,7 @@ npm run prettier:check / prettier:format
 
 ### Build toolchain gotchas
 
-The pom targets **release 25**, but the build runs on **JDK 26** (`build-image.sh` pins `JAVA_HOME=/usr/lib/jvm/jdk-26-oracle-x64` when present). Two related pins exist because Jib 3.4.1's bundled ASM cannot read Java 25 class files (major 69): `jib-maven-plugin.version` is **3.4.6**, and the jib `<container>` block sets an explicit `<mainClass>` so Jib never falls back to its class scan. Both carry explanatory comments — don't "clean up" either.
+The pom targets **release 25** and builds on **JDK 25**. The enforcer's `requireJavaVersion` is `[25,27)` as of 2026-08-08; it used to be `[26,)`, which demanded a JDK newer than the bytecode this build emits and made a plain `./mvnw verify` fail on a JDK 25 host with `release version 25 not supported`. 26 stays in range on purpose — `../deploy/docker/api.Dockerfile` builds on `maven:3.9-eclipse-temurin-26` — so don't narrow it without changing that Dockerfile too. `build-image.sh` still pins `JAVA_HOME=/usr/lib/jvm/jdk-26-oracle-x64` when present; it is superseded by `../deploy/docker/` and the pin is harmless while 26 remains in range. Two related pins exist because Jib 3.4.1's bundled ASM cannot read Java 25 class files (major 69): `jib-maven-plugin.version` is **3.4.6**, and the jib `<container>` block sets an explicit `<mainClass>` so Jib never falls back to its class scan. Both carry explanatory comments — don't "clean up" either.
 
 Deployment of the whole three-repo stack lives in `../deploy/` at the workspace root (`docker-compose.professional.yml`, runbook in its `README.md`), not here. It invokes this repo's `build-image.sh` as `(cd ../api && ./build-image.sh <version>)`.
 

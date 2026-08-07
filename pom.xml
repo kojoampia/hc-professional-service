@@ -569,9 +569,16 @@
                                 <message>You are running an older version of Maven. JHipster requires at least Maven ${maven.version}</message>
                                 <version>[${maven.version},)</version>
                             </requireMavenVersion>
+                            <!--
+                                JDK 25 is the build JDK for this workspace, matching <java.version>25</java.version>
+                                above; the generator's default of [26,) demanded a JDK newer than the bytecode the
+                                build actually targets. The range keeps 26 acceptable so deploy/docker's
+                                maven:3.9-eclipse-temurin-26 build stage still passes; 27 is excluded because no
+                                release beyond 26 has been tried against this pom.
+                            -->
                             <requireJavaVersion>
-                                <message>You are running an incompatible version of Java. JHipster supports JDK 26 and later.</message>
-                                <version>[26,)</version>
+                                <message>You are running an incompatible version of Java. This project requires JDK 25 or 26.</message>
+                                <version>[25,27)</version>
                             </requireJavaVersion>
                         </rules>
                     </configuration>
