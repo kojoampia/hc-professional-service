@@ -31,7 +31,19 @@ import org.springframework.web.server.ResponseStatusException;
  * is deliberately no self-subscription endpoint.
  */
 @RestController
-@RequestMapping("/api/onboarding/duty-rosters")
+/*
+ * Moved from /api/onboarding/duty-rosters on 2026-08-11. The duty roster is owned by this service,
+ * not by the onboarding flow — it was only ever under that prefix because WP6 built it alongside
+ * the applicant pipeline. Both web clients already expected this path and were getting 404s: the
+ * generated entity client (entities/professionalservice/duty-roster) and DutyRosterApiService.
+ *
+ * Authorization is unchanged. Under /api/onboarding/** the matcher required only authentication and
+ * the @PreAuthorize below did the real work; under /api/** the matchers additionally require
+ * CLINICAL_MUTATION for POST and DELETE, which every admin already holds. The move is therefore
+ * stricter at the matcher and identical in effect — assign, unassign and listAll stay admin-only,
+ * and /my stays open to any authenticated clinician reading their own assignments.
+ */
+@RequestMapping("/api/duty-rosters")
 public class DutyRosterResource {
 
     private static final Logger log = LoggerFactory.getLogger(DutyRosterResource.class);
@@ -62,7 +74,7 @@ public class DutyRosterResource {
         }
         DutyRoster saved = dutyRosterRepository.save(dutyRoster);
         domainEventPublisher.publishEntityCreated("DutyRoster", saved.getId(), null, SecurityUtils.getCurrentUserLogin().orElse("system"));
-        return ResponseEntity.created(new URI("/api/onboarding/duty-rosters/" + saved.getId())).body(saved);
+        return ResponseEntity.created(new URI("/api/duty-rosters/" + saved.getId())).body(saved);
     }
 
     @DeleteMapping("/{id}")
