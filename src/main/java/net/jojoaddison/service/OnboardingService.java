@@ -484,7 +484,12 @@ public class OnboardingService {
 
         long done = requirements.stream().filter(OnboardingProgressDTO.Requirement::done).count();
         int percent = Math.toIntExact(Math.round(((double) done / requirements.size()) * 100));
-        return new OnboardingProgressDTO(percent, done == requirements.size(), requirements);
+        return new OnboardingProgressDTO(
+            percent,
+            done == requirements.size(),
+            application == null ? null : application.getStatus(),
+            requirements
+        );
     }
 
     private static boolean hasText(String value) {
