@@ -82,7 +82,28 @@ class OnboardingProgressIT {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.percent").value(0))
             .andExpect(jsonPath("$.complete").value(false))
+            .andExpect(jsonPath("$.status").doesNotExist())
             .andExpect(jsonPath("$.requirements.length()").value(8));
+    }
+
+    /**
+     * `complete` and `status` answer different questions and the shell's first-login interstitial
+     * depends on the difference: completeness is the applicant's half, while ACTIVE additionally
+     * requires admin vetting. A finished profile nobody has reviewed is therefore complete and a
+     * long way from ACTIVE, and anything gating on `complete` would treat it as live.
+     */
+    @Test
+    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    void reportsTheApplicationStatusAlongsideCompleteness() throws Exception {
+        ProfessionalApplication application = startedApplication();
+        Profile saved = profileRepository.save(completeProfile());
+        uploadAllMandatoryDocuments(saved);
+
+        restMockMvc
+            .perform(get("/api/onboarding/progress"))
+            .andExpect(jsonPath("$.complete").value(true))
+            .andExpect(jsonPath("$.status").value(application.getStatus().name()))
+            .andExpect(jsonPath("$.status").value(org.hamcrest.Matchers.not("ACTIVE")));
     }
 
     @Test
