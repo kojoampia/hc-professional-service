@@ -13,6 +13,8 @@ import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.security.AuthoritiesConstants;
 import net.jojoaddison.security.SecurityUtils;
 import net.jojoaddison.service.DutyRosterService;
+import net.jojoaddison.service.RosterTrailService;
+import net.jojoaddison.service.dto.PatientDtos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -62,17 +64,20 @@ public class DutyRosterResource {
     private final ProfileRepository profileRepository;
     private final DomainEventPublisher domainEventPublisher;
     private final DutyRosterService dutyRosterService;
+    private final RosterTrailService rosterTrailService;
 
     public DutyRosterResource(
         DutyRosterRepository dutyRosterRepository,
         ProfileRepository profileRepository,
         DomainEventPublisher domainEventPublisher,
-        DutyRosterService dutyRosterService
+        DutyRosterService dutyRosterService,
+        RosterTrailService rosterTrailService
     ) {
         this.dutyRosterRepository = dutyRosterRepository;
         this.profileRepository = profileRepository;
         this.domainEventPublisher = domainEventPublisher;
         this.dutyRosterService = dutyRosterService;
+        this.rosterTrailService = rosterTrailService;
     }
 
     @PostMapping
@@ -167,6 +172,37 @@ public class DutyRosterResource {
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public DutyRosterService.PurgeResult purgeSnapshots() {
         return dutyRosterService.purgeExpiredSnapshots();
+    }
+
+    /**
+     * A customer's recent activity, for a clinician who has them on their own round (DR3).
+     *
+     * <p>Lives under the duty-roster resource because the <b>permission derives from the roster</b>,
+     * not from the patient: the caller may read this only while that customer is on one of their
+     * rounds within ±30 days. {@link RosterTrailService} owns that check and it runs on every read.
+     *
+     * <p>Authenticated rather than role-gated, and that is not an oversight. Every clinical authority
+     * does rounds, including the four that are read-only under {@code CLINICAL_MUTATION}, and the
+     * roster is a far tighter boundary than any role would be — a doctor with no rounds sees nothing
+     * here, which is the correct answer.
+     */
+    @GetMapping("/customers/{customerId}/trail")
+    public List<PatientDtos.ActivityLogEntry> customerTrail(@PathVariable String customerId) {
+        return rosterTrailService.trailFor(customerId, LocalDate.now());
+    }
+
+    /**
+     * Not on your roster is a <b>403</b>, and never an empty list.
+     *
+     * <p>"Nothing happened this week" and "you may not look" are different answers and the screen
+     * treats them differently; collapsing the second into the first would hide an authorization
+     * failure behind a plausible blank panel. The body says which customer was refused only in the
+     * sense of repeating what the caller already sent — it reveals nothing about customers they
+     * cannot see, so the endpoint cannot be used to probe for ids.
+     */
+    @ExceptionHandler(RosterTrailService.TrailForbiddenException.class)
+    public ResponseEntity<String> handleTrailForbidden(RosterTrailService.TrailForbiddenException exception) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(exception.getMessage());
     }
 
     /** The caller's profile id, or empty when the account has no profile — an ordinary state. */

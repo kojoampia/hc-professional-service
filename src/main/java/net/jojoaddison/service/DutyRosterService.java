@@ -6,10 +6,13 @@ import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
 import net.jojoaddison.domain.DutyRoster;
 import net.jojoaddison.domain.Visit;
 import net.jojoaddison.domain.enumeration.ShiftType;
@@ -134,6 +137,43 @@ public class DutyRosterService {
                 )
         );
         return summaries;
+    }
+
+    /**
+     * How far either side of today a round still counts as "the caller's own" for the activity trail
+     * (docs/duty-roster.md § 7, DR3).
+     *
+     * <p>Thirty days back is enough to review a recent round, thirty ahead to prepare for an upcoming
+     * one. It is a <em>rolling</em> window rather than an accumulating one, so the set of customers a
+     * clinician may read shrinks again by itself as rounds age out — nobody has to remember to revoke
+     * anything.
+     */
+    public static final int TRAIL_WINDOW_DAYS = 30;
+
+    /**
+     * The customers on the caller's own rounds within {@link #TRAIL_WINDOW_DAYS} either side of a date.
+     *
+     * <p>This <b>is the authorization boundary</b> for the activity trail, in the same way
+     * {@code PatientDirectoryService.patientIdsFor} is the boundary for the patient record. It is
+     * computed here, on every read, from this service's own collection — not carried in a token, not
+     * asked of another stack. That makes it exact at the moment it is used: a customer removed from
+     * the roster loses the trail immediately rather than when some credential next turns over.
+     *
+     * <p>An empty set is the safe answer and the common one — a professional with no rounds, or an
+     * account with no profile at all, reads nothing. Callers must treat empty as "deny", never as
+     * "unfiltered".
+     */
+    public Set<String> trailCustomerIds(String professionalId, LocalDate reference) {
+        if (professionalId == null || reference == null) {
+            return Set.of();
+        }
+        return dutyRosterRepository
+            .findRoundsInRange(professionalId, reference.minusDays(TRAIL_WINDOW_DAYS), reference.plusDays(TRAIL_WINDOW_DAYS))
+            .stream()
+            .flatMap(round -> round.getVisits().stream())
+            .map(Visit::getCustomerId)
+            .filter(id -> id != null && !id.isBlank())
+            .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
     // --------------------------------------------------------------- writes
