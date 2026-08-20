@@ -17,6 +17,7 @@ import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.service.dto.OnboardingProgressDTO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -220,7 +221,17 @@ public class OnboardingService {
         ProfessionalApplication application = getOwnApplication(accountId);
         requireMandatoryDocuments(application);
         application.submittedAt(Instant.now());
-        return transition(application, OnboardingStatus.CREDENTIAL_REVIEW, accountId, "submitted for credential review");
+        ProfessionalApplication saved = transition(
+            application,
+            OnboardingStatus.CREDENTIAL_REVIEW,
+            accountId,
+            "submitted for credential review"
+        );
+        // COMPLETED means the applicant is done, not that they are cleared to work — the ACTIVE
+        // event below says that. Keeping them apart is what lets the admin portal tell an
+        // application stalled on us from one stalled on the clinician.
+        domainEventPublisher.publishOnboardingState("COMPLETED", accountId, saved.getId(), saved.getRequestedRole(), accountId);
+        return saved;
     }
 
     public ProfessionalApplication decide(
@@ -270,11 +281,35 @@ public class OnboardingService {
 
     public ProfessionalApplication markStatus(String applicationId, OnboardingStatus target, String reason, String actor) {
         ProfessionalApplication application = getById(applicationId);
-        // WP7 reactivation guard: leaving SUSPENDED requires a current verified license
-        if (target == OnboardingStatus.ACTIVE && application.getStatus() == OnboardingStatus.SUSPENDED) {
-            requireCurrentVerifiedLicense(application);
+        if (target == OnboardingStatus.ACTIVE) {
+            // A profile goes ACTIVE only when it is complete AND vetted. The vetting half is the
+            // APPROVED -> ... -> ACTIVE chain, which only an admin can drive; this is the other
+            // half, and it is checked here rather than in the client because an admin activating an
+            // incomplete application is a bug, not a shortcut.
+            requireCompleteProfile(application);
+            // WP7 reactivation guard: leaving SUSPENDED additionally requires a current license.
+            if (application.getStatus() == OnboardingStatus.SUSPENDED) {
+                requireCurrentVerifiedLicense(application);
+            }
         }
-        return transition(application, target, actor, reason);
+        ProfessionalApplication saved = transition(application, target, actor, reason);
+        if (target == OnboardingStatus.ACTIVE) {
+            domainEventPublisher.publishOnboardingState("ACTIVE", saved.getAccountId(), saved.getId(), saved.getRequestedRole(), actor);
+        }
+        return saved;
+    }
+
+    private void requireCompleteProfile(ProfessionalApplication application) {
+        OnboardingProgressDTO progress = progressFor(application.getAccountId());
+        if (!progress.complete()) {
+            String missing = progress
+                .requirements()
+                .stream()
+                .filter(requirement -> !requirement.done())
+                .map(OnboardingProgressDTO.Requirement::key)
+                .collect(java.util.stream.Collectors.joining(", "));
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Activation requires a complete profile; still missing: " + missing);
+        }
     }
 
     private void requireCurrentVerifiedLicense(ProfessionalApplication application) {
@@ -394,6 +429,100 @@ public class OnboardingService {
                 .toStatus(to)
                 .reason(reason)
                 .at(Instant.now())
+        );
+    }
+
+    /**
+     * The eight requirements, equally weighted, in the order the profile page shows them.
+     *
+     * <p>Named constants rather than inline strings because the client maps every key to a
+     * translated label in four languages: a key renamed here and not there renders as the key
+     * itself, mid-screen, with nothing thrown and nothing logged.
+     */
+    private static final String REQ_CONSENT = "consent";
+    private static final String REQ_PROFILE = "profile";
+    private static final String REQ_ADDRESS = "address";
+    private static final String REQ_NEXT_OF_KIN = "nextOfKin";
+    private static final String REQ_CERTIFICATE = "certificate";
+    private static final String REQ_LICENSE = "license";
+    private static final String REQ_IDENTITY = "identity";
+    private static final String REQ_PHOTO = "photo";
+
+    /**
+     * How far this account has got, for its own eyes.
+     *
+     * <p>Answers for an account with no application at all — everything false, 0% — rather than
+     * 404ing, because that is the state every clinician created by admin invitation starts in and
+     * the profile page has to render something for them.
+     */
+    public OnboardingProgressDTO progressFor(String accountId) {
+        ProfessionalApplication application = applicationRepository.findByAccountId(accountId).orElse(null);
+        Profile profile = profileRepository.findByAccountId(accountId).orElse(null);
+        // Resolved from the profile, not via documentsFor(application): that throws 409 when the
+        // application has no linked profile yet, which is precisely one of the incomplete states
+        // this method exists to report on.
+        List<PersonalDocument> documents = profile == null || profile.getId() == null
+            ? List.<PersonalDocument>of()
+            : personalDocumentRepository.findByProfileId(profile.getId());
+
+        List<OnboardingProgressDTO.Requirement> requirements = List.of(
+            new OnboardingProgressDTO.Requirement(REQ_CONSENT, application != null && application.getConsentAcceptedAt() != null),
+            new OnboardingProgressDTO.Requirement(REQ_PROFILE, personalDetailsComplete(profile)),
+            new OnboardingProgressDTO.Requirement(REQ_ADDRESS, addressComplete(profile)),
+            new OnboardingProgressDTO.Requirement(REQ_NEXT_OF_KIN, nextOfKinComplete(profile)),
+            new OnboardingProgressDTO.Requirement(
+                REQ_CERTIFICATE,
+                documents.stream().anyMatch(d -> d.getType() == DocumentType.CERTIFICATE)
+            ),
+            new OnboardingProgressDTO.Requirement(
+                REQ_LICENSE,
+                documents.stream().anyMatch(d -> d.getType() == DocumentType.LICENSE && d.getExpiryDate() != null)
+            ),
+            new OnboardingProgressDTO.Requirement(REQ_IDENTITY, documents.stream().anyMatch(d -> IDENTITY_TYPES.contains(d.getType()))),
+            new OnboardingProgressDTO.Requirement(REQ_PHOTO, documents.stream().anyMatch(d -> d.getType() == DocumentType.PASSPHOTO))
+        );
+
+        long done = requirements.stream().filter(OnboardingProgressDTO.Requirement::done).count();
+        int percent = Math.toIntExact(Math.round(((double) done / requirements.size()) * 100));
+        return new OnboardingProgressDTO(percent, done == requirements.size(), requirements);
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static boolean personalDetailsComplete(Profile profile) {
+        return (
+            profile != null &&
+            hasText(profile.getFirstName()) &&
+            hasText(profile.getLastName()) &&
+            profile.getBirthDate() != null &&
+            hasText(profile.getSex()) &&
+            hasText(profile.getMobilePhone()) &&
+            hasText(profile.getCardType()) &&
+            hasText(profile.getCardNumber())
+        );
+    }
+
+    /** Mirrors the wizard's required address fields; town, district and digital address stay optional. */
+    private static boolean addressComplete(Profile profile) {
+        return (
+            profile != null &&
+            profile.getAddress() != null &&
+            hasText(profile.getAddress().getStreetAddress()) &&
+            hasText(profile.getAddress().getCity()) &&
+            hasText(profile.getAddress().getRegion()) &&
+            hasText(profile.getAddress().getCountry())
+        );
+    }
+
+    private static boolean nextOfKinComplete(Profile profile) {
+        return (
+            profile != null &&
+            profile.getEmergencyContact() != null &&
+            hasText(profile.getEmergencyContact().getName()) &&
+            hasText(profile.getEmergencyContact().getRelationship()) &&
+            hasText(profile.getEmergencyContact().getPhone())
         );
     }
 

@@ -151,6 +151,14 @@ spring:
         entityEvents-out-0:
           destination: hc.professional.entity
           content-type: application/json
+        # onboarding.state rides the REGISTRATION topic, not the entity one, because it continues
+        # the story registration.created starts: a consumer following one clinician's progress
+        # subscribes to one topic and keys on accountId throughout. See
+        # professional-onboarding-workflow.md § "Onboarding state events and the completion
+        # contract".
+        onboardingStateEvents-out-0:
+          destination: hc.professional.registration
+          content-type: application/json
         # Consumes the same topic this service publishes to, so a message.created event becomes a
         # websocket nudge for its recipient. A group is set on purpose: with one, a multi-instance
         # deployment delivers each event to a single instance. That is correct only while every
