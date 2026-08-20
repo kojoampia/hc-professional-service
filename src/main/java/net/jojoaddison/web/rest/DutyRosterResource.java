@@ -27,23 +27,27 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * Professional duty-roster assignments (professional-onboarding-workflow.md
  * § Duty roster, assignment-only decision): roster administrators (ROLE_ADMIN)
- * create and remove assignments; professionals read their own via /my. There
- * is deliberately no self-subscription endpoint.
+ * create and remove assignments; professionals read their own. There is
+ * deliberately no self-subscription endpoint.
  */
 @RestController
 /*
- * Moved from /api/onboarding/duty-rosters on 2026-08-11. The duty roster is owned by this service,
- * not by the onboarding flow — it was only ever under that prefix because WP6 built it alongside
- * the applicant pipeline. Both web clients already expected this path and were getting 404s: the
- * generated entity client (entities/professionalservice/duty-roster) and DutyRosterApiService.
+ * Singular, and the bare GET is your own roster (docs/duty-roster.md § 1, DR1). A clinician asking
+ * for "the duty roster" means theirs; the administrator's whole-estate view is the special case and
+ * earns the longer path, /all.
  *
- * Authorization is unchanged. Under /api/onboarding/** the matcher required only authentication and
- * the @PreAuthorize below did the real work; under /api/** the matchers additionally require
- * CLINICAL_MUTATION for POST and DELETE, which every admin already holds. The move is therefore
- * stricter at the matcher and identical in effect — assign, unassign and listAll stay admin-only,
- * and /my stays open to any authenticated clinician reading their own assignments.
+ * THIS INVERTED WHICH OPERATION IS THE DEFAULT, so the security annotations were re-derived rather
+ * than moved. Previously the bare GET was the admin list and /my was the clinician's; now the bare
+ * GET is .authenticated() and /all carries the @PreAuthorize(ADMIN) that used to sit on it. Copying
+ * the old annotations across would either lock every clinician out of their own roster or publish
+ * the whole estate's to anyone signed in.
+ *
+ * Earlier history: moved from /api/onboarding/duty-rosters on 2026-08-11, because the roster is
+ * owned by this service and was only under that prefix because WP6 built it beside the applicant
+ * pipeline. Under /api/** the matchers additionally require CLINICAL_MUTATION for POST and DELETE,
+ * which every admin already holds.
  */
-@RequestMapping("/api/duty-rosters")
+@RequestMapping("/api/duty-roster")
 public class DutyRosterResource {
 
     private static final Logger log = LoggerFactory.getLogger(DutyRosterResource.class);
@@ -74,7 +78,7 @@ public class DutyRosterResource {
         }
         DutyRoster saved = dutyRosterRepository.save(dutyRoster);
         domainEventPublisher.publishEntityCreated("DutyRoster", saved.getId(), null, SecurityUtils.getCurrentUserLogin().orElse("system"));
-        return ResponseEntity.created(new URI("/api/duty-rosters/" + saved.getId())).body(saved);
+        return ResponseEntity.created(new URI("/api/duty-roster/" + saved.getId())).body(saved);
     }
 
     @DeleteMapping("/{id}")
@@ -84,14 +88,19 @@ public class DutyRosterResource {
         return ResponseEntity.noContent().build();
     }
 
-    @GetMapping
+    /** Every assignment on the estate. Admin only — see the inversion note on the class. */
+    @GetMapping("/all")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public List<DutyRoster> listAll() {
         return dutyRosterRepository.findAllByOrderByDateAscShiftAsc();
     }
 
-    /** A professional's own assignments — read-only view per the assignment-only policy. */
-    @GetMapping("/my")
+    /**
+     * The caller's own assignments — the default meaning of "the duty roster", and read-only per the
+     * assignment-only policy. An account with no profile gets an empty list rather than an error:
+     * having no roster is an ordinary state, not a failure.
+     */
+    @GetMapping
     public List<DutyRoster> myAssignments() {
         String login = SecurityUtils.getCurrentUserLogin()
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "No authenticated account"));

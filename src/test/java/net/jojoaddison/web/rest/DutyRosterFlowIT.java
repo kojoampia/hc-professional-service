@@ -85,22 +85,22 @@ class DutyRosterFlowIT {
     @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
     void adminAssignsListsAndUnassigns() throws Exception {
         restMockMvc
-            .perform(post("/api/duty-rosters").contentType(MediaType.APPLICATION_JSON).content(assignmentJson()))
+            .perform(post("/api/duty-roster").contentType(MediaType.APPLICATION_JSON).content(assignmentJson()))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.shift").value("NIGHT"));
-        restMockMvc.perform(get("/api/duty-rosters")).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
+        restMockMvc.perform(get("/api/duty-roster/all")).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
 
         // unknown professional rejected
         restMockMvc
             .perform(
-                post("/api/duty-rosters")
+                post("/api/duty-roster")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(assignmentJson().replace(profile.getId(), "no-such-profile"))
             )
             .andExpect(status().isBadRequest());
 
         String id = dutyRosterRepository.findAll().get(0).getId();
-        restMockMvc.perform(delete("/api/duty-rosters/" + id)).andExpect(status().isNoContent());
+        restMockMvc.perform(delete("/api/duty-roster/" + id)).andExpect(status().isNoContent());
         assertThat(dutyRosterRepository.count()).isZero();
     }
 
@@ -109,40 +109,51 @@ class DutyRosterFlowIT {
     void dayAndFlexibleShiftsRoundTrip() throws Exception {
         restMockMvc
             .perform(
-                post("/api/duty-rosters").contentType(MediaType.APPLICATION_JSON).content(assignmentJson().replace("\"NIGHT\"", "\"DAY\""))
+                post("/api/duty-roster").contentType(MediaType.APPLICATION_JSON).content(assignmentJson().replace("\"NIGHT\"", "\"DAY\""))
             )
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.shift").value("DAY"));
         restMockMvc
             .perform(
-                post("/api/duty-rosters")
+                post("/api/duty-roster")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(assignmentJson().replace("\"NIGHT\"", "\"FLEXIBLE\""))
             )
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.shift").value("FLEXIBLE"));
-        restMockMvc.perform(get("/api/duty-rosters")).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
+        // EVENING replaced AFTERNOON in DR1 and had no coverage before.
+        restMockMvc
+            .perform(
+                post("/api/duty-roster")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(assignmentJson().replace("\"NIGHT\"", "\"EVENING\""))
+            )
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.shift").value("EVENING"));
+        restMockMvc.perform(get("/api/duty-roster/all")).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(3));
     }
 
+    /**
+     * The DR1 inversion, asserted from the clinician's side: the bare GET is now <em>their</em>
+     * roster and /all is the admin's. Read this together with
+     * {@link #professionalReadsOwnAssignmentsOnly()} — between them they pin both halves, which is
+     * what stops the annotations being swapped back and either locking clinicians out of their own
+     * roster or publishing the whole estate's.
+     */
     @Test
     @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
     void professionalsCannotAssignOrListAll() throws Exception {
         restMockMvc
-            .perform(post("/api/duty-rosters").contentType(MediaType.APPLICATION_JSON).content(assignmentJson()))
+            .perform(post("/api/duty-roster").contentType(MediaType.APPLICATION_JSON).content(assignmentJson()))
             .andExpect(status().isForbidden());
-        restMockMvc.perform(get("/api/duty-rosters")).andExpect(status().isForbidden());
+        restMockMvc.perform(get("/api/duty-roster/all")).andExpect(status().isForbidden());
     }
 
     @Test
     @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
     void professionalReadsOwnAssignmentsOnly() throws Exception {
         dutyRosterRepository.save(
-            new DutyRoster()
-                .date(LocalDate.now())
-                .duty(DutyRole.NURSE)
-                .professionalId(profile.getId())
-                .shift(ShiftType.MORNING)
-                .name("Ward 3")
+            new DutyRoster().date(LocalDate.now()).duty(DutyRole.NURSE).professionalId(profile.getId()).shift(ShiftType.DAY).name("Ward 3")
         );
         dutyRosterRepository.save(
             new DutyRoster()
@@ -153,7 +164,7 @@ class DutyRosterFlowIT {
                 .name("Ward 9")
         );
         restMockMvc
-            .perform(get("/api/duty-rosters/my"))
+            .perform(get("/api/duty-roster"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(1))
             .andExpect(jsonPath("$[0].name").value("Ward 3"));
