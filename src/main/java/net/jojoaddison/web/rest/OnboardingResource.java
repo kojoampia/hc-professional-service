@@ -7,6 +7,7 @@ import net.jojoaddison.domain.enumeration.OnboardingStatus;
 import net.jojoaddison.security.AuthoritiesConstants;
 import net.jojoaddison.security.SecurityUtils;
 import net.jojoaddison.service.OnboardingService;
+import net.jojoaddison.service.dto.OnboardingProgressDTO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -59,6 +60,18 @@ public class OnboardingResource {
             request.source()
         );
         return ResponseEntity.status(HttpStatus.CREATED).body(application);
+    }
+
+    /**
+     * How far the caller has got, for the meter on {@code /account/profile}.
+     *
+     * <p>Always answers, including for an account with no application at all — everything false,
+     * 0% — because that is the state a clinician created by admin invitation starts in, and the
+     * profile page has to render something for them rather than an error.
+     */
+    @GetMapping("/progress")
+    public OnboardingProgressDTO progress() {
+        return onboardingService.progressFor(currentAccountId());
     }
 
     @GetMapping("/profile")

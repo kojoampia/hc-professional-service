@@ -27,6 +27,7 @@ import org.springframework.stereotype.Component;
 public class DomainEventPublisher {
 
     public static final String ENTITY_TOPIC_BINDING = "entityEvents-out-0";
+    public static final String ONBOARDING_STATE_BINDING = "onboardingStateEvents-out-0";
     private static final String SOURCE = "hc-professional-service";
 
     private static final Logger log = LoggerFactory.getLogger(DomainEventPublisher.class);
@@ -54,18 +55,52 @@ public class DomainEventPublisher {
      * suppressing the call would have fixed the per-write ERROR and left the retry loop running.
      */
     private void publish(String eventType, String entityId, DomainEventEnvelope envelope, String subject) {
+        publish(ENTITY_TOPIC_BINDING, eventType, entityId, envelope, subject);
+    }
+
+    private void publish(String binding, String eventType, String key, DomainEventEnvelope envelope, String subject) {
         if (!enabled) {
             log.debug("Skipping {} for {} — publishing disabled", eventType, subject);
             return;
         }
         try {
-            streamBridge.send(
-                ENTITY_TOPIC_BINDING,
-                MessageBuilder.withPayload(envelope).setHeader(KafkaHeaders.KEY, entityId.getBytes()).build()
-            );
+            streamBridge.send(binding, MessageBuilder.withPayload(envelope).setHeader(KafkaHeaders.KEY, key.getBytes()).build());
         } catch (RuntimeException e) {
             log.error("Failed to publish {} for {}", eventType, subject, e);
         }
+    }
+
+    /**
+     * Onboarding reached a new state the admin portal cares about.
+     *
+     * <p>Keyed by {@code accountId} rather than the application id, matching
+     * {@code registration.created} on the same topic — the two together are one clinician's story,
+     * and per-account ordering is what makes "IN_PROGRESS then COMPLETED" readable.
+     *
+     * <p>{@code state} is carried in the payload rather than the event type so a consumer switches
+     * on one field instead of matching a family of event names.
+     *
+     * @param state one of {@code IN_PROGRESS}, {@code COMPLETED}, {@code ACTIVE}.
+     */
+    public void publishOnboardingState(String state, String accountId, String applicationId, String requestedRole, String actor) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("accountId", accountId);
+        payload.put("state", state);
+        if (applicationId != null) {
+            payload.put("applicationId", applicationId);
+        }
+        if (requestedRole != null) {
+            payload.put("requestedRole", requestedRole);
+        }
+        DomainEventEnvelope envelope = new DomainEventEnvelope(
+            UUID.randomUUID().toString(),
+            "onboarding.state",
+            Instant.now(),
+            SOURCE,
+            actor,
+            payload
+        );
+        publish(ONBOARDING_STATE_BINDING, "onboarding.state", accountId, envelope, state + " " + accountId);
     }
 
     public void publishEntityCreated(String entityType, String entityId, String accountId, String actor) {
