@@ -3,6 +3,8 @@ package net.jojoaddison.service.dto.patientservice;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * The slices of patientservice's documents this service reads.
@@ -38,7 +40,8 @@ public final class PatientServiceDtos {
         String mobilePhone,
         String phoneNumber,
         String email,
-        String contacts
+        String contacts,
+        Address address
     ) {
         /** Display name, tolerant of the middle names being absent, which they usually are. */
         public String fullName() {
@@ -60,6 +63,59 @@ public final class PatientServiceDtos {
         /** Best available number; the mobile is the one clinicians actually call. */
         public String contactPhone() {
             return mobilePhone != null && !mobilePhone.isBlank() ? mobilePhone : phoneNumber;
+        }
+
+        /** The address as one line, or null if there is none to show. See {@link Address#oneLine()}. */
+        public String formattedAddress() {
+            return address == null ? null : address.oneLine();
+        }
+    }
+
+    /**
+     * Where a patient lives, from the {@code address} on {@code Profile}.
+     *
+     * <p>It is a {@code @DBRef} over there, and structured rather than free text on purpose — "a
+     * digital address, a town and a region cannot be recovered from '5 Ankobra River Street' once
+     * someone has typed it that way", as that field's own javadoc puts it. A {@code @DBRef} may
+     * arrive as the referenced document, as an unresolved id, or not at all, so **every field here is
+     * optional and the caller must cope with an empty result** rather than assuming a shape.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Address(
+        String id,
+        String digitalAddress,
+        String streetAddress,
+        String areaCode,
+        String town,
+        String city,
+        String district,
+        String region,
+        String country
+    ) {
+        /**
+         * One line for a clinician who is trying to find a door.
+         *
+         * <p><b>The digital address leads</b> — GhanaPostGPS is what actually navigates in Accra,
+         * where street addressing is inconsistent and a house may have no number at all. Street, then
+         * the town or city (whichever is filled; profiles use them interchangeably), then the region.
+         * {@code areaCode}, {@code district} and {@code country} are deliberately left out: they add
+         * length without helping anyone arrive.
+         *
+         * <p>Blank segments are dropped rather than rendered as gaps, so a half-filled address reads
+         * as a short address instead of a broken one. Returns null when there is nothing at all,
+         * which the caller stores as "no snapshot" rather than as an empty string.
+         */
+        public String oneLine() {
+            String locality = isPresent(town) ? town : city;
+            String joined = Stream.of(digitalAddress, streetAddress, locality, region)
+                .filter(Address::isPresent)
+                .map(String::trim)
+                .collect(Collectors.joining(", "));
+            return joined.isBlank() ? null : joined;
+        }
+
+        private static boolean isPresent(String value) {
+            return value != null && !value.isBlank();
         }
     }
 

@@ -75,7 +75,22 @@ class PatientDirectoryServiceUnitTest {
     }
 
     private PatientProfile profile(String patientId, String first, String last, String sex, LocalDate born) {
-        return new PatientProfile("profile-" + patientId, patientId, first, null, last, born, sex, "024", null, "p@example.com", null);
+        // Trailing null is the address, added to the record in DR2 for the duty-roster visit
+        // snapshot. Nothing in this test reads it; the directory shows demographics, not doorsteps.
+        return new PatientProfile(
+            "profile-" + patientId,
+            patientId,
+            first,
+            null,
+            last,
+            born,
+            sex,
+            "024",
+            null,
+            "p@example.com",
+            null,
+            null
+        );
     }
 
     @Test

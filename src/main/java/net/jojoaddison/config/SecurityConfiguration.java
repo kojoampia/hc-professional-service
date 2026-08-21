@@ -50,6 +50,13 @@ public class SecurityConfiguration {
                     // technician — every read-only role — gets a silent 403 registering a device
                     // and simply never receives notifications, with nothing to point at.
                     .requestMatchers("/api/notifications/**").authenticated()
+                    // Booking leave is not a clinical mutation either. Fourth exception of the same
+                    // shape, and the one with the plainest consequence: under the POST /api/** rule
+                    // below, a carer, care angel, chemist or technician could not ASK FOR TIME OFF.
+                    // Per-record authorization is AbsenceService's — you write your own, an
+                    // administrator writes anyone's — and approval is @PreAuthorize(ADMIN) on the
+                    // resource, so nothing here loosens who may grant.
+                    .requestMatchers("/api/absences/**").authenticated()
                     // The STOMP handshake carries no Authorization header (browsers cannot set one
                     // on a WebSocket upgrade). It is authenticated on the CONNECT frame instead —
                     // see WebsocketConfiguration — so the handshake itself is left open.
