@@ -53,8 +53,35 @@ public final class SecurityUtils {
     public static Optional<String> getCurrentUserJWT() {
         SecurityContext securityContext = SecurityContextHolder.getContext();
         return Optional.ofNullable(securityContext.getAuthentication())
-            .filter(authentication -> authentication.getCredentials() instanceof String)
-            .map(authentication -> (String) authentication.getCredentials());
+            .map(Authentication::getCredentials)
+            .map(SecurityUtils::asTokenValue);
+    }
+
+    /**
+     * The compact serialization of whatever credential the caller authenticated with, or null.
+     *
+     * <p><b>Two shapes, and this service only ever produces the second.</b> A {@code String} is what
+     * JHipster's original {@code JWTFilter} left behind and what every test here constructed; a
+     * {@link Jwt} is what {@code oauth2ResourceServer().jwt()} produces, via the
+     * {@code JwtAuthenticationConverter} in {@code SecurityJwtConfiguration}. This method used to
+     * accept only the first, so at runtime it returned empty on every single call.
+     *
+     * <p>That mattered because {@code PatientServiceClient} relays this token to {@code hc-patient}:
+     * with none to relay it declines to call at all — correctly, since reading with no credential
+     * would either 401 or, worse, succeed against an open endpoint and return data the caller was
+     * never authorised for. So <b>every cross-stack read degraded silently to an empty list</b>: the
+     * dashboard's patient count sat at zero, a round's customer snapshot never populated on write
+     * (DR2) or on a day-view refresh (DR6), and the activity trail came back empty for a customer the
+     * caller was entitled to (DR3). Nothing failed; it all just returned nothing, which is
+     * indistinguishable from "no data yet".
+     */
+    private static String asTokenValue(Object credentials) {
+        if (credentials instanceof Jwt jwt) {
+            return jwt.getTokenValue();
+        }
+        // A blank string is not a credential. Treated as absent so the caller declines to relay it
+        // rather than sending `Authorization: Bearer ` and getting a 401 it cannot explain.
+        return credentials instanceof String token && !token.isBlank() ? token : null;
     }
 
     /**
