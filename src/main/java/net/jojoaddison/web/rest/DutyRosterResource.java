@@ -150,6 +150,25 @@ public class DutyRosterResource {
     }
 
     /**
+     * The caller's rounds for one date, with customer snapshots refreshed (DR6, docs § 6).
+     *
+     * <p>The day view's read, and **the only one that carries customer names, addresses and phone
+     * numbers to a browser**. The range read draws a grid of shift names and needs none of them; this
+     * one is opened deliberately, by someone about to walk to the address.
+     *
+     * <p>Refreshing here is a write on a read path, which § 6 flagged and accepted — it is what makes
+     * the snapshot self-healing whenever `hc-patient` is up. See
+     * {@link DutyRosterService#refreshSnapshots}.
+     *
+     * <p>No profile means an empty list rather than an error, exactly as the range read treats it:
+     * having no roster is an ordinary state.
+     */
+    @GetMapping("/day/{date}")
+    public List<DutyRoster> day(@PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return ownProfileId().map(professionalId -> dutyRosterService.dayFor(professionalId, date)).orElse(List.of());
+    }
+
+    /**
      * The caller's year, one record per day they are rostered — the year view's read (DR2).
      *
      * <p>Days with nothing on them are absent rather than returned empty; see

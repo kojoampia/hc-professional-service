@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
@@ -460,6 +461,121 @@ class DutyRosterRoundsIT {
             .customerName("Kept")
             .customerAddress("GA-1, Somewhere")
             .customerPhone("024");
+    }
+
+    // ------------------------------------------------------- day read (DR6)
+
+    @Test
+    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    void refreshesCustomerSnapshotsWhenADayIsOpened() throws Exception {
+        // The gap the write path leaves when hc-patient is down: ids stored, snapshot empty. Opening
+        // the day is what heals it (§ 6), and this is the case the write-path test hands over to.
+        store(
+            TOMORROW,
+            ShiftType.DAY,
+            "Ward 3",
+            new Visit().customerId(CUSTOMER).startTime(LocalTime.of(9, 0)).endTime(LocalTime.of(10, 0))
+        );
+        assertThat(roundNamed("Ward 3").getVisits().get(0).getCustomerName()).isNull();
+        when(patientServiceClient.profiles()).thenReturn(List.of(patientProfile()));
+
+        restMockMvc
+            .perform(get("/api/duty-roster/day/" + TOMORROW))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(1))
+            .andExpect(jsonPath("$[0].visits[0].customerName").value("Akosua Mensah"))
+            .andExpect(jsonPath("$[0].visits[0].customerPhone").value("0244000111"));
+
+        // Written back, not merely decorated on the way out — that is what makes it self-healing
+        // rather than a per-request lookup dressed up as one.
+        assertThat(roundNamed("Ward 3").getVisits().get(0).getCustomerName()).isEqualTo("Akosua Mensah");
+    }
+
+    @Test
+    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    void servesTheStoredSnapshotWhenThePatientStackIsUnreachable() throws Exception {
+        Visit visit = new Visit().customerId(CUSTOMER).startTime(LocalTime.of(9, 0)).endTime(LocalTime.of(10, 0));
+        visit.setCustomerName("Akosua Mensah");
+        visit.setCustomerAddress("GA-123-4567, 5 Ankobra River Street, Osu, Greater Accra");
+        store(TOMORROW, ShiftType.DAY, "Ward 3", visit);
+        // An outage and "every customer was deleted" are indistinguishable from here, because the
+        // client degrades to an empty list. Of the two readings, blanking every address on the roster
+        // is far worse than serving one that may be a day old.
+        when(patientServiceClient.profiles()).thenReturn(List.of());
+
+        restMockMvc
+            .perform(get("/api/duty-roster/day/" + TOMORROW))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].visits[0].customerName").value("Akosua Mensah"));
+
+        assertThat(roundNamed("Ward 3").getVisits().get(0).getCustomerName()).isEqualTo("Akosua Mensah");
+    }
+
+    @Test
+    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    void doesNotRewriteARoundWhoseSnapshotIsAlreadyCurrent() throws Exception {
+        Visit visit = new Visit().customerId(CUSTOMER).startTime(LocalTime.of(9, 0)).endTime(LocalTime.of(10, 0));
+        visit.setCustomerName("Akosua Mensah");
+        visit.setCustomerAddress("GA-123-4567, 5 Ankobra River Street, Osu, Greater Accra");
+        visit.setCustomerPhone("0244000111");
+        store(TOMORROW, ShiftType.DAY, "Ward 3", visit);
+        when(patientServiceClient.profiles()).thenReturn(List.of(patientProfile()));
+        Instant before = roundNamed("Ward 3").getLastModifiedDate();
+
+        restMockMvc.perform(get("/api/duty-roster/day/" + TOMORROW)).andExpect(status().isOk());
+
+        // A write on a read path is acceptable only if it is rare. Opening the same day twice must
+        // not churn the collection or the audit fields.
+        assertThat(roundNamed("Ward 3").getLastModifiedDate()).isEqualTo(before);
+    }
+
+    @Test
+    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    void keepsASnapshotForACustomerMissingFromTheProfileCollection() throws Exception {
+        Visit known = new Visit().customerId(CUSTOMER).startTime(LocalTime.of(9, 0)).endTime(LocalTime.of(10, 0));
+        Visit stranger = new Visit().customerId("patient-unknown").startTime(LocalTime.of(11, 0)).endTime(LocalTime.of(12, 0));
+        stranger.setCustomerName("Kofi Osei");
+        store(TOMORROW, ShiftType.DAY, "Ward 3", known, stranger);
+        when(patientServiceClient.profiles()).thenReturn(List.of(patientProfile()));
+
+        restMockMvc
+            .perform(get("/api/duty-roster/day/" + TOMORROW))
+            .andExpect(status().isOk())
+            // Refreshed where the profile was found...
+            .andExpect(jsonPath("$[0].visits[0].customerName").value("Akosua Mensah"))
+            // ...and left alone where it was not. A customer absent from an unfiltered collection may
+            // be new over there, or the collection may have been truncated by a swallowed failure.
+            // Only the 90-day purge clears a snapshot.
+            .andExpect(jsonPath("$[0].visits[1].customerName").value("Kofi Osei"));
+    }
+
+    @Test
+    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    void returnsOnlyTheCallersOwnRoundsForThatDate() throws Exception {
+        Profile other = profileRepository.save(new Profile().accountId("someone-else").firstName("So").lastName("Else"));
+        store(TOMORROW, ShiftType.DAY, "Mine");
+        DutyRoster theirs = new DutyRoster()
+            .date(TOMORROW)
+            .duty(DutyRole.NURSE)
+            .professionalId(other.getId())
+            .shift(ShiftType.EVENING)
+            .name("Theirs");
+        dutyRosterRepository.save(theirs);
+        store(TOMORROW.plusDays(1), ShiftType.DAY, "Tomorrow");
+
+        restMockMvc
+            .perform(get("/api/duty-roster/day/" + TOMORROW))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(1))
+            .andExpect(jsonPath("$[0].name").value("Mine"));
+    }
+
+    @Test
+    @WithMockUser(username = "no-profile", authorities = { "ROLE_NURSE" })
+    void answersAnEmptyDayForAnAccountWithNoProfile() throws Exception {
+        // Having no roster is an ordinary state, not a failure — the same treatment the range read
+        // gives it.
+        restMockMvc.perform(get("/api/duty-roster/day/" + TOMORROW)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
     }
 
     private void store(LocalDate date, ShiftType shift, String name, Visit... visits) {

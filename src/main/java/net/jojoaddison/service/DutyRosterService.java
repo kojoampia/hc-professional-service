@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
@@ -217,6 +218,99 @@ public class DutyRosterService {
             .map(Visit::getCustomerId)
             .filter(id -> id != null && !id.isBlank())
             .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    /**
+     * The caller's rounds for one date, with their customer snapshots brought up to date
+     * (docs/duty-roster.md § 6, DR6).
+     *
+     * <p><b>This is the only read that refreshes, and that is the design rather than an omission.</b>
+     * § 6 says "opening a day fetches the current profiles and updates the stored snapshots behind the
+     * render" — a *day*, not a range. The calendar's range read draws coloured squares and shift
+     * names; it needs no customer at all, so refreshing there would spend a cross-stack call on every
+     * page-turn to update data nothing is about to show. One day, opened deliberately, is where the
+     * address is about to be read off the screen and walked to.
+     *
+     * <p><b>It is a write on a read path</b>, which § 6 flagged and accepted. Two things keep it
+     * honest: only rounds whose snapshot actually changed are saved, so the common case of opening
+     * yesterday's round again writes nothing at all; and failure is silent, so an unreachable patient
+     * stack yields the stored snapshot rather than an error. A clinician holding a slightly old
+     * address can still knock on the door; one holding an error page cannot.
+     */
+    public List<DutyRoster> dayFor(String professionalId, LocalDate date) {
+        if (professionalId == null || date == null) {
+            return List.of();
+        }
+        List<DutyRoster> rounds = dutyRosterRepository.findRoundsInRange(professionalId, date, date);
+        refreshSnapshots(rounds);
+        return rounds;
+    }
+
+    /**
+     * Bring the customer snapshots on these rounds up to date, in **one** cross-stack call.
+     *
+     * <p>This is the answer to open question 2, "batching the on-read refresh". The naive shape is one
+     * profile lookup per visit, which is a dozen cross-stack calls to open a busy day; this fetches the
+     * collection once and indexes it in memory, exactly as {@link #populateSnapshots} does on the write
+     * path. It is a cache rather than a query only because {@code /api/profiles} still takes no filter
+     * — when it learns to, this becomes a query and the whole shape gets cheaper.
+     *
+     * <p><b>An empty profile list is treated as an outage, not as "every customer was deleted".</b>
+     * {@link PatientServiceClient} degrades to an empty list when the sibling stack is unreachable, so
+     * the two are indistinguishable from here — and of the two readings, blanking every address on the
+     * roster is far worse than keeping one that may be a day old. Nothing is cleared on a miss for the
+     * same reason: a customer absent from the collection may be new, or the collection may have been
+     * truncated by a failure this client is designed to swallow. **Only the 90-day purge clears a
+     * snapshot**, and it does so deliberately.
+     */
+    public int refreshSnapshots(List<DutyRoster> rounds) {
+        List<Visit> visits = rounds.stream().flatMap(round -> round.getVisits().stream()).toList();
+        if (visits.isEmpty()) {
+            return 0;
+        }
+        Map<String, PatientProfile> byPatientId = new LinkedHashMap<>();
+        for (PatientProfile profile : patientServiceClient.profiles()) {
+            if (profile.patientId() != null) {
+                byPatientId.putIfAbsent(profile.patientId(), profile);
+            }
+        }
+        if (byPatientId.isEmpty()) {
+            log.debug("Patient profiles unavailable; serving {} round(s) from their stored snapshots", rounds.size());
+            return 0;
+        }
+
+        int refreshed = 0;
+        for (DutyRoster round : rounds) {
+            boolean changed = false;
+            for (Visit visit : round.getVisits()) {
+                PatientProfile profile = byPatientId.get(visit.getCustomerId());
+                if (profile == null) {
+                    continue;
+                }
+                String name = blankToNull(profile.fullName());
+                String address = profile.formattedAddress();
+                String phone = blankToNull(profile.contactPhone());
+                if (!Objects.equals(name, visit.getCustomerName())) {
+                    visit.setCustomerName(name);
+                    changed = true;
+                }
+                if (!Objects.equals(address, visit.getCustomerAddress())) {
+                    visit.setCustomerAddress(address);
+                    changed = true;
+                }
+                if (!Objects.equals(phone, visit.getCustomerPhone())) {
+                    visit.setCustomerPhone(phone);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                // Identifiers only in the log line — the snapshot is exactly what must not reach one.
+                log.debug("Refreshed customer snapshots on round {}", round.getId());
+                dutyRosterRepository.save(round);
+                refreshed++;
+            }
+        }
+        return refreshed;
     }
 
     // --------------------------------------------------------------- writes
