@@ -2,6 +2,7 @@ package net.jojoaddison.service;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import net.jojoaddison.broker.DomainEventEnvelope;
@@ -33,6 +34,11 @@ import org.springframework.stereotype.Service;
  * <p><b>Both transports always fire.</b> This does not try to work out whether the recipient has a
  * live socket: the server cannot know reliably, and guessing produces missed notifications. The
  * client dedupes on messageId across push and STOMP.
+ *
+ * <p><b>It names copy, it does not write copy (MOB10).</b> What goes out is a bundle key and, at
+ * most, the sender's name as an argument; the text is rendered per <em>device</em> from
+ * {@code DeviceToken.langKey} by {@link PushCopyService}, because one account's handsets can be set
+ * to different languages. This handler knows the recipient's account and nothing about their phones.
  */
 @Service
 public class PushEventHandler {
@@ -108,13 +114,16 @@ public class PushEventHandler {
         boolean showSender = profileService.wantsSenderNameInPush(accountId);
         String sender = showSender ? String.valueOf(payload.getOrDefault("senderName", "")) : "";
 
+        boolean named = showSender && !sender.isBlank();
+
         pushNotificationService.sendToAccount(
             accountId,
             new PushPayload(
                 "push.message.title",
-                showSender && !sender.isBlank() ? "push.message.body.named" : "push.message.body",
-                "Abofonsa BridgeCare",
-                showSender && !sender.isBlank() ? "New message from " + sender : "You have a new message",
+                named ? "push.message.body.named" : "push.message.body",
+                // The sender's name is the only argument any push copy takes, and it travels as an
+                // argument rather than a composed string so the word order can differ per language.
+                named ? List.of(sender) : List.of(),
                 // Collapse per conversation so a busy thread is one tray row, not ten.
                 String.valueOf(payload.getOrDefault("conversationId", "messages")),
                 Map.of(
@@ -149,8 +158,7 @@ public class PushEventHandler {
             new PushPayload(
                 "push.compliance.title",
                 "push.compliance.body",
-                "Abofonsa BridgeCare",
-                "A credential needs your attention",
+                List.of(),
                 "compliance",
                 Map.of(
                     "type",
