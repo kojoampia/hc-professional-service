@@ -38,6 +38,17 @@ public class Visit implements Serializable {
     private static final long serialVersionUID = 1L;
 
     /**
+     * Identity within the round, so a single visit can be moved (DR4).
+     *
+     * <p>An embedded document needs none of its own to be stored, and this one had none until
+     * visit-level reassignment required a way to name one. Assigned on write when absent; never
+     * reused. It is <b>not</b> a customer identifier and carries no meaning — two visits to the same
+     * person on the same day have different ids.
+     */
+    @Field("id")
+    private String id;
+
+    /**
      * The patient stack's {@code Profile.patientId} — <b>not</b> its profile id.
      *
      * <p>One id serves both reads the day view needs: {@code patientservice} {@code Profile} for
@@ -68,6 +79,19 @@ public class Visit implements Serializable {
     /** Snapshot. The mobile where there is one; a clinician calls ahead from the street. */
     @Field("customer_phone")
     private String customerPhone;
+
+    public String getId() {
+        return this.id;
+    }
+
+    public Visit id(String id) {
+        this.id = id;
+        return this;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
 
     public String getCustomerId() {
         return this.customerId;
@@ -167,7 +191,8 @@ public class Visit implements Serializable {
     @Override
     public String toString() {
         return "Visit{" +
-                "customerId='" + getCustomerId() + "'" +
+                "id=" + getId() +
+                ", customerId='" + getCustomerId() + "'" +
                 ", startTime='" + getStartTime() + "'" +
                 ", endTime='" + getEndTime() + "'" +
                 "}";

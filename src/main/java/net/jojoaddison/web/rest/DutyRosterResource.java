@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -159,6 +160,49 @@ public class DutyRosterResource {
     public List<DutyRosterService.DaySummary> summary(@RequestParam(required = false) Integer year) {
         int target = year == null ? LocalDate.now().getYear() : year;
         return ownProfileId().map(professionalId -> dutyRosterService.summariseYear(professionalId, target)).orElse(List.of());
+    }
+
+    /**
+     * Move a whole round to another professional (DR4, docs § 8) — the default form of cover.
+     *
+     * <p>The round's customers, their times and their order move together, in one action, because
+     * they are a coherent plan and splitting them by hand loses it. Use this before approving an
+     * absence that {@code PUT /api/absences/{id}/approve} has just refused with a 409.
+     */
+    @PutMapping("/{id}/reassign")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
+    public DutyRoster reassign(@PathVariable String id, @RequestParam String professionalId) {
+        requireProfile(professionalId);
+        return dutyRosterService.reassignRound(id, professionalId);
+    }
+
+    /**
+     * Move a single visit to another professional (DR4, docs § 8) — the fallback.
+     *
+     * <p>For when one person cannot take the whole round. The visit lands in the target's round for
+     * the same date and shift, creating one if they have none. Returns the <em>target</em> round,
+     * since that is where the visit now is.
+     */
+    @PutMapping("/{id}/visits/{visitId}/reassign")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
+    public DutyRoster reassignVisit(@PathVariable String id, @PathVariable String visitId, @RequestParam String professionalId) {
+        requireProfile(professionalId);
+        return dutyRosterService.reassignVisit(id, visitId, professionalId);
+    }
+
+    /**
+     * The target of a reassignment must be somebody who exists — checked here, as {@link #assign}
+     * checks it, so both write paths refuse an unknown id the same way.
+     *
+     * <p>Without this a mistyped id is <b>silently destructive</b> rather than an error: the round is
+     * saved against a professional nobody is, so it leaves the source clinician's roster, never
+     * appears on anyone else's, and survives only in the administrator's {@code /all} list. The
+     * customers on it are simply not visited, and nothing anywhere says so.
+     */
+    private void requireProfile(String professionalId) {
+        if (professionalId == null || professionalId.isBlank() || profileRepository.findById(professionalId).isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown professional profile");
+        }
     }
 
     /**

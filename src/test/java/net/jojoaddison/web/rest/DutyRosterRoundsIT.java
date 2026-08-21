@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -233,6 +234,88 @@ class DutyRosterRoundsIT {
             .andExpect(status().isBadRequest());
 
         assertThat(dutyRosterRepository.count()).isOne();
+    }
+
+    // ----------------------------------------------------------- reassignment
+
+    @Test
+    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    void movesASingleVisitIntoTheTargetsRoundForTheSameDateAndShift() throws Exception {
+        Profile cover = profileRepository.save(new Profile().accountId("cover-nurse").firstName("Co").lastName("Ver"));
+        restMockMvc
+            .perform(
+                post("/api/duty-roster")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(roundJson("DAY", visitJson("c-1", "09:00", "10:00") + "," + visitJson("c-2", "11:00", "12:00")))
+            )
+            .andExpect(status().isCreated());
+
+        DutyRoster source = dutyRosterRepository.findAll().get(0);
+        // Ids are assigned on write, not sent by the client — a client inventing them could collide
+        // two visits in one round and make the wrong one move.
+        String visitId = source.getVisits().get(0).getId();
+        assertThat(visitId).isNotBlank();
+
+        restMockMvc
+            .perform(put("/api/duty-roster/" + source.getId() + "/visits/" + visitId + "/reassign").param("professionalId", cover.getId()))
+            .andExpect(status().isOk())
+            // Returns the target, because that is where the visit now is. No round existed for the
+            // cover nurse, so one was created carrying the source's duty and name — otherwise the day
+            // view shows an unnamed shift that appeared from nowhere.
+            .andExpect(jsonPath("$.professionalId").value(cover.getId()))
+            .andExpect(jsonPath("$.name").value("Ward 3"))
+            .andExpect(jsonPath("$.visits.length()").value(1))
+            .andExpect(jsonPath("$.visits[0].customerId").value("c-1"));
+
+        assertThat(roundNamed("Ward 3").getVisits()).hasSize(1);
+        assertThat(dutyRosterRepository.count()).isEqualTo(2);
+    }
+
+    @Test
+    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    void refusesAReassignmentThatWouldDoubleBookTheTarget() throws Exception {
+        Profile busy = profileRepository.save(new Profile().accountId("busy-nurse").firstName("Bu").lastName("Sy"));
+        store(TOMORROW, ShiftType.DAY, "Theirs", new Visit().customerId("c-9").startTime(LocalTime.of(9, 0)).endTime(LocalTime.of(12, 0)));
+        DutyRoster theirs = roundNamed("Theirs");
+        theirs.setProfessionalId(busy.getId());
+        dutyRosterRepository.save(theirs);
+
+        store(TOMORROW, ShiftType.DAY, "Mine", new Visit().customerId("c-1").startTime(LocalTime.of(11, 0)).endTime(LocalTime.of(13, 0)));
+
+        // Moving a round onto somebody already working those hours is the failure this catches. A
+        // 400 like every other overlap: the conflict is with data the administrator is looking at
+        // and can pick a different target for, rather than a separate resource to go and resolve.
+        restMockMvc
+            .perform(put("/api/duty-roster/" + roundNamed("Mine").getId() + "/reassign").param("professionalId", busy.getId()))
+            .andExpect(status().isBadRequest());
+
+        assertThat(roundNamed("Mine").getProfessionalId()).isEqualTo(profile.getId());
+    }
+
+    @Test
+    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    void refusesAReassignmentToAProfessionalWhoDoesNotExist() throws Exception {
+        store(TOMORROW, ShiftType.DAY, "Mine", new Visit().customerId("c-1").startTime(LocalTime.of(9, 0)).endTime(LocalTime.of(10, 0)));
+
+        // A mistyped id is silently destructive rather than an error without this check: the round
+        // is saved against a professional nobody is, so it leaves the source clinician's roster,
+        // never appears on anyone else's, and the customers on it are simply not visited. POST
+        // checks the same thing the same way.
+        restMockMvc
+            .perform(put("/api/duty-roster/" + roundNamed("Mine").getId() + "/reassign").param("professionalId", "not-a-profile"))
+            .andExpect(status().isBadRequest());
+
+        assertThat(roundNamed("Mine").getProfessionalId()).isEqualTo(profile.getId());
+    }
+
+    @Test
+    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    void reassignmentIsAdminOnly() throws Exception {
+        store(TOMORROW, ShiftType.DAY, "Mine");
+
+        restMockMvc
+            .perform(put("/api/duty-roster/" + roundNamed("Mine").getId() + "/reassign").param("professionalId", "someone"))
+            .andExpect(status().isForbidden());
     }
 
     // -------------------------------------------------------------- range read

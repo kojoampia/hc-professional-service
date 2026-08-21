@@ -14,6 +14,7 @@ import net.jojoaddison.domain.DutyRoster;
 import net.jojoaddison.domain.Visit;
 import net.jojoaddison.domain.enumeration.DutyRole;
 import net.jojoaddison.domain.enumeration.ShiftType;
+import net.jojoaddison.repository.AbsenceRepository;
 import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.service.DutyRosterService.InvalidRoundException;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,13 +45,16 @@ class DutyRosterServiceUnitTest {
     private DutyRosterRepository dutyRosterRepository;
 
     @Mock
+    private AbsenceRepository absenceRepository;
+
+    @Mock
     private PatientServiceClient patientServiceClient;
 
     private DutyRosterService service;
 
     @BeforeEach
     void setUp() {
-        service = new DutyRosterService(dutyRosterRepository, patientServiceClient);
+        service = new DutyRosterService(dutyRosterRepository, absenceRepository, patientServiceClient);
         when(dutyRosterRepository.findRoundsAround(anyString(), any(), any())).thenReturn(List.of());
         when(patientServiceClient.profiles()).thenReturn(List.of());
     }

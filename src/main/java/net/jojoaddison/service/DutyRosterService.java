@@ -12,10 +12,15 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.UUID;
 import java.util.stream.Collectors;
+import net.jojoaddison.domain.Absence;
 import net.jojoaddison.domain.DutyRoster;
 import net.jojoaddison.domain.Visit;
+import net.jojoaddison.domain.enumeration.AbsenceStatus;
+import net.jojoaddison.domain.enumeration.AbsenceType;
 import net.jojoaddison.domain.enumeration.ShiftType;
+import net.jojoaddison.repository.AbsenceRepository;
 import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.PatientProfile;
 import org.slf4j.Logger;
@@ -52,10 +57,16 @@ public class DutyRosterService {
     public static final int SNAPSHOT_RETENTION_DAYS = 90;
 
     private final DutyRosterRepository dutyRosterRepository;
+    private final AbsenceRepository absenceRepository;
     private final PatientServiceClient patientServiceClient;
 
-    public DutyRosterService(DutyRosterRepository dutyRosterRepository, PatientServiceClient patientServiceClient) {
+    public DutyRosterService(
+        DutyRosterRepository dutyRosterRepository,
+        AbsenceRepository absenceRepository,
+        PatientServiceClient patientServiceClient
+    ) {
         this.dutyRosterRepository = dutyRosterRepository;
+        this.absenceRepository = absenceRepository;
         this.patientServiceClient = patientServiceClient;
     }
 
@@ -72,10 +83,25 @@ public class DutyRosterService {
      *
      * <p>Carries the shifts worked and how many visits they held — enough for a year grid to colour a
      * day and show a density, without shipping the rounds themselves, which would mean shipping a
-     * year of customer snapshots to render twelve small squares. DR4 adds absence to this shape;
-     * until then a day the professional is off is simply absent from the result.
+     * year of customer snapshots to render twelve small squares.
+     *
+     * <p><b>{@code absence} was added in DR4</b>, which is what lets the year view finally distinguish
+     * the three states § 8 describes. Until then "off" and "not yet rostered" were the same thing — a
+     * day missing from the result — and they still are when {@code absence} is null. A day can carry
+     * both: a round <em>and</em> an absence over it means leave was requested but the cover has not
+     * been arranged, and that is precisely the day an administrator needs to see, so neither field
+     * suppresses the other.
      */
-    public record DaySummary(LocalDate date, List<ShiftType> shifts, int visits) {}
+    public record DaySummary(LocalDate date, List<ShiftType> shifts, int visits, AbsenceOnDay absence) {}
+
+    /**
+     * The absence covering a day, if any.
+     *
+     * <p>Status is carried, not just type, because {@code REQUESTED} renders hatched and
+     * {@code APPROVED} solid — a clinician has to be able to see that time off is asked for rather
+     * than granted, and colour alone cannot say it.
+     */
+    public record AbsenceOnDay(AbsenceType type, AbsenceStatus status) {}
 
     /** What a purge run did. Rounds are counted, not visits, so the number matches the audit line. */
     public record PurgeResult(int roundsPurged, int visitsPurged) {}
@@ -110,32 +136,49 @@ public class DutyRosterService {
     /**
      * One record per day the professional is rostered in the given year, earliest first.
      *
-     * <p><b>Only days with something on them.</b> Returning all 365 would make the empty days look
-     * like data and triple the payload to say nothing; a year grid renders the gaps as off. Note that
-     * "off" and "not yet rostered" are indistinguishable in this result, and deliberately so until
-     * DR4 gives absence a representation of its own.
+     * <p><b>Only days with something on them</b> — a round, an absence, or both. Returning all 365
+     * would make the empty days look like data and triple the payload to say nothing; a year grid
+     * renders the gaps as off. Since DR4 an absent day <em>is</em> something, so a granted holiday
+     * appears here with no shifts and no visits, which is exactly what the year view colours green.
      */
     public List<DaySummary> summariseYear(String professionalId, int year) {
-        List<DutyRoster> rounds = dutyRosterRepository.findRoundsInRange(
-            professionalId,
-            LocalDate.of(year, 1, 1),
-            LocalDate.of(year, 12, 31)
-        );
+        LocalDate start = LocalDate.of(year, 1, 1);
+        LocalDate end = LocalDate.of(year, 12, 31);
         Map<LocalDate, List<DutyRoster>> byDate = new TreeMap<>();
-        for (DutyRoster round : rounds) {
+        for (DutyRoster round : dutyRosterRepository.findRoundsInRange(professionalId, start, end)) {
             byDate.computeIfAbsent(round.getDate(), key -> new ArrayList<>()).add(round);
         }
+
+        // Absences are stored as ranges and rendered per day, so they are expanded here — clipped to
+        // the year, since one can run across a new year and only this year's half belongs in it.
+        Map<LocalDate, Absence> absenceByDate = new TreeMap<>();
+        for (Absence absence : absenceRepository.findOverlapping(professionalId, start, end)) {
+            LocalDate day = absence.getFromDate().isBefore(start) ? start : absence.getFromDate();
+            LocalDate last = absence.getToDate().isAfter(end) ? end : absence.getToDate();
+            while (!day.isAfter(last)) {
+                // An APPROVED absence wins a day it shares with a REQUESTED one: it is the one that
+                // actually stops the clinician working, and it is the safer thing to render.
+                Absence existing = absenceByDate.get(day);
+                if (existing == null || (existing.getStatus() != AbsenceStatus.APPROVED && absence.getStatus() == AbsenceStatus.APPROVED)) {
+                    absenceByDate.put(day, absence);
+                }
+                byDate.computeIfAbsent(day, key -> new ArrayList<>());
+                day = day.plusDays(1);
+            }
+        }
+
         List<DaySummary> summaries = new ArrayList<>();
-        byDate.forEach(
-            (date, dayRounds) ->
-                summaries.add(
-                    new DaySummary(
-                        date,
-                        dayRounds.stream().map(DutyRoster::getShift).distinct().sorted().toList(),
-                        dayRounds.stream().mapToInt(round -> round.getVisits().size()).sum()
-                    )
+        byDate.forEach((date, dayRounds) -> {
+            Absence absence = absenceByDate.get(date);
+            summaries.add(
+                new DaySummary(
+                    date,
+                    dayRounds.stream().map(DutyRoster::getShift).distinct().sorted().toList(),
+                    dayRounds.stream().mapToInt(round -> round.getVisits().size()).sum(),
+                    absence == null ? null : new AbsenceOnDay(absence.getType(), absence.getStatus())
                 )
-        );
+            );
+        });
         return summaries;
     }
 
@@ -187,7 +230,105 @@ public class DutyRosterService {
     public DutyRoster assign(DutyRoster round) {
         validateRound(round);
         populateSnapshots(round);
+        ensureVisitIds(round);
         return dutyRosterRepository.save(round);
+    }
+
+    /**
+     * Move a whole round to another professional, visits and all (docs/duty-roster.md § 8, DR4).
+     *
+     * <p><b>The default form of reassignment, and one auditable action.</b> When someone is off, the
+     * round they were doing usually goes to one other person intact — the customers, their times and
+     * their order are a coherent plan, and splitting it up by hand loses that. The snapshots travel
+     * with the visits unchanged; they describe the customer, not the clinician.
+     *
+     * <p>Validated against the <em>target's</em> existing roster, so a reassignment cannot quietly
+     * double-book the person taking it on. That is a 400 like any other overlap, not a 409: the
+     * conflict is with data the administrator is looking at and can pick a different target for.
+     */
+    public DutyRoster reassignRound(String rosterId, String toProfessionalId) {
+        DutyRoster round = dutyRosterRepository
+            .findById(rosterId)
+            .orElseThrow(() -> new InvalidRoundException("No such duty roster assignment"));
+        if (toProfessionalId == null || toProfessionalId.isBlank()) {
+            throw new InvalidRoundException("A target professional is required");
+        }
+        if (toProfessionalId.equals(round.getProfessionalId())) {
+            // Not an error worth failing on, but not a no-op worth pretending about either.
+            return round;
+        }
+        DutyRoster moved = round.professionalId(toProfessionalId);
+        validateRound(moved);
+        return dutyRosterRepository.save(moved);
+    }
+
+    /**
+     * Move one visit to another professional (docs/duty-roster.md § 8, DR4).
+     *
+     * <p><b>The fallback, for when one person cannot take the whole round.</b> The visit lands in the
+     * target's round for the same date and shift — an existing one if they already have it, a new one
+     * otherwise, copying the source's duty and name so the day view reads sensibly rather than showing
+     * an unnamed shift that appeared from nowhere.
+     *
+     * <p>The target round is validated with the visit in it, so this cannot double-book them either.
+     * The source is saved second and only if the target succeeded: there is no transaction across two
+     * documents here, and the failure worth avoiding is the one where the visit vanishes from the
+     * source without arriving anywhere. Duplicating it is recoverable; losing it is not.
+     */
+    public DutyRoster reassignVisit(String rosterId, String visitId, String toProfessionalId) {
+        DutyRoster source = dutyRosterRepository
+            .findById(rosterId)
+            .orElseThrow(() -> new InvalidRoundException("No such duty roster assignment"));
+        Visit visit = source
+            .getVisits()
+            .stream()
+            .filter(candidate -> visitId != null && visitId.equals(candidate.getId()))
+            .findFirst()
+            .orElseThrow(() -> new InvalidRoundException("No such visit on this assignment"));
+        if (toProfessionalId == null || toProfessionalId.isBlank()) {
+            throw new InvalidRoundException("A target professional is required");
+        }
+        if (toProfessionalId.equals(source.getProfessionalId())) {
+            return source;
+        }
+
+        DutyRoster target = dutyRosterRepository
+            .findRoundsInRange(toProfessionalId, source.getDate(), source.getDate())
+            .stream()
+            .filter(candidate -> candidate.getShift() == source.getShift())
+            .findFirst()
+            .orElseGet(
+                () ->
+                    new DutyRoster()
+                        .date(source.getDate())
+                        .duty(source.getDuty())
+                        .professionalId(toProfessionalId)
+                        .shift(source.getShift())
+                        .name(source.getName())
+                        .description(source.getDescription())
+            );
+        target.getVisits().add(visit);
+        validateRound(target);
+
+        dutyRosterRepository.save(target);
+        source.getVisits().removeIf(candidate -> visitId.equals(candidate.getId()));
+        dutyRosterRepository.save(source);
+        return target;
+    }
+
+    /**
+     * Give every visit an id, leaving any it already has alone.
+     *
+     * <p>Ids exist so a single visit can be named for reassignment; they are assigned on write rather
+     * than required from the client, because a client inventing them could collide two visits in one
+     * round and make the wrong one move.
+     */
+    private void ensureVisitIds(DutyRoster round) {
+        for (Visit visit : round.getVisits()) {
+            if (visit.getId() == null || visit.getId().isBlank()) {
+                visit.setId(UUID.randomUUID().toString());
+            }
+        }
     }
 
     /**
