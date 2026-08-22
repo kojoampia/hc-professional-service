@@ -50,7 +50,19 @@ public final class PatientDtos {
 
     public record ClinicalReport(String id, String occurredAt, String label, String reportType, String url) {}
 
-    public record CaseSummary(String id, String openedAt, String brief, String status) {}
+    /**
+     * A case, as a list row.
+     *
+     * <p>{@code patientId} was added on 2026-08-22 and is not decoration. The queue at
+     * {@code GET /api/cases} spans patients, and editing a case goes to
+     * {@code PATCH /api/patients/{patientId}/cases/{caseId}} — the patient is in that path because
+     * it is what the entitlement check checks against. Without this field a client can list cases it
+     * cannot open, edit or even navigate from, which is what shipping the queue first revealed.
+     *
+     * <p>Nested inside a {@code PatientRecord} it is redundant, and harmless: the same shape is
+     * cheaper than two.
+     */
+    public record CaseSummary(String id, String patientId, String openedAt, String brief, String status) {}
 
     /**
      * A full patient record, assembled from this service's relation plus five patientservice reads.
