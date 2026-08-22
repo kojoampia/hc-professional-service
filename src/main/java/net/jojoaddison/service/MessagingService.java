@@ -2,6 +2,7 @@ package net.jojoaddison.service;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -182,7 +183,10 @@ public class MessagingService {
                 }
             });
         if (accounts.isEmpty()) {
-            log.info("Role broadcast to {} matched no active professionals — message stored with no recipients", role);
+            // Left as a log rather than a throw because this method is also used on the reply path,
+            // where the set legitimately narrows. The REFUSAL lives at the resource, which is the
+            // only place that knows the caller is starting a broadcast — see MessagingResource.
+            log.info("Role broadcast to {} matched no active professionals", role);
         }
         return accounts;
     }
@@ -240,5 +244,78 @@ public class MessagingService {
         unread.forEach(row -> row.read(Boolean.TRUE).readAt(now));
         messageRecipientRepository.saveAll(unread);
         return unread.size();
+    }
+
+    /**
+     * Marks one thread read, and answers with the caller's NEW total unread count.
+     *
+     * <p><b>Why this exists.</b> Until now a client could mark one message or mark everything, so
+     * opening a single thread meant either N calls or clearing every unread badge in the app. The
+     * mobile client took the second option and its own comment apologised for it — a clinician who
+     * opened one conversation lost the signal that three others were waiting.
+     *
+     * <p>Returning the count rather than 204 is deliberate: the badge is the reason the caller made
+     * this request, and a separate {@code /unread-count} round trip afterwards is a second request
+     * for something this one already knows. It also removes the window where the two disagree.
+     *
+     * <p>Scoped through the caller's own recipient rows, like every other read here — a conversation
+     * id is not authority over it.
+     */
+    public long markConversationRead(String accountId, String conversationId) {
+        List<MessageRecipient> rows = messageRecipientRepository
+            .findByRecipientIdAndConversationId(accountId, conversationId)
+            .stream()
+            .filter(row -> !Boolean.TRUE.equals(row.getRead()))
+            .toList();
+        if (!rows.isEmpty()) {
+            Instant now = Instant.now();
+            rows.forEach(row -> row.read(Boolean.TRUE).readAt(now));
+            messageRecipientRepository.saveAll(rows);
+        }
+        return unreadCount(accountId);
+    }
+
+    /**
+     * Who a clinician may address, optionally narrowed by role or a name fragment.
+     *
+     * <p><b>Sourced from the same place {@link #resolveRole} reads</b>, so the picker and the
+     * broadcast cannot disagree about who exists. The alternative — the gateway's
+     * {@code PublicUserResource} — returns every gateway user unfiltered, which is not something to
+     * put behind a recipient picker on a clinical app.
+     *
+     * <p>It inherits that method's caveat: this is who holds an authority according to <em>this</em>
+     * service's application records, which approximates the gateway's actual grant.
+     */
+    public List<Recipient> recipients(String query, String role) {
+        String needle = query == null ? null : query.trim().toLowerCase(java.util.Locale.ROOT);
+        return professionalApplicationRepository
+            .findByStatusOrderBySubmittedAtDesc(OnboardingStatus.ACTIVE)
+            .stream()
+            .filter(application -> application.getAccountId() != null)
+            .filter(application -> role == null || role.isBlank() || role.equalsIgnoreCase(application.getRequestedRole()))
+            .map(application -> new Recipient(application.getAccountId(), application.getLogin(), application.getRequestedRole()))
+            .filter(recipient -> needle == null || needle.isBlank() || matches(recipient, needle))
+            .sorted(Comparator.comparing(Recipient::displayName, Comparator.nullsLast(Comparator.naturalOrder())))
+            .toList();
+    }
+
+    private static boolean matches(Recipient recipient, String needle) {
+        return (
+            (recipient.displayName() != null && recipient.displayName().toLowerCase(java.util.Locale.ROOT).contains(needle)) ||
+            (recipient.accountId() != null && recipient.accountId().toLowerCase(java.util.Locale.ROOT).contains(needle))
+        );
+    }
+
+    /**
+     * Someone a message can be addressed to.
+     *
+     * <p>Carries no contact details and no clinical information — an account id, a display name and
+     * a role are what a picker needs, and are already visible to any colleague.
+     */
+    public record Recipient(String accountId, String displayName, String role) {}
+
+    /** Whether any active professional holds this role. Used to refuse an empty broadcast. */
+    public boolean roleHasRecipients(String role) {
+        return !resolveRole(role).isEmpty();
     }
 }
