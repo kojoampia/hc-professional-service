@@ -129,11 +129,22 @@ public final class PatientServiceDtos {
     public record ClinicalCase(
         String id,
         String patientId,
+        Integer caseNumber,
+        String title,
         Instant openedAt,
         Instant closedAt,
         String brief,
         String status,
-        String assignedProfessionalId
+        String symptoms,
+        String diagnosis,
+        String assignedProfessionalId,
+        String assignedRosterId,
+        /**
+         * Set when the case has been retired from the working queue. Archived cases are excluded
+         * from the sibling's list unless {@code includeArchived} is asked for, so this is normally
+         * null on anything read through here.
+         */
+        Instant archivedAt
     ) {}
 
     /**

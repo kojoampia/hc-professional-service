@@ -114,6 +114,29 @@ public class PatientServiceClient {
     }
 
     /**
+     * Partially updates a clinical case, as the calling clinician.
+     *
+     * <p>patientservice's PATCH requires the id in the body to match the one in the path — a JHipster
+     * convention — so the caller must include it. Sent as {@code application/merge-patch+json}, which
+     * is what that endpoint consumes.
+     */
+    public ClinicalCase patchClinicalCase(String id, Map<String, Object> body) {
+        if (!enabled) {
+            throw new IllegalStateException("patientservice is disabled; cannot update a case");
+        }
+        String token = SecurityUtils.getCurrentUserJWT()
+            .orElseThrow(() -> new IllegalStateException("No caller token available; refusing to update a case"));
+        return restClient
+            .patch()
+            .uri("/api/clinical-cases/{id}", id)
+            .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+            .contentType(MediaType.valueOf("application/merge-patch+json"))
+            .body(body)
+            .retrieve()
+            .body(ClinicalCase.class);
+    }
+
+    /**
      * One POST, as the calling clinician.
      *
      * <p><b>Writes do not fail soft, and that is the whole point of a separate method.</b> The reads

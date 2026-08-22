@@ -19,6 +19,7 @@ import net.jojoaddison.service.PatientDirectoryService.DirectoryFilter;
 import net.jojoaddison.service.dto.PatientDtos.CreateActivity;
 import net.jojoaddison.service.dto.PatientDtos.CreateReport;
 import net.jojoaddison.service.dto.PatientDtos.PatientListItem;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDtos;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ActivityLog;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.PatientProfile;
@@ -114,7 +115,23 @@ class PatientDirectoryServiceUnitTest {
         // no scheduled task. Either source alone hides half the caseload.
         when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task("patient-task")));
         when(patientService.clinicalCases()).thenReturn(
-            List.of(new ClinicalCase("case-1", "patient-case", Instant.now(), null, "brief", "OPEN", PROFESSIONAL_ID))
+            List.of(
+                new ClinicalCase(
+                    "case-1",
+                    "patient-case",
+                    1,
+                    "t",
+                    Instant.now(),
+                    null,
+                    "brief",
+                    "OPEN",
+                    null,
+                    null,
+                    PROFESSIONAL_ID,
+                    null,
+                    null
+                )
+            )
         );
         when(patientService.profiles()).thenReturn(
             List.of(
@@ -129,7 +146,23 @@ class PatientDirectoryServiceUnitTest {
     @Test
     void aCaseAssignedToSomeoneElseIsNotMine() {
         when(patientService.clinicalCases()).thenReturn(
-            List.of(new ClinicalCase("case-1", "patient-other", Instant.now(), null, "brief", "OPEN", "a-different-professional"))
+            List.of(
+                new ClinicalCase(
+                    "case-1",
+                    "patient-other",
+                    1,
+                    "t",
+                    Instant.now(),
+                    null,
+                    "brief",
+                    "OPEN",
+                    null,
+                    null,
+                    "a-different-professional",
+                    null,
+                    null
+                )
+            )
         );
         when(patientService.profiles()).thenReturn(List.of(profile("patient-other", "Not", "Mine", "female", LocalDate.of(1990, 1, 1))));
 
@@ -624,5 +657,149 @@ class PatientDirectoryServiceUnitTest {
         public <S extends net.jojoaddison.domain.PatientWriteReceipt> java.util.List<S> insert(Iterable<S> entities) {
             throw new UnsupportedOperationException();
         }
+    }
+
+    // --- Cases (web-mobile-port.md § Phase 1.4) -----------------------------------------------
+
+    private static PatientServiceDtos.ClinicalCase aCase(String id, String patientId, String status, String assignedTo) {
+        return new PatientServiceDtos.ClinicalCase(
+            id,
+            patientId,
+            1,
+            "Title",
+            Instant.parse("2026-08-20T09:00:00Z"),
+            null,
+            "brief",
+            status,
+            "symptoms",
+            "diagnosis",
+            assignedTo,
+            null,
+            null
+        );
+    }
+
+    @Test
+    void theCaseQueueIsMINEonly() {
+        // The reason this is proxied at all: patientservice's own endpoint has no clinician scope,
+        // so a client calling it directly receives every case in the estate.
+        when(patientService.clinicalCases()).thenReturn(
+            List.of(aCase("c-mine", MINE, "OPEN", PROFESSIONAL_ID), aCase("c-theirs", "p-other", "OPEN", "someone-else"))
+        );
+
+        assertThat(service.myCases(PageRequest.of(0, 20), null).getContent()).extracting("id").containsExactly("c-mine");
+    }
+
+    @Test
+    void anARCHIVEDcaseIsNotInTheWORKINGqueue() {
+        var archived = new PatientServiceDtos.ClinicalCase(
+            "c-old",
+            MINE,
+            1,
+            "t",
+            Instant.parse("2026-08-20T09:00:00Z"),
+            null,
+            "b",
+            "OPEN",
+            null,
+            null,
+            PROFESSIONAL_ID,
+            null,
+            Instant.parse("2026-08-21T09:00:00Z")
+        );
+        when(patientService.clinicalCases()).thenReturn(List.of(archived, aCase("c-open", MINE, "OPEN", PROFESSIONAL_ID)));
+
+        assertThat(service.myCases(PageRequest.of(0, 20), null).getContent()).extracting("id").containsExactly("c-open");
+    }
+
+    @Test
+    void theQueueFiltersByStatusCaseInsensitively() {
+        when(patientService.clinicalCases()).thenReturn(
+            List.of(aCase("c-open", MINE, "OPEN", PROFESSIONAL_ID), aCase("c-closed", MINE, "CLOSED", PROFESSIONAL_ID))
+        );
+
+        assertThat(service.myCases(PageRequest.of(0, 20), "open").getContent()).extracting("id").containsExactly("c-open");
+    }
+
+    @Test
+    void theQueueTotalIsTheFilteredTotal() {
+        when(patientService.clinicalCases()).thenReturn(
+            List.of(
+                aCase("c1", MINE, "OPEN", PROFESSIONAL_ID),
+                aCase("c2", MINE, "OPEN", PROFESSIONAL_ID),
+                aCase("c3", MINE, "CLOSED", PROFESSIONAL_ID)
+            )
+        );
+
+        var page = service.myCases(PageRequest.of(0, 1), "OPEN");
+
+        assertThat(page.getContent()).hasSize(1);
+        assertThat(page.getTotalElements()).isEqualTo(2);
+    }
+
+    @Test
+    void aCaseOnAPatientOUTSIDEmyCaseloadCannotBeEdited() {
+        onePatientOfMine();
+        when(patientService.clinicalCases()).thenReturn(List.of(aCase("c-theirs", "p-other", "OPEN", "someone-else")));
+
+        assertThatThrownBy(
+            () -> service.updateCase("p-other", "c-theirs", new PatientDirectoryService.CaseUpdate("x", null, null, null))
+        ).isInstanceOf(PatientDirectoryService.PatientNotInCaseloadException.class);
+        verify(patientService, org.mockito.Mockito.never()).patchClinicalCase(any(), any());
+    }
+
+    @Test
+    void onlyTheFOUReditableFieldsAreForwarded() {
+        // A whole-document PATCH would let a caller move a case to another patient or reassign it.
+        onePatientOfMine();
+        when(patientService.clinicalCases()).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.patchClinicalCase(any(), any())).thenReturn(aCase("c1", MINE, "CLOSED", PROFESSIONAL_ID));
+
+        service.updateCase(MINE, "c1", new PatientDirectoryService.CaseUpdate("new symptoms", null, null, "CLOSED"));
+
+        ArgumentCaptor<java.util.Map<String, Object>> body = ArgumentCaptor.forClass(java.util.Map.class);
+        verify(patientService).patchClinicalCase(org.mockito.ArgumentMatchers.eq("c1"), body.capture());
+        assertThat(body.getValue()).containsEntry("symptoms", "new symptoms").containsEntry("status", "CLOSED");
+        assertThat(body.getValue()).doesNotContainKeys("patientId", "assignedProfessionalId", "assignedRosterId", "archivedAt");
+    }
+
+    @Test
+    void theBodyCarriesTheIdPatientserviceInsistsOn() {
+        // Its PATCH rejects a body whose id does not match the path — a JHipster convention.
+        onePatientOfMine();
+        when(patientService.clinicalCases()).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.patchClinicalCase(any(), any())).thenReturn(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID));
+
+        service.updateCase(MINE, "c1", new PatientDirectoryService.CaseUpdate("s", null, null, null));
+
+        ArgumentCaptor<java.util.Map<String, Object>> body = ArgumentCaptor.forClass(java.util.Map.class);
+        verify(patientService).patchClinicalCase(any(), body.capture());
+        assertThat(body.getValue()).containsEntry("id", "c1");
+    }
+
+    @Test
+    void aNullFieldIsOMITTEDratherThanSentAsNull() {
+        // A merge-patch null means "clear this". Sending one for every untouched field would wipe a
+        // diagnosis because the clinician edited the symptoms.
+        onePatientOfMine();
+        when(patientService.clinicalCases()).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.patchClinicalCase(any(), any())).thenReturn(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID));
+
+        service.updateCase(MINE, "c1", new PatientDirectoryService.CaseUpdate("s", null, null, null));
+
+        ArgumentCaptor<java.util.Map<String, Object>> body = ArgumentCaptor.forClass(java.util.Map.class);
+        verify(patientService).patchClinicalCase(any(), body.capture());
+        assertThat(body.getValue()).doesNotContainKey("diagnosis");
+    }
+
+    @Test
+    void aPatientsCasesAreEntitlementChecked() {
+        onePatientOfMine();
+        when(patientService.clinicalCases()).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
+
+        assertThat(service.casesFor(MINE, PageRequest.of(0, 20)).getContent()).extracting("id").containsExactly("c1");
+        assertThatThrownBy(() -> service.casesFor("p-other", PageRequest.of(0, 20))).isInstanceOf(
+            PatientDirectoryService.PatientNotInCaseloadException.class
+        );
     }
 }
