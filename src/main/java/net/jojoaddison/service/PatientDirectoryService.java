@@ -25,6 +25,10 @@ import net.jojoaddison.service.dto.PatientDtos.PatientListItem;
 import net.jojoaddison.service.dto.PatientDtos.PatientRecord;
 import net.jojoaddison.service.dto.PatientDtos.RecordEntry;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.PatientProfile;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 /**
@@ -88,6 +92,113 @@ public class PatientDirectoryService {
         return Stream.concat(fromTasks, fromCases)
             .filter(id -> id != null && !id.isBlank())
             .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    /**
+     * How a caller may narrow the directory. Every field is optional; all present fields must match.
+     *
+     * <p>{@code sex} and {@code childrenOnly} mirror the two filters the web dashboard already offers
+     * (its {@code PatientDirectoryFilters}), so a clinician sees the same result set on either client.
+     */
+    public record DirectoryFilter(String query, String sex, Boolean childrenOnly) {
+        public static final DirectoryFilter NONE = new DirectoryFilter(null, null, null);
+
+        boolean matches(PatientListItem patient) {
+            return matchesQuery(patient) && matchesSex(patient) && matchesChildren(patient);
+        }
+
+        private boolean matchesQuery(PatientListItem patient) {
+            if (query == null || query.isBlank()) {
+                return true;
+            }
+            String needle = query.trim().toLowerCase(java.util.Locale.ROOT);
+            // Name and id both, because a clinician reading from a wristband has the id and not the
+            // spelling. Null name is a data fault in the sibling service, not a reason to throw.
+            return (
+                (patient.patientName() != null && patient.patientName().toLowerCase(java.util.Locale.ROOT).contains(needle)) ||
+                (patient.id() != null && patient.id().toLowerCase(java.util.Locale.ROOT).contains(needle))
+            );
+        }
+
+        private boolean matchesSex(PatientListItem patient) {
+            return sex == null || sex.isBlank() || sex.trim().equalsIgnoreCase(patient.sex());
+        }
+
+        private boolean matchesChildren(PatientListItem patient) {
+            return !Boolean.TRUE.equals(childrenOnly) || patient.isChild();
+        }
+    }
+
+    /**
+     * The sorts this endpoint accepts, and the only ones.
+     *
+     * <p>The list is assembled in memory from two services, so a sort is a comparator lookup rather
+     * than a database index — an arbitrary {@code sort=} from a client would otherwise reach it.
+     * Unknown properties are rejected rather than ignored: a silently-unsorted page looks like a
+     * backend that lost the clinician's ordering preference, and nobody reports that as a bug.
+     */
+    private static final Map<String, Comparator<PatientListItem>> SORTABLE = Map.of(
+        "patientName",
+        Comparator.comparing(PatientListItem::patientName, Comparator.nullsLast(Comparator.naturalOrder())),
+        "lastActivityAt",
+        Comparator.comparing(PatientListItem::lastActivityAt, Comparator.nullsLast(Comparator.naturalOrder())),
+        "sex",
+        Comparator.comparing(PatientListItem::sex, Comparator.nullsLast(Comparator.naturalOrder())),
+        "id",
+        Comparator.comparing(PatientListItem::id, Comparator.nullsLast(Comparator.naturalOrder()))
+    );
+
+    /** Sortable property names, for an error message that tells the caller what to use instead. */
+    public static Set<String> sortableProperties() {
+        return new java.util.TreeSet<>(SORTABLE.keySet());
+    }
+
+    /**
+     * One page of the clinician's directory.
+     *
+     * <p><b>Paged here, not in the datastore.</b> The set is the union of this service's tasks and
+     * patientservice's cases, so there is no single collection to page and no single clock to sort
+     * by — the whole union is assembled, then filtered, sorted and sliced. That is honest for a
+     * caseload of tens and would not be for thousands; the ceiling is the sibling services' own
+     * unpaged reads, not this method.
+     *
+     * <p>What it buys is real all the same: a phone on mobile data receives twenty rows instead of
+     * the whole caseload, and {@code X-Total-Count} finally means the number of matches rather than
+     * the number of rows in the body.
+     */
+    public Page<PatientListItem> directory(Pageable pageable, DirectoryFilter filter) {
+        DirectoryFilter effective = filter == null ? DirectoryFilter.NONE : filter;
+        List<PatientListItem> matches = directory().stream().filter(effective::matches).toList();
+
+        List<PatientListItem> ordered = sort(matches, pageable.getSort());
+        if (pageable.isUnpaged()) {
+            return new PageImpl<>(ordered, pageable, ordered.size());
+        }
+
+        int from = (int) Math.min(pageable.getOffset(), ordered.size());
+        int to = Math.min(from + pageable.getPageSize(), ordered.size());
+        return new PageImpl<>(ordered.subList(from, to), pageable, ordered.size());
+    }
+
+    /** Applies a whitelisted sort, or leaves the default newest-activity-first order in place. */
+    private List<PatientListItem> sort(List<PatientListItem> patients, Sort sort) {
+        if (sort == null || sort.isUnsorted()) {
+            return patients;
+        }
+        Comparator<PatientListItem> comparator = null;
+        for (Sort.Order order : sort) {
+            Comparator<PatientListItem> next = SORTABLE.get(order.getProperty());
+            if (next == null) {
+                throw new IllegalArgumentException(
+                    "Cannot sort patients by '" + order.getProperty() + "'; sortable properties are " + sortableProperties()
+                );
+            }
+            if (order.isDescending()) {
+                next = next.reversed();
+            }
+            comparator = comparator == null ? next : comparator.thenComparing(next);
+        }
+        return patients.stream().sorted(comparator).toList();
     }
 
     /** The clinician's patient directory, newest activity first. */
