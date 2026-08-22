@@ -1,5 +1,6 @@
 package net.jojoaddison.service;
 
+import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -15,7 +16,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
@@ -66,10 +67,26 @@ public class PatientServiceClient {
         @Value("${application.patientservice.timeout-seconds:5}") int timeoutSeconds
     ) {
         this.enabled = enabled;
-        // Explicit connect and read timeouts. The default is no timeout at all, which inside a
-        // request thread means a sibling that stops answering takes this service down with it.
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(Duration.ofSeconds(timeoutSeconds));
+        // JdkClientHttpRequestFactory, NOT SimpleClientHttpRequestFactory.
+        //
+        // Simple wraps java.net.HttpURLConnection, which does not support PATCH — it throws
+        // `java.net.ProtocolException: Invalid HTTP method: PATCH` before a byte leaves the
+        // process. Every read here is a GET and every write was a POST, so this was invisible
+        // until `patchClinicalCase` was added: it shipped, every test passed, and editing a case
+        // 500'd against the running stack. Nothing catches it below an integration test that makes
+        // a real PATCH over a real transport, because the failure is in the JDK's HTTP client and
+        // not in this code, this URL or the far service.
+        //
+        // The java.net.http client underneath this one has no such restriction. Do not swap it back
+        // for Simple on the grounds that the reads do not need it.
+        // BOTH timeouts, and they live in two different places on this factory — the connect
+        // timeout on the HttpClient, the read timeout on the factory. Setting only the second is an
+        // easy mistake when porting from Simple (which took both) and leaves the connect side
+        // unbounded, which is half of the failure the timeouts exist to prevent: a sibling that
+        // accepts nothing hangs a request thread just as effectively as one that answers nothing.
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(
+            HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(timeoutSeconds)).build()
+        );
         factory.setReadTimeout(Duration.ofSeconds(timeoutSeconds));
         this.restClient = builder.baseUrl(baseUrl).requestFactory(factory).build();
         LOG.info("patientservice client -> {} (enabled={}, timeout={}s)", baseUrl, enabled, timeoutSeconds);
