@@ -65,6 +65,32 @@ public final class PatientDtos {
     public record CaseSummary(String id, String patientId, String openedAt, String brief, String status) {}
 
     /**
+     * One case, with the clinical prose a summary deliberately omits.
+     *
+     * <p>Separate from {@link CaseSummary} rather than an extension of it, because the queue is a
+     * list and this is a screen. {@code symptoms} and {@code diagnosis} are free text of unbounded
+     * length; carrying them on every row of a twenty-row page would put several kilobytes of
+     * clinical prose on the wire to render four words of it, on a phone paying for the bytes.
+     *
+     * <p><b>There is no recommendations field</b>, on this record or on patientservice's
+     * {@code ClinicalCase}. The dashboard migration plan describes a recommendation checklist; it
+     * was never given anywhere to live. Adding one here would mean this service storing clinical
+     * content it does not own, so the gap is left visible instead.
+     */
+    public record CaseDetail(
+        String id,
+        String patientId,
+        Integer caseNumber,
+        String title,
+        String openedAt,
+        String closedAt,
+        String brief,
+        String status,
+        String symptoms,
+        String diagnosis
+    ) {}
+
+    /**
      * A full patient record, assembled from this service's relation plus five patientservice reads.
      *
      * <p>Any of the lists can be empty because the sibling service was unreachable — the client

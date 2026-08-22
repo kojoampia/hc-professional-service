@@ -20,6 +20,7 @@ import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.repository.TaskRepository;
 import net.jojoaddison.security.SecurityUtils;
 import net.jojoaddison.service.dto.PatientDtos.ActivityLogEntry;
+import net.jojoaddison.service.dto.PatientDtos.CaseDetail;
 import net.jojoaddison.service.dto.PatientDtos.CaseSummary;
 import net.jojoaddison.service.dto.PatientDtos.ClinicalReport;
 import net.jojoaddison.service.dto.PatientDtos.CreateActivity;
@@ -497,6 +498,41 @@ public class PatientDirectoryService {
         }
 
         return toCaseSummary(patientService.patchClinicalCase(caseId, body));
+    }
+
+    /**
+     * One case in full, for the detail screen.
+     *
+     * <p>Entitlement-checked against the patient, not the case: holding a case id is not authority
+     * over it, which is the same reason the PATCH path carries the patient too.
+     *
+     * <p>Archived cases are readable here although they are excluded from every list. A case that
+     * was archived while a clinician had it open should render rather than 404 — they are being
+     * shown something that exists, and the alternative reads as data loss.
+     */
+    public CaseDetail caseDetail(String patientId, String caseId) {
+        requireEntitlement(patientId);
+        return patientService
+            .clinicalCases()
+            .stream()
+            .filter(c -> caseId.equals(c.id()) && patientId.equals(c.patientId()))
+            .findFirst()
+            .map(
+                c ->
+                    new CaseDetail(
+                        c.id(),
+                        c.patientId(),
+                        c.caseNumber(),
+                        c.title(),
+                        text(c.openedAt()),
+                        text(c.closedAt()),
+                        c.brief(),
+                        c.status() == null ? null : c.status().toLowerCase(java.util.Locale.ROOT),
+                        c.symptoms(),
+                        c.diagnosis()
+                    )
+            )
+            .orElseThrow(() -> new PatientNotInCaseloadException(patientId));
     }
 
     /** The clinical fields a clinician may edit. Everything else on a case is somebody else's. */
