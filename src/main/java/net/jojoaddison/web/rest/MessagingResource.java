@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -75,6 +76,20 @@ public class MessagingResource {
         if (noExplicit && noRole) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Give at least one recipient, or a role to broadcast to");
         }
+        // A ROLE THAT MATCHES NOBODY IS REFUSED, not stored.
+        //
+        // This used to log at info and save a message with zero recipients, answering 200. The
+        // clinician saw their escalation sent and it reached no one — the worst possible shape for
+        // this failure, because nothing on either side ever says so. A typo in a role name, or a
+        // role whose last holder was deactivated, both land here.
+        //
+        // 422 rather than 400: the request is well-formed, it simply cannot be carried out.
+        if (!noRole && !messagingService.roleHasRecipients(request.recipientRole())) {
+            throw new ResponseStatusException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "No active professional holds the role '" + request.recipientRole() + "'"
+            );
+        }
         Message message = messagingService.startConversation(
             me,
             me,
@@ -131,6 +146,40 @@ public class MessagingResource {
         return messagingService.markRead(caller(), messageId).isPresent()
             ? ResponseEntity.noContent().build()
             : ResponseEntity.notFound().build();
+    }
+
+    /**
+     * {@code POST /api/messaging/conversations/{id}/read} : mark one thread read.
+     *
+     * <p>Answers with the caller's <b>new total unread count</b>, so the badge costs one round trip
+     * rather than two — and cannot briefly disagree with the list that prompted the call.
+     *
+     * <p>Before this existed a client could mark one message or mark everything. The mobile client
+     * took the second option and its own comment apologised for it: opening one conversation cleared
+     * every unread badge in the app, so a clinician lost the signal that three others were waiting.
+     */
+    @PostMapping("/conversations/{conversationId}/read")
+    public ResponseEntity<Long> markConversationRead(@PathVariable String conversationId) {
+        return ResponseEntity.ok(messagingService.markConversationRead(caller(), conversationId));
+    }
+
+    /**
+     * {@code GET /api/messaging/recipients} : who this clinician may address.
+     *
+     * <p>Sourced from the same records the role broadcast resolves against, so the picker and the
+     * broadcast cannot disagree about who exists. Deliberately <b>not</b> the gateway's
+     * {@code /api/users}, which returns every gateway user unfiltered — including accounts that are
+     * not clinicians at all — and is not something to put behind a recipient picker on a clinical
+     * app.
+     *
+     * <p>Carries an account id, a display name and a role. No contact details, nothing clinical.
+     */
+    @GetMapping("/recipients")
+    public List<MessagingService.Recipient> recipients(
+        @RequestParam(required = false) String query,
+        @RequestParam(required = false) String role
+    ) {
+        return messagingService.recipients(query, role);
     }
 
     @PostMapping("/read-all")

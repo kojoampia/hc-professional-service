@@ -209,4 +209,126 @@ class MessagingFlowIT {
             .perform(post("/api/messaging/conversations").contentType(MediaType.APPLICATION_JSON).content("{\"body\":\"hello\"}"))
             .andExpect(status().isBadRequest());
     }
+
+    // --- Per-conversation read, recipients, and the refused broadcast (Phase 1.5/1.6) ----------
+
+    @Test
+    void readingONEthreadLeavesTHEOTHERSunread() {
+        // The whole reason this endpoint exists. A client could previously mark one message or mark
+        // EVERYTHING, so the mobile app opened a thread and cleared every unread badge — a clinician
+        // lost the signal that other conversations were waiting.
+        Message first = messagingService.startConversation(SENDER, SENDER, "One", "body", java.util.List.of(RECIPIENT), null);
+        messagingService.startConversation(SENDER, SENDER, "Two", "body", java.util.List.of(RECIPIENT), null);
+        assertThat(messagingService.unreadCount(RECIPIENT)).isEqualTo(2);
+
+        long remaining = messagingService.markConversationRead(RECIPIENT, first.getConversationId());
+
+        assertThat(remaining).isEqualTo(1);
+        assertThat(messagingService.unreadCount(RECIPIENT)).isEqualTo(1);
+    }
+
+    @Test
+    void markingAThreadReadANSWERSwithTheNewTotal() {
+        // Returned rather than 204 so the badge costs one round trip, and cannot briefly disagree
+        // with the list that prompted the call.
+        Message message = messagingService.startConversation(SENDER, SENDER, "One", "body", java.util.List.of(RECIPIENT), null);
+
+        assertThat(messagingService.markConversationRead(RECIPIENT, message.getConversationId())).isZero();
+    }
+
+    @Test
+    void markingAThreadTheCallerIsNotInChangesNothing() {
+        // A conversation id is not authority over it — the same rule every read here follows.
+        Message message = messagingService.startConversation(SENDER, SENDER, "One", "body", java.util.List.of(RECIPIENT), null);
+
+        assertThat(messagingService.markConversationRead(STRANGER, message.getConversationId())).isZero();
+        assertThat(messagingService.unreadCount(RECIPIENT)).isEqualTo(1);
+    }
+
+    @Test
+    void markingAnAlreadyReadThreadIsAnObviousNoOp() {
+        Message message = messagingService.startConversation(SENDER, SENDER, "One", "body", java.util.List.of(RECIPIENT), null);
+        messagingService.markConversationRead(RECIPIENT, message.getConversationId());
+
+        assertThat(messagingService.markConversationRead(RECIPIENT, message.getConversationId())).isZero();
+    }
+
+    @Test
+    void theRecipientDirectoryListsActiveProfessionals() {
+        activeNurse(NURSE_A);
+        activeNurse(NURSE_B);
+
+        assertThat(messagingService.recipients(null, null))
+            .extracting(MessagingService.Recipient::accountId)
+            .containsExactlyInAnyOrder(NURSE_A, NURSE_B);
+    }
+
+    @Test
+    void theDirectoryNarrowsByRoleAndByName() {
+        activeNurse(NURSE_A);
+
+        assertThat(messagingService.recipients(null, "ROLE_NURSE")).hasSize(1);
+        assertThat(messagingService.recipients(null, "ROLE_DOCTOR")).isEmpty();
+        assertThat(messagingService.recipients("nurse-a", null)).hasSize(1);
+        assertThat(messagingService.recipients("nobody", null)).isEmpty();
+    }
+
+    @Test
+    void theDirectoryAndTheBROADCASTagreeAboutWhoExists() {
+        // Sourced from the same records on purpose: a picker that offers someone the broadcast
+        // cannot reach, or vice versa, is worse than no picker.
+        activeNurse(NURSE_A);
+
+        assertThat(messagingService.recipients(null, "ROLE_NURSE")).isNotEmpty();
+        assertThat(messagingService.roleHasRecipients("ROLE_NURSE")).isTrue();
+        assertThat(messagingService.recipients(null, "ROLE_WIZARD")).isEmpty();
+        assertThat(messagingService.roleHasRecipients("ROLE_WIZARD")).isFalse();
+    }
+
+    @Test
+    @WithMockUser(username = SENDER, authorities = { "ROLE_NURSE" })
+    void aBroadcastToARoleNOBODYholdsIsREFUSED() throws Exception {
+        // It used to log at info and store a message with zero recipients, answering 200 — the
+        // clinician saw their escalation sent and it reached no one. 422 rather than 400: the
+        // request is well-formed, it simply cannot be carried out.
+        mockMvc
+            .perform(
+                post("/api/messaging/conversations")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"subject\":\"Escalation\",\"body\":\"Please review\",\"recipientRole\":\"ROLE_WIZARD\"}")
+            )
+            .andExpect(status().isUnprocessableEntity());
+
+        assertThat(messageRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @WithMockUser(username = SENDER, authorities = { "ROLE_NURSE" })
+    void aBroadcastToARoleSOMEONEholdsIsSent() throws Exception {
+        activeNurse(NURSE_A);
+
+        mockMvc
+            .perform(
+                post("/api/messaging/conversations")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"subject\":\"Staff\",\"body\":\"Meeting at 3\",\"recipientRole\":\"ROLE_NURSE\"}")
+            )
+            .andExpect(status().isOk());
+
+        assertThat(messagingService.unreadCount(NURSE_A)).isEqualTo(1);
+    }
+
+    @Test
+    @WithMockUser(username = "msg-carer", authorities = { "ROLE_CARER" })
+    void aREADONLYroleCanStillReadAThreadAndMarkItRead() throws Exception {
+        // /api/messaging/** is hoisted above the CLINICAL_MUTATION rules for exactly this:
+        // correspondence is not a clinical mutation, and a carer who could receive a message but
+        // never answer or clear it would be worse than one who got none.
+        messagingService.startConversation(SENDER, SENDER, "One", "body", java.util.List.of("msg-carer"), null);
+        String conversationId = messagingService.conversationsFor("msg-carer").get(0).getId();
+
+        mockMvc.perform(post("/api/messaging/conversations/" + conversationId + "/read")).andExpect(status().isOk());
+
+        assertThat(messagingService.unreadCount("msg-carer")).isZero();
+    }
 }
