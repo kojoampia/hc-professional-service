@@ -260,6 +260,7 @@ public class PatientDirectoryService {
                 c ->
                     new CaseSummary(
                         c.id(),
+                        c.patientId(),
                         text(c.openedAt()),
                         c.brief(),
                         c.status() == null ? null : c.status().toLowerCase(java.util.Locale.ROOT)
@@ -504,6 +505,7 @@ public class PatientDirectoryService {
     private CaseSummary toCaseSummary(net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase c) {
         return new CaseSummary(
             c.id(),
+            c.patientId(),
             text(c.openedAt()),
             c.brief(),
             c.status() == null ? null : c.status().toLowerCase(java.util.Locale.ROOT)

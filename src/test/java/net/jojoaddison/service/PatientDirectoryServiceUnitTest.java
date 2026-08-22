@@ -680,6 +680,18 @@ class PatientDirectoryServiceUnitTest {
     }
 
     @Test
+    void aQueuedCaseCARRIESitsPatientId() {
+        // Without it the queue lists cases a client cannot open, edit or navigate from: editing goes
+        // to /api/patients/{patientId}/cases/{caseId}, and the patient is what the entitlement check
+        // checks against. Shipping the queue first is what revealed it.
+        when(patientService.clinicalCases()).thenReturn(List.of(aCase("c-mine", MINE, "OPEN", PROFESSIONAL_ID)));
+
+        assertThat(service.myCases(PageRequest.of(0, 20), null).getContent())
+            .singleElement()
+            .satisfies(summary -> assertThat(summary.patientId()).isEqualTo(MINE));
+    }
+
+    @Test
     void theCaseQueueIsMINEonly() {
         // The reason this is proxied at all: patientservice's own endpoint has no clinician scope,
         // so a client calling it directly receives every case in the estate.
