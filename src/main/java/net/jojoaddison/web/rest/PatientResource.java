@@ -3,6 +3,7 @@ package net.jojoaddison.web.rest;
 import java.util.List;
 import net.jojoaddison.service.PatientDirectoryService;
 import net.jojoaddison.service.dto.PatientDtos.ActivityLogEntry;
+import net.jojoaddison.service.dto.PatientDtos.CaseDetail;
 import net.jojoaddison.service.dto.PatientDtos.CaseSummary;
 import net.jojoaddison.service.dto.PatientDtos.ClinicalReport;
 import net.jojoaddison.service.dto.PatientDtos.CreateActivity;
@@ -174,6 +175,23 @@ public class PatientResource {
      * <p>Only symptoms, diagnosis, brief and status are forwarded. A whole-document PATCH would let a
      * caller move a case to another patient or reassign it; neither is this screen's job.
      */
+    /**
+     * {@code GET /api/patients/{id}/cases/{caseId}} : one case in full.
+     *
+     * <p>Separate from the list because {@code symptoms} and {@code diagnosis} are unbounded free
+     * text. Carrying them on every row of a page would put kilobytes of clinical prose on the wire
+     * to render a summary line of it — the wrong trade on a phone, and the reason
+     * {@link net.jojoaddison.service.dto.PatientDtos.CaseSummary} stays lean.
+     */
+    @GetMapping("/{id}/cases/{caseId}")
+    public ResponseEntity<CaseDetail> caseDetail(@PathVariable String id, @PathVariable String caseId) {
+        try {
+            return ResponseEntity.ok(patientDirectoryService.caseDetail(id, caseId));
+        } catch (PatientDirectoryService.PatientNotInCaseloadException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
     @PatchMapping("/{id}/cases/{caseId}")
     public CaseSummary updateCase(
         @PathVariable String id,
