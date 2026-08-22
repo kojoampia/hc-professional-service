@@ -2,6 +2,10 @@ package net.jojoaddison.web.rest;
 
 import java.util.List;
 import net.jojoaddison.service.PatientDirectoryService;
+import net.jojoaddison.service.dto.PatientDtos.ActivityLogEntry;
+import net.jojoaddison.service.dto.PatientDtos.ClinicalReport;
+import net.jojoaddison.service.dto.PatientDtos.CreateActivity;
+import net.jojoaddison.service.dto.PatientDtos.CreateReport;
 import net.jojoaddison.service.dto.PatientDtos.PatientListItem;
 import net.jojoaddison.service.dto.PatientDtos.PatientRecord;
 import org.springdoc.core.annotations.ParameterObject;
@@ -12,6 +16,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -27,8 +33,11 @@ import tech.jhipster.web.util.PaginationUtil;
  * is therefore always "my patients" and never "all patients", and there is deliberately no way to
  * ask for someone else's.
  *
- * <p>Reads only. Creating patients, cases or clinical records belongs to patientservice, and adding
- * write endpoints here would put two services in charge of the same documents.
+ * <p><b>Reads, plus two writes that forward rather than own.</b> Creating patients and cases still
+ * belongs to patientservice. The two POSTs below file an activity entry and a report against a
+ * patient the caller already has, and they do it by relaying the caller's own token to
+ * patientservice — this service adds the entitlement check its sibling cannot make, and stores
+ * nothing of the record but an idempotency receipt.
  */
 @RestController
 @RequestMapping("/api/patients")
@@ -78,6 +87,57 @@ public class PatientResource {
         }
         HttpHeaders headers = PaginationUtil.generatePaginationHttpHeaders(ServletUriComponentsBuilder.fromCurrentRequest(), page);
         return ResponseEntity.ok().headers(headers).body(page.getContent());
+    }
+
+    /**
+     * {@code POST /api/patients/{id}/activities} : file an activity-log entry.
+     *
+     * <p><b>New in Phase 1.3, and not a port.</b> {@code web/} has POSTed here since the dashboard
+     * was built; the endpoint never existed, so every "add activity" returned 404. See
+     * {@code web-mobile-port.md}.
+     *
+     * <p><b>Left outside the hoisted prefixes on purpose.</b> {@code /api/patients/**} is not listed
+     * above the {@code POST /api/**} rule in {@link net.jojoaddison.config.SecurityConfiguration},
+     * so this requires {@code CLINICAL_MUTATION} — carer, angel, chemist and technician read a record
+     * and cannot file into one. The four prefixes that <em>are</em> hoisted (onboarding, messaging,
+     * notifications, absences) were each hoisted to escape that rule, and will look like precedent
+     * to the next person. They are not: filing a clinical observation is exactly what the rule is for.
+     *
+     * <p>404 rather than 403 for a patient outside the caller's caseload, matching the GET: a
+     * clinician must not learn that a patient id is real by trying to write to it.
+     */
+    @PostMapping("/{id}/activities")
+    public ResponseEntity<ActivityLogEntry> appendActivity(@PathVariable String id, @RequestBody CreateActivity request) {
+        try {
+            return ResponseEntity.status(HttpStatus.CREATED).body(patientDirectoryService.appendActivity(id, request));
+        } catch (PatientDirectoryService.PatientNotInCaseloadException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No such patient for this clinician", e);
+        } catch (IllegalArgumentException e) {
+            // A clientRef already spent on a different write. 409 rather than 400: the request is
+            // well-formed, it simply cannot be honoured twice.
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * {@code POST /api/patients/{id}/reports} : file a clinical report.
+     *
+     * <p>Same authorization and the same 404 rule as {@link #appendActivity}.
+     *
+     * <p>This carries <b>metadata only</b> — a name, a category, a URL. It is not a file upload, and
+     * the dashboard's "upload" control on the patient record never moved any bytes either; it sent
+     * the filename as a URL. Attaching real content to a patient record is a separate feature and is
+     * deliberately not pretended at here.
+     */
+    @PostMapping("/{id}/reports")
+    public ResponseEntity<ClinicalReport> appendReport(@PathVariable String id, @RequestBody CreateReport request) {
+        try {
+            return ResponseEntity.status(HttpStatus.CREATED).body(patientDirectoryService.appendReport(id, request));
+        } catch (PatientDirectoryService.PatientNotInCaseloadException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No such patient for this clinician", e);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage(), e);
+        }
     }
 
     /**

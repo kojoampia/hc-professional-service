@@ -1,6 +1,7 @@
 package net.jojoaddison.web.rest;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -8,6 +9,7 @@ import net.jojoaddison.IntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -80,5 +82,65 @@ class PatientResourceIT {
     @Test
     void anAnonymousCallerIsRejected() throws Exception {
         restMockMvc.perform(get("/api/patients")).andExpect(status().isUnauthorized());
+    }
+
+    // --- Writes (web-mobile-port.md § Phase 1.3) ----------------------------------------------
+
+    private static final String ACTIVITY = "{\"title\":\"Wound dressed\",\"description\":\"No exudate\"}";
+    private static final String REPORT = "{\"name\":\"assessment.pdf\",\"reportType\":\"ASSESSMENT\"}";
+
+    /**
+     * The mapping exists at all.
+     *
+     * <p>Before Phase 1.3 both of these returned 404 <em>from dispatch</em> — no such handler — while
+     * web/ had been POSTing to them for months. A nurse holds CLINICAL_MUTATION, so security passes
+     * and the 404 now comes from the entitlement check instead: this test account has no caseload.
+     * Same status, entirely different reason, which is why the carer case below matters.
+     */
+    @Test
+    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    void aClinicianReachesTheActivityHandlerAndIsRefusedOnlyByTheCaseload() throws Exception {
+        restMockMvc
+            .perform(post("/api/patients/not-my-patient/activities").contentType(MediaType.APPLICATION_JSON).content(ACTIVITY))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    void aClinicianReachesTheReportHandlerToo() throws Exception {
+        restMockMvc
+            .perform(post("/api/patients/not-my-patient/reports").contentType(MediaType.APPLICATION_JSON).content(REPORT))
+            .andExpect(status().isNotFound());
+    }
+
+    /**
+     * The authorization split, and the reason /api/patients/** was left OUT of the hoisted prefixes.
+     *
+     * <p>A carer may read a record and may not file into one. Four prefixes in SecurityConfiguration
+     * are hoisted above the CLINICAL_MUTATION rules — onboarding, messaging, notifications, absences
+     * — each to let read-only roles do something that is not a clinical mutation. Filing an
+     * observation IS one. If someone hoists this prefix "for consistency", these two fail.
+     */
+    @Test
+    @WithMockUser(username = "patients-carer", authorities = { "ROLE_CARER" })
+    void aREADONLYroleCannotFileAnActivity() throws Exception {
+        restMockMvc
+            .perform(post("/api/patients/any/activities").contentType(MediaType.APPLICATION_JSON).content(ACTIVITY))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(username = "patients-carer", authorities = { "ROLE_CARER" })
+    void aREADONLYroleCannotFileAReport() throws Exception {
+        restMockMvc
+            .perform(post("/api/patients/any/reports").contentType(MediaType.APPLICATION_JSON).content(REPORT))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void anAnonymousCallerCannotFileAnything() throws Exception {
+        restMockMvc
+            .perform(post("/api/patients/any/activities").contentType(MediaType.APPLICATION_JSON).content(ACTIVITY))
+            .andExpect(status().isUnauthorized());
     }
 }

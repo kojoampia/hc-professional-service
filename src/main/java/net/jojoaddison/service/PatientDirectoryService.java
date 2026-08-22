@@ -1,5 +1,6 @@
 package net.jojoaddison.service;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.Period;
 import java.time.ZoneOffset;
@@ -12,19 +13,28 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import net.jojoaddison.domain.PatientWriteReceipt;
 import net.jojoaddison.domain.Task;
+import net.jojoaddison.repository.PatientWriteReceiptRepository;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.repository.TaskRepository;
 import net.jojoaddison.security.SecurityUtils;
 import net.jojoaddison.service.dto.PatientDtos.ActivityLogEntry;
 import net.jojoaddison.service.dto.PatientDtos.CaseSummary;
 import net.jojoaddison.service.dto.PatientDtos.ClinicalReport;
+import net.jojoaddison.service.dto.PatientDtos.CreateActivity;
+import net.jojoaddison.service.dto.PatientDtos.CreateReport;
 import net.jojoaddison.service.dto.PatientDtos.DashboardSummary;
 import net.jojoaddison.service.dto.PatientDtos.EmergencyContact;
 import net.jojoaddison.service.dto.PatientDtos.PatientListItem;
 import net.jojoaddison.service.dto.PatientDtos.PatientRecord;
 import net.jojoaddison.service.dto.PatientDtos.RecordEntry;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ActivityLog;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.PatientProfile;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.Report;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -54,18 +64,23 @@ public class PatientDirectoryService {
     /** WHO's definition, and the one the dashboard's "kids" tile has always meant. */
     private static final int CHILD_AGE_LIMIT = 18;
 
+    private static final Logger log = LoggerFactory.getLogger(PatientDirectoryService.class);
+
     private final TaskRepository taskRepository;
     private final ProfileRepository profileRepository;
     private final PatientServiceClient patientService;
+    private final PatientWriteReceiptRepository receiptRepository;
 
     public PatientDirectoryService(
         TaskRepository taskRepository,
         ProfileRepository profileRepository,
-        PatientServiceClient patientService
+        PatientServiceClient patientService,
+        PatientWriteReceiptRepository receiptRepository
     ) {
         this.taskRepository = taskRepository;
         this.profileRepository = profileRepository;
         this.patientService = patientService;
+        this.receiptRepository = receiptRepository;
     }
 
     /**
@@ -317,6 +332,174 @@ public class PatientDirectoryService {
                 reports
             )
         );
+    }
+
+    /**
+     * Files an activity-log entry against one of the caller's own patients.
+     *
+     * <p><b>The entitlement rule is the same union that governs reads.</b> A clinician who may not
+     * read a patient may not write to one either, and routing the check through
+     * {@link #patientIdsFor(String)} means the two can never drift apart — which they would if the
+     * write path grew its own copy.
+     *
+     * @throws PatientNotInCaseloadException when the patient is not the caller's, or there is no
+     *     caller profile. Deliberately the same answer as "no such patient": a clinician must not be
+     *     able to discover that a patient id is real by trying to write to it.
+     */
+    public ActivityLogEntry appendActivity(String patientId, CreateActivity request) {
+        String accountId = requireEntitlement(patientId);
+
+        Optional<PatientWriteReceipt> replay = replayOf(request.clientRef(), accountId, patientId, "activity");
+        if (replay.isPresent()) {
+            return activityById(patientId, replay.orElseThrow().getCreatedId());
+        }
+
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("patientId", patientId);
+        body.put("summary", request.title());
+        body.put("detail", request.description());
+        // loggedAt is the clinical time. Absent means now — a bedside entry describes the present,
+        // and patientservice stamps the audit fields from the token regardless of what is sent.
+        body.put("loggedAt", parseInstant(request.occurredAt()).orElseGet(Instant::now).toString());
+
+        ActivityLog created = patientService.createActivityLog(body);
+        recordReceipt(request.clientRef(), accountId, patientId, "activity", created == null ? null : created.id());
+        return created == null
+            ? null
+            : new ActivityLogEntry(
+                created.id(),
+                occurredAt(created.loggedAt(), created.createdDate()),
+                created.summary(),
+                created.summary(),
+                created.detail(),
+                text(created.createdDate())
+            );
+    }
+
+    /** Files a clinical report against one of the caller's own patients. See {@link #appendActivity}. */
+    public ClinicalReport appendReport(String patientId, CreateReport request) {
+        String accountId = requireEntitlement(patientId);
+
+        Optional<PatientWriteReceipt> replay = replayOf(request.clientRef(), accountId, patientId, "report");
+        if (replay.isPresent()) {
+            return reportById(patientId, replay.orElseThrow().getCreatedId());
+        }
+
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("patientId", patientId);
+        body.put("name", request.name());
+        body.put("category", request.reportType());
+        body.put("description", request.description());
+        body.put("url", request.url());
+
+        Report created = patientService.createReport(body);
+        recordReceipt(request.clientRef(), accountId, patientId, "report", created == null ? null : created.id());
+        return created == null
+            ? null
+            : new ClinicalReport(
+                created.id(),
+                occurredAt(null, created.reportDate() == null ? created.createdDate() : created.reportDate()),
+                created.name(),
+                created.category(),
+                created.url()
+            );
+    }
+
+    /** The caller's login, having established they may write to this patient. */
+    private String requireEntitlement(String patientId) {
+        String professionalId = callerProfileId().orElse(null);
+        if (professionalId == null || patientId == null || !patientIdsFor(professionalId).contains(patientId)) {
+            throw new PatientNotInCaseloadException(patientId);
+        }
+        return SecurityUtils.getCurrentUserLogin().orElseThrow(() -> new PatientNotInCaseloadException(patientId));
+    }
+
+    /**
+     * A previous forward of this {@code clientRef}, if there was one.
+     *
+     * <p>A key replayed by a different account or against a different patient is refused rather than
+     * honoured: it means two clients generated the same key, and answering with the first one's
+     * record would hand one clinician another's write.
+     */
+    private Optional<PatientWriteReceipt> replayOf(String clientRef, String accountId, String patientId, String kind) {
+        if (clientRef == null || clientRef.isBlank()) {
+            return Optional.empty();
+        }
+        return receiptRepository
+            .findByClientRef(clientRef)
+            .map(receipt -> {
+                if (
+                    !accountId.equals(receipt.getAccountId()) ||
+                    !patientId.equals(receipt.getPatientId()) ||
+                    !kind.equals(receipt.getKind())
+                ) {
+                    throw new IllegalArgumentException("clientRef has already been used for a different write");
+                }
+                return receipt;
+            });
+    }
+
+    private void recordReceipt(String clientRef, String accountId, String patientId, String kind, String createdId) {
+        if (clientRef == null || clientRef.isBlank() || createdId == null) {
+            return;
+        }
+        PatientWriteReceipt receipt = new PatientWriteReceipt();
+        receipt.setClientRef(clientRef);
+        receipt.setAccountId(accountId);
+        receipt.setPatientId(patientId);
+        receipt.setKind(kind);
+        receipt.setCreatedId(createdId);
+        receipt.setCreatedAt(Instant.now());
+        try {
+            receiptRepository.save(receipt);
+        } catch (DuplicateKeyException e) {
+            // Two retries of the same queued write raced and both missed the read. The record is
+            // already filed once, which is the outcome that matters; the loser simply stops here.
+            log.debug("Receipt for clientRef {} already stored by a concurrent retry", clientRef);
+        }
+    }
+
+    /** Re-reads a filed entry so a replay answers with the record rather than a fresh copy. */
+    private ActivityLogEntry activityById(String patientId, String id) {
+        return record(patientId)
+            .map(PatientRecord::activities)
+            .orElseGet(List::of)
+            .stream()
+            .filter(entry -> entry.id() != null && entry.id().equals(id))
+            .findFirst()
+            .orElse(null);
+    }
+
+    private ClinicalReport reportById(String patientId, String id) {
+        return record(patientId)
+            .map(PatientRecord::reports)
+            .orElseGet(List::of)
+            .stream()
+            .filter(entry -> entry.id() != null && entry.id().equals(id))
+            .findFirst()
+            .orElse(null);
+    }
+
+    private Optional<Instant> parseInstant(String iso) {
+        if (iso == null || iso.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(Instant.parse(iso.trim()));
+        } catch (java.time.format.DateTimeParseException e) {
+            // A malformed timestamp is not worth refusing a clinical note over. Treated as absent,
+            // which means "now" — and patientservice stamps the audit fields either way.
+            log.debug("Ignoring unparseable occurredAt '{}'", iso);
+            return Optional.empty();
+        }
+    }
+
+    /** Thrown when a caller writes to a patient outside their caseload. Mapped to 404 by the resource. */
+    public static class PatientNotInCaseloadException extends RuntimeException {
+
+        public PatientNotInCaseloadException(String patientId) {
+            super("No such patient for this clinician: " + patientId);
+        }
     }
 
     /**

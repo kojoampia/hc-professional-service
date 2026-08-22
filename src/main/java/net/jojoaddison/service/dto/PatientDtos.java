@@ -16,6 +16,31 @@ public final class PatientDtos {
     /** A row in the patient directory. {@code isChild} is derived, never stored. */
     public record PatientListItem(String id, String patientName, String lastActivityAt, String sex, boolean isChild) {}
 
+    /**
+     * A new activity-log entry, as the dashboard already posts it.
+     *
+     * <p>{@code title}/{@code description} are the frontend's names ({@code CreateActivityDto}) and
+     * map to patientservice's {@code summary}/{@code detail}. The translation happens once, here,
+     * rather than making either side rename.
+     *
+     * @param occurredAt when it happened, ISO-8601. Absent means now — a clinician filing at the
+     *     bedside is describing the present, and refusing the write for a missing timestamp would be
+     *     pedantry. It is <b>not</b> an audit field: patientservice stamps createdBy/createdDate from
+     *     the token, so this cannot be used to attribute an entry to someone else.
+     * @param clientRef an idempotency key. Optional, but a client that retries without one can file
+     *     a clinical note twice — see {@code PatientWriteReceipt}.
+     */
+    public record CreateActivity(String title, String description, String occurredAt, String clientRef) {}
+
+    /**
+     * A new clinical report.
+     *
+     * <p>{@code reportType} is the frontend's name and maps to patientservice's {@code category}.
+     *
+     * @param clientRef see {@link CreateActivity#clientRef()}
+     */
+    public record CreateReport(String name, String reportType, String description, String url, String clientRef) {}
+
     public record EmergencyContact(String name, String phone) {}
 
     /** Shared shape for the dated lists on a record: visitations, medications, activities, reports. */
