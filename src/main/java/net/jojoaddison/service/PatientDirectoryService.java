@@ -252,25 +252,47 @@ public class PatientDirectoryService {
             )
             .toList();
 
+        // occurredAt is the clinical time — when the thing happened — falling back to the filing
+        // date. Ordering a record by when it was typed rather than when it happened puts a
+        // late-entered observation at the top, which reads as the most recent event.
         List<ActivityLogEntry> activities = patientService
             .activityLogs()
             .stream()
             .filter(a -> patientId.equals(a.patientId()))
-            .map(a -> new ActivityLogEntry(a.id(), text(a.createdDate()), a.name(), a.name(), a.description(), text(a.createdDate())))
+            .map(
+                a ->
+                    new ActivityLogEntry(
+                        a.id(),
+                        occurredAt(a.loggedAt(), a.createdDate()),
+                        a.summary(),
+                        a.summary(),
+                        a.detail(),
+                        text(a.createdDate())
+                    )
+            )
             .toList();
 
         List<RecordEntry> medications = patientService
             .medications()
             .stream()
             .filter(m -> patientId.equals(m.patientId()))
-            .map(m -> new RecordEntry(m.id(), text(m.createdDate()), m.name()))
+            .map(m -> new RecordEntry(m.id(), occurredAt(null, m.startedOn() == null ? m.createdDate() : m.startedOn()), m.name()))
             .toList();
 
         List<ClinicalReport> reports = patientService
             .reports()
             .stream()
             .filter(r -> patientId.equals(r.patientId()))
-            .map(r -> new ClinicalReport(r.id(), text(r.createdDate()), r.name(), r.category(), r.url()))
+            .map(
+                r ->
+                    new ClinicalReport(
+                        r.id(),
+                        occurredAt(null, r.reportDate() == null ? r.createdDate() : r.reportDate()),
+                        r.name(),
+                        r.category(),
+                        r.url()
+                    )
+            )
             .toList();
 
         PatientListItem summary = toListItem(profile, activities.isEmpty() ? null : activities.get(0).occurredAt());
@@ -326,14 +348,29 @@ public class PatientDirectoryService {
         return patientService
             .activityLogs()
             .stream()
-            .filter(a -> a.patientId() != null && a.createdDate() != null)
+            .filter(a -> a.patientId() != null && (a.loggedAt() != null || a.createdDate() != null))
             .collect(
                 Collectors.toMap(
                     net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ActivityLog::patientId,
-                    a -> text(a.createdDate()),
+                    a -> occurredAt(a.loggedAt(), a.createdDate()),
                     (a, b) -> a.compareTo(b) >= 0 ? a : b
                 )
             );
+    }
+
+    /**
+     * When something happened, preferring the clinical timestamp over the filing date.
+     *
+     * <p>Both are rendered as text because that is what the frontend contract carries, and both sort
+     * lexicographically in ISO-8601 — but they do not sort against <em>each other</em>:
+     * {@code "2026-08-22"} precedes {@code "2026-08-22T09:15:00Z"} for the same moment. Mixing the
+     * two within one list is therefore avoided rather than tolerated; each list above picks one kind.
+     */
+    private String occurredAt(java.time.Instant clinical, LocalDate filed) {
+        if (clinical != null) {
+            return clinical.toString();
+        }
+        return filed == null ? null : filed.toString();
     }
 
     private PatientListItem toListItem(PatientProfile profile, String lastActivityAt) {

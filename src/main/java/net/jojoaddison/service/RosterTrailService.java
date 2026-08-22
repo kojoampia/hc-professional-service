@@ -3,6 +3,7 @@ package net.jojoaddison.service;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -105,13 +106,16 @@ public class RosterTrailService {
             log.debug("Trail denied: customer not on the caller's roster within the window");
             throw new TrailForbiddenException("Customer is not on your duty roster");
         }
+        // The window is measured against loggedAt — when the visit happened — because that is what a
+        // trail is for. createdDate is only the filing date, and a note typed up a week late would
+        // otherwise fall inside a window its visit fell outside of.
         Instant cutoff = Instant.now().minus(Duration.ofDays(TRAIL_DAYS));
         return patientServiceClient
             .activityLogs()
             .stream()
             .filter(entry -> customerId.equals(entry.patientId()))
-            .filter(entry -> entry.createdDate() != null && entry.createdDate().isAfter(cutoff))
-            .sorted(Comparator.comparing(ActivityLog::createdDate).reversed())
+            .filter(entry -> occurredAt(entry) != null && occurredAt(entry).isAfter(cutoff))
+            .sorted(Comparator.comparing(RosterTrailService::occurredAt).reversed())
             .map(RosterTrailService::toEntry)
             .toList();
     }
@@ -125,12 +129,33 @@ public class RosterTrailService {
     }
 
     /**
-     * patientservice's {@code ActivityLog} has a {@code name} and a {@code createdDate}; the shape the
+     * When the entry happened, as an instant.
+     *
+     * <p>{@code loggedAt} is the clinical time and is already an {@code Instant}; {@code createdDate}
+     * is a {@code LocalDate} and is promoted to the start of that day in UTC so the two can be
+     * compared at all. That promotion is a widening, not a truth — an entry with only a filing date
+     * is treated as having happened at midnight, which is the least-wrong option available.
+     */
+    private static Instant occurredAt(ActivityLog entry) {
+        if (entry.loggedAt() != null) {
+            return entry.loggedAt();
+        }
+        return entry.createdDate() == null ? null : entry.createdDate().atStartOfDay(ZoneOffset.UTC).toInstant();
+    }
+
+    /**
+     * patientservice's {@code ActivityLog} carries {@code summary}/{@code detail}; the shape the
      * frontend already renders wants a label, a title and an occurredAt. Mapped the same way
      * {@code PatientDirectoryService} maps it, so the two surfaces agree.
+     *
+     * <p>It used to read {@code name}/{@code description}, which patientservice does not send — see
+     * {@code PatientServiceDtos.ActivityLog}. Every trail entry was a pair of nulls, and before that
+     * the collection never arrived at all.
      */
     private static ActivityLogEntry toEntry(ActivityLog entry) {
-        String at = entry.createdDate() == null ? null : entry.createdDate().toString();
-        return new ActivityLogEntry(entry.id(), at, entry.name(), entry.name(), entry.description(), at);
+        Instant at = occurredAt(entry);
+        String text = at == null ? null : at.toString();
+        String filed = entry.createdDate() == null ? null : entry.createdDate().toString();
+        return new ActivityLogEntry(entry.id(), text, entry.summary(), entry.summary(), entry.detail(), filed);
     }
 }
