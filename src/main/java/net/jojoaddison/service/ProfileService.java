@@ -182,4 +182,40 @@ public class ProfileService {
     public boolean wantsSenderNameInPush(String accountId) {
         return findByAccountId(accountId).map(p -> Boolean.TRUE.equals(p.getPushShowSenderName())).orElse(false);
     }
+
+    /** The three push preferences, with the defaults applied. Never null (MOB10). */
+    public PushPreferences pushPreferences(String accountId) {
+        return new PushPreferences(wantsMessagePush(accountId), wantsCompliancePush(accountId), wantsSenderNameInPush(accountId));
+    }
+
+    /**
+     * Writes the three push preferences and returns what is now stored.
+     *
+     * <p><b>Creates a profile if the account has none.</b> A clinician can install the app and open
+     * settings before completing onboarding, and a toggle that flips back on the next screen visit
+     * is worse than no toggle. The document created holds nothing but the account id and the flags;
+     * onboarding fills in the rest and does not treat mere existence as progress — the application
+     * advances only when {@code completeProfile} is called explicitly.
+     *
+     * <p>This deliberately does not go through {@code OnboardingService.upsertOwnProfile}. That sets
+     * every field it knows from the incoming body, so routing preferences through it would mean
+     * either sending a whole profile to change one toggle, or blanking the rest.
+     */
+    public PushPreferences updatePushPreferences(String accountId, PushPreferences preferences) {
+        Profile profile = profileRepository.findByAccountId(accountId).orElseGet(() -> new Profile().accountId(accountId));
+        profile.setPushMessagesEnabled(preferences.messages());
+        profile.setPushComplianceEnabled(preferences.compliance());
+        profile.setPushShowSenderName(preferences.showSenderName());
+        profileRepository.save(profile);
+        return pushPreferences(accountId);
+    }
+
+    /**
+     * How this clinician wants to be notified, following them across devices.
+     *
+     * <p>{@code showSenderName} defaults to false while the other two default to true: a lock screen
+     * is visible to anyone holding the phone, so revealing even a colleague's name is chosen rather
+     * than inherited.
+     */
+    public record PushPreferences(boolean messages, boolean compliance, boolean showSenderName) {}
 }

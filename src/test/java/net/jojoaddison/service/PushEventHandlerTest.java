@@ -68,7 +68,9 @@ class PushEventHandlerTest {
 
         PushPayload payload = captured();
         assertThat(payload.data().values()).noneMatch(value -> value.contains("deteriorating"));
-        assertThat(payload.fallbackBody()).doesNotContain("deteriorating");
+        // The body is a bundle key and, at most, a sender's name — there is nowhere for content to
+        // ride along even if a future event carried it.
+        assertThat(payload.bodyArgs()).noneMatch(argument -> argument.contains("deteriorating"));
     }
 
     @Test
@@ -77,7 +79,9 @@ class PushEventHandlerTest {
         // has to be opted into rather than inherited.
         handler.handle(messageCreated(UUID.randomUUID().toString(), Map.of()));
 
-        assertThat(captured().fallbackBody()).isEqualTo("You have a new message");
+        PushPayload payload = captured();
+        assertThat(payload.bodyCode()).isEqualTo("push.message.body");
+        assertThat(payload.bodyArgs()).isEmpty();
     }
 
     @Test
@@ -86,7 +90,9 @@ class PushEventHandlerTest {
 
         handler.handle(messageCreated(UUID.randomUUID().toString(), Map.of()));
 
-        assertThat(captured().fallbackBody()).isEqualTo("New message from Dr Mensah");
+        PushPayload payload = captured();
+        assertThat(payload.bodyCode()).isEqualTo("push.message.body.named");
+        assertThat(payload.bodyArgs()).containsExactly("Dr Mensah");
     }
 
     @Test

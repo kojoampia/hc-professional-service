@@ -63,6 +63,7 @@ public class PushNotificationService {
     private final DeviceTokenRepository deviceTokenRepository;
     private final ApplicationProperties.Notifications.Push properties;
     private final ApnsClient apnsClient;
+    private final PushCopyService pushCopyService;
 
     /**
      * Resolved lazily so the application starts without a Firebase project. With push disabled the
@@ -74,23 +75,27 @@ public class PushNotificationService {
         DeviceTokenRepository deviceTokenRepository,
         ApplicationProperties applicationProperties,
         ApnsClient apnsClient,
+        PushCopyService pushCopyService,
         ObjectProvider<FirebaseMessaging> firebaseMessaging
     ) {
         this.deviceTokenRepository = deviceTokenRepository;
         this.properties = applicationProperties.getNotifications().getPush();
         this.apnsClient = apnsClient;
+        this.pushCopyService = pushCopyService;
         this.firebaseMessaging = firebaseMessaging;
     }
 
-    /** A notification to deliver. Text is already decided; this class does not compose copy. */
-    public record PushPayload(
-        String titleKey,
-        String bodyKey,
-        String fallbackTitle,
-        String fallbackBody,
-        String collapseKey,
-        Map<String, String> data
-    ) {}
+    /**
+     * A notification to deliver, as bundle keys rather than text.
+     *
+     * <p>Text is chosen here rather than by the caller because the language is a property of the
+     * <em>device</em>, and the caller only knows the account — see {@link PushCopyService}. What
+     * reaches FCM and APNs is finished strings; neither transport ever sees a key.
+     *
+     * @param bodyArgs {@code MessageFormat} arguments for the body — a sender's name, and nothing
+     *     more. Never message content.
+     */
+    public record PushPayload(String titleCode, String bodyCode, List<String> bodyArgs, String collapseKey, Map<String, String> data) {}
 
     /**
      * Sends to every active device registered to an account.
@@ -112,16 +117,28 @@ public class PushNotificationService {
             return;
         }
 
-        Map<Boolean, List<DeviceToken>> byTransport = devices
+        // Grouped by language BEFORE platform, because the copy differs per group and one account
+        // can hold devices in different languages — an English work handset and a German personal
+        // one is a normal setup, not an edge case. Composing one payload for the whole account,
+        // which is what this did before MOB10, cannot express that.
+        Map<String, List<DeviceToken>> byLanguage = devices
             .stream()
-            .collect(Collectors.partitioningBy(device -> IOS.equalsIgnoreCase(device.getPlatform())));
+            .collect(Collectors.groupingBy(device -> pushCopyService.normalise(device.getLangKey())));
 
-        sendViaApns(byTransport.get(true), payload);
-        sendViaFcm(byTransport.get(false), accountId, payload);
+        byLanguage.forEach((language, group) -> {
+            PushCopyService.Copy copy = pushCopyService.render(payload.titleCode(), payload.bodyCode(), payload.bodyArgs(), language);
+
+            Map<Boolean, List<DeviceToken>> byTransport = group
+                .stream()
+                .collect(Collectors.partitioningBy(device -> IOS.equalsIgnoreCase(device.getPlatform())));
+
+            sendViaApns(byTransport.get(true), copy, payload);
+            sendViaFcm(byTransport.get(false), accountId, copy, payload);
+        });
     }
 
     /** iOS — one request per device; APNs has no multicast. */
-    private void sendViaApns(List<DeviceToken> devices, PushPayload payload) {
+    private void sendViaApns(List<DeviceToken> devices, PushCopyService.Copy copy, PushPayload payload) {
         if (devices.isEmpty()) {
             return;
         }
@@ -133,8 +150,8 @@ public class PushNotificationService {
             try {
                 ApnsClient.ApnsResult result = apnsClient.send(
                     device.getToken(),
-                    payload.fallbackTitle(),
-                    payload.fallbackBody(),
+                    copy.title(),
+                    copy.body(),
                     payload.collapseKey(),
                     payload.data()
                 );
@@ -149,8 +166,8 @@ public class PushNotificationService {
         }
     }
 
-    /** Android — one multicast request for the account's devices. */
-    private void sendViaFcm(List<DeviceToken> devices, String accountId, PushPayload payload) {
+    /** Android — one multicast request per language group. */
+    private void sendViaFcm(List<DeviceToken> devices, String accountId, PushCopyService.Copy copy, PushPayload payload) {
         if (devices.isEmpty()) {
             return;
         }
@@ -164,7 +181,7 @@ public class PushNotificationService {
         List<String> tokens = targets.stream().map(DeviceToken::getToken).toList();
 
         try {
-            BatchResponse response = messaging.sendEachForMulticast(build(tokens, payload));
+            BatchResponse response = messaging.sendEachForMulticast(build(tokens, copy, payload));
             pruneDeadTokens(targets, response);
         } catch (Exception e) {
             // Includes FirebaseMessagingException. A push that cannot be delivered is a degraded
@@ -173,25 +190,23 @@ public class PushNotificationService {
         }
     }
 
-    private MulticastMessage build(List<String> tokens, PushPayload payload) {
+    private MulticastMessage build(List<String> tokens, PushCopyService.Copy copy, PushPayload payload) {
         return MulticastMessage.builder()
             .addAllTokens(tokens)
             // Identifiers only. The client uses these to fetch the message over HTTP and to dedupe
             // against the STOMP frame for the same event.
             .putAllData(payload.data())
-            .setNotification(Notification.builder().setTitle(payload.fallbackTitle()).setBody(payload.fallbackBody()).build())
+            .setNotification(Notification.builder().setTitle(copy.title()).setBody(copy.body()).build())
             .setAndroidConfig(
                 AndroidConfig.builder()
                     .setPriority(AndroidConfig.Priority.HIGH)
                     // Ten messages in one thread must not become ten tray rows.
                     .setCollapseKey(payload.collapseKey())
-                    .setNotification(
-                        AndroidNotification.builder()
-                            .setTitleLocalizationKey(payload.titleKey())
-                            .setBodyLocalizationKey(payload.bodyKey())
-                            .setChannelId("messages")
-                            .build()
-                    )
+                    // NO setTitleLocalizationKey/setBodyLocalizationKey. Android resolves those as
+                    // string RESOURCE names, which may not contain dots, against values-<lang>
+                    // directories this app does not have — so every one of them silently fell
+                    // through to the English notification above. The text is already localised.
+                    .setNotification(AndroidNotification.builder().setChannelId("messages").build())
                     .build()
             )
             // No ApnsConfig: only Android tokens reach this builder. iOS is served by ApnsClient.
