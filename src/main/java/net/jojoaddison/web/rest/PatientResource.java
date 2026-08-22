@@ -3,6 +3,7 @@ package net.jojoaddison.web.rest;
 import java.util.List;
 import net.jojoaddison.service.PatientDirectoryService;
 import net.jojoaddison.service.dto.PatientDtos.ActivityLogEntry;
+import net.jojoaddison.service.dto.PatientDtos.CaseSummary;
 import net.jojoaddison.service.dto.PatientDtos.ClinicalReport;
 import net.jojoaddison.service.dto.PatientDtos.CreateActivity;
 import net.jojoaddison.service.dto.PatientDtos.CreateReport;
@@ -15,6 +16,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -137,6 +139,51 @@ public class PatientResource {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No such patient for this clinician", e);
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * {@code GET /api/patients/{id}/cases} : the patient's open cases.
+     *
+     * <p>Proxied rather than read from patientservice directly. Its {@code /api/clinical-cases} is
+     * generated CRUD with no filters and no clinician scope, so a client calling it receives every
+     * case in the estate and narrows the list in the browser. Here the narrowing is server-side.
+     *
+     * <p>Archived cases are excluded, matching the sibling's own default.
+     */
+    @GetMapping("/{id}/cases")
+    public ResponseEntity<List<CaseSummary>> cases(@PathVariable String id, @ParameterObject Pageable pageable) {
+        try {
+            Page<CaseSummary> page = patientDirectoryService.casesFor(id, pageable);
+            HttpHeaders headers = PaginationUtil.generatePaginationHttpHeaders(ServletUriComponentsBuilder.fromCurrentRequest(), page);
+            return ResponseEntity.ok().headers(headers).body(page.getContent());
+        } catch (PatientDirectoryService.PatientNotInCaseloadException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No such patient for this clinician", e);
+        }
+    }
+
+    /**
+     * {@code PATCH /api/patients/{id}/cases/{caseId}} : edit the clinical fields of a case.
+     *
+     * <p><b>This route exists for a security reason.</b> patientservice's own PATCH is gated on its
+     * {@code requireWrite}, which passes for any authenticated non-patient caller — verified on the
+     * deployed stack, where a <em>carer</em> gets 400 rather than 403 from it. So a role that is
+     * read-only here can edit a diagnosis by going through the gateway's {@code patientservice} route
+     * directly. Through this route it is behind {@code CLINICAL_MUTATION} and the caseload check.
+     *
+     * <p>Only symptoms, diagnosis, brief and status are forwarded. A whole-document PATCH would let a
+     * caller move a case to another patient or reassign it; neither is this screen's job.
+     */
+    @PatchMapping("/{id}/cases/{caseId}")
+    public CaseSummary updateCase(
+        @PathVariable String id,
+        @PathVariable String caseId,
+        @RequestBody PatientDirectoryService.CaseUpdate changes
+    ) {
+        try {
+            return patientDirectoryService.updateCase(id, caseId, changes);
+        } catch (PatientDirectoryService.PatientNotInCaseloadException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No such case for this clinician", e);
         }
     }
 

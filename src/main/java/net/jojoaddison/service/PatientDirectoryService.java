@@ -405,6 +405,121 @@ public class PatientDirectoryService {
             );
     }
 
+    /**
+     * The caller's own caseload, newest first — the case queue's source.
+     *
+     * <p>Assembled here rather than read from patientservice directly, and that is the whole point
+     * of this method. The sibling's {@code /api/clinical-cases} is generated CRUD with no filters and
+     * no clinician scope: a client that calls it gets <em>every case in the estate</em> and narrows
+     * the list in the browser. Going through here means the narrowing is server-side and the caller
+     * never receives a case that is not theirs.
+     */
+    public Page<CaseSummary> myCases(Pageable pageable, String status) {
+        String professionalId = callerProfileId().orElse(null);
+        if (professionalId == null) {
+            return new PageImpl<>(List.of(), pageable, 0);
+        }
+        List<CaseSummary> matches = patientService
+            .clinicalCases()
+            .stream()
+            .filter(c -> professionalId.equals(c.assignedProfessionalId()))
+            .filter(c -> c.archivedAt() == null)
+            .filter(c -> status == null || status.isBlank() || status.equalsIgnoreCase(c.status()))
+            .sorted(
+                Comparator.comparing(
+                    net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase::openedAt,
+                    Comparator.nullsLast(Comparator.reverseOrder())
+                )
+            )
+            .map(this::toCaseSummary)
+            .toList();
+        return slice(matches, pageable);
+    }
+
+    /** One patient's cases, entitlement-checked the same way their record is. */
+    public Page<CaseSummary> casesFor(String patientId, Pageable pageable) {
+        requireEntitlement(patientId);
+        List<CaseSummary> matches = patientService
+            .clinicalCases()
+            .stream()
+            .filter(c -> patientId.equals(c.patientId()))
+            .filter(c -> c.archivedAt() == null)
+            .sorted(
+                Comparator.comparing(
+                    net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase::openedAt,
+                    Comparator.nullsLast(Comparator.reverseOrder())
+                )
+            )
+            .map(this::toCaseSummary)
+            .toList();
+        return slice(matches, pageable);
+    }
+
+    /**
+     * Updates the clinical fields of one of the caller's own cases.
+     *
+     * <p><b>This exists for a security reason, not for tidiness.</b> patientservice's PATCH is gated
+     * on its own {@code requireWrite}, which passes for any authenticated non-patient caller —
+     * verified against the deployed stack, where a <em>carer</em> receives 400 rather than 403 from
+     * it. So a role that is read-only in this service can edit a diagnosis by going through the
+     * gateway's {@code patientservice} route directly. Routed through here it is behind
+     * {@code CLINICAL_MUTATION} <em>and</em> the caseload check, which is the posture this service
+     * already applies to every other clinical write.
+     *
+     * <p>Only the four fields a clinician edits are forwarded. A whole-document PATCH would let a
+     * caller move a case to another patient or reassign it, neither of which is this screen's job.
+     */
+    public CaseSummary updateCase(String patientId, String caseId, CaseUpdate changes) {
+        requireEntitlement(patientId);
+
+        net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase existing = patientService
+            .clinicalCases()
+            .stream()
+            .filter(c -> caseId.equals(c.id()) && patientId.equals(c.patientId()))
+            .findFirst()
+            .orElseThrow(() -> new PatientNotInCaseloadException(patientId));
+
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        // patientservice's PATCH requires the body id to match the path id.
+        body.put("id", existing.id());
+        if (changes.symptoms() != null) {
+            body.put("symptoms", changes.symptoms());
+        }
+        if (changes.diagnosis() != null) {
+            body.put("diagnosis", changes.diagnosis());
+        }
+        if (changes.brief() != null) {
+            body.put("brief", changes.brief());
+        }
+        if (changes.status() != null) {
+            body.put("status", changes.status());
+        }
+
+        return toCaseSummary(patientService.patchClinicalCase(caseId, body));
+    }
+
+    /** The clinical fields a clinician may edit. Everything else on a case is somebody else's. */
+    public record CaseUpdate(String symptoms, String diagnosis, String brief, String status) {}
+
+    private CaseSummary toCaseSummary(net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase c) {
+        return new CaseSummary(
+            c.id(),
+            text(c.openedAt()),
+            c.brief(),
+            c.status() == null ? null : c.status().toLowerCase(java.util.Locale.ROOT)
+        );
+    }
+
+    /** Pages an already-assembled list. Same shape as {@link #directory(Pageable, DirectoryFilter)}. */
+    private <T> Page<T> slice(List<T> all, Pageable pageable) {
+        if (pageable.isUnpaged()) {
+            return new PageImpl<>(all, pageable, all.size());
+        }
+        int from = (int) Math.min(pageable.getOffset(), all.size());
+        int to = Math.min(from + pageable.getPageSize(), all.size());
+        return new PageImpl<>(all.subList(from, to), pageable, all.size());
+    }
+
     /** The caller's login, having established they may write to this patient. */
     private String requireEntitlement(String patientId) {
         String professionalId = callerProfileId().orElse(null);
