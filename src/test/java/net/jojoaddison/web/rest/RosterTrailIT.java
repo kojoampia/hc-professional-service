@@ -107,8 +107,28 @@ class RosterTrailIT {
         );
     }
 
-    private static ActivityLog log(String id, String patientId, String name, int daysAgo) {
-        return new ActivityLog(id, patientId, name, "detail", Instant.now().minus(daysAgo, ChronoUnit.DAYS));
+    /**
+     * A fixture in the shape patientservice ACTUALLY sends.
+     *
+     * <p>It used to be built as {@code (id, patientId, name, description, Instant)} — the shape this
+     * service wished for rather than the one the sibling emits. That is why this suite stayed green
+     * while every real trail came back empty: the test and the production DTO agreed with each other
+     * and both disagreed with patientservice. Fixture shapes copied from the consumer are worth
+     * nothing; these are copied from {@code hc-patient/api/.../domain/ActivityLog.java}.
+     */
+    private static ActivityLog log(String id, String patientId, String summary, int daysAgo) {
+        return new ActivityLog(
+            id,
+            patientId,
+            "case-1",
+            Instant.now().minus(daysAgo, ChronoUnit.DAYS),
+            summary,
+            "detail",
+            "OBSERVATION",
+            "CLINICIAN",
+            "professional-1",
+            LocalDate.now().minusDays(daysAgo)
+        );
     }
 
     private static String trail(String customerId) {
@@ -220,7 +240,10 @@ class RosterTrailIT {
     @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
     void toleratesAnActivityEntryWithNoDate() throws Exception {
         when(patientServiceClient.activityLogs()).thenReturn(
-            List.of(new ActivityLog("a-undated", MINE, "No date", "detail", null), log("a-recent", MINE, "Dated", 1))
+            List.of(
+                new ActivityLog("a-undated", MINE, "case-1", null, "No date", "detail", "OBSERVATION", "CLINICIAN", "professional-1", null),
+                log("a-recent", MINE, "Dated", 1)
+            )
         );
 
         // Dropped rather than thrown on or sorted arbitrarily: an entry with no time cannot be placed

@@ -136,15 +136,70 @@ public final class PatientServiceDtos {
         String assignedProfessionalId
     ) {}
 
-    /** An entry in the patient's activity log, from {@code GET /api/activity-logs}. */
+    /**
+     * An entry in the patient's activity log, from {@code GET /api/activity-logs}.
+     *
+     * <p><b>Corrected 2026-08-22.</b> This record previously read {@code name}/{@code description}
+     * with an {@code Instant createdDate}. patientservice sends neither: its text lives in
+     * {@code summary}/{@code detail}, and {@code createdDate} is a <b>LocalDate</b>. The two text
+     * fields simply came back null; the date was worse — Jackson throws on {@code "2026-08-22"} into
+     * an {@code Instant}, {@code PatientServiceClient} catches it by design, and the whole collection
+     * answered empty. Every patient record showed no activity at all, and nothing logged an error.
+     *
+     * <p>{@code kind} and {@code source} are enums over there and are taken as strings here on
+     * purpose, so adding a new value in patientservice cannot fail deserialization in this service.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record ActivityLog(String id, String patientId, String name, String description, Instant createdDate) {}
+    public record ActivityLog(
+        String id,
+        String patientId,
+        String caseId,
+        Instant loggedAt,
+        String summary,
+        String detail,
+        String kind,
+        String source,
+        String authorId,
+        LocalDate createdDate
+    ) {}
 
-    /** A medication record, from {@code GET /api/medications}. */
+    /**
+     * A medication record, from {@code GET /api/medications}.
+     *
+     * <p>{@code createdDate} is a {@code LocalDate} over there — see {@link ActivityLog} for what
+     * asking for an {@code Instant} costs.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Medication(String id, String patientId, String name, String description, Instant createdDate) {}
+    public record Medication(
+        String id,
+        String patientId,
+        String caseId,
+        String name,
+        String description,
+        String dosage,
+        String status,
+        LocalDate startedOn,
+        LocalDate createdDate
+    ) {}
 
-    /** A clinical report, from {@code GET /api/reports}. */
+    /**
+     * A clinical report, from {@code GET /api/reports}.
+     *
+     * <p>{@code reportDate} is when the report is <em>about</em>; {@code createdDate} is when it was
+     * filed. Both are {@code LocalDate} — see {@link ActivityLog}.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Report(String id, String patientId, String name, String category, String description, String url, Instant createdDate) {}
+    public record Report(
+        String id,
+        String patientId,
+        String caseId,
+        String name,
+        String category,
+        String description,
+        String summary,
+        String url,
+        String authorId,
+        LocalDate reportDate,
+        LocalDate createdDate
+    ) {}
 }

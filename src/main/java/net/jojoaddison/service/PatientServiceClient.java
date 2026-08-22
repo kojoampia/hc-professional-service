@@ -2,6 +2,7 @@ package net.jojoaddison.service;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import net.jojoaddison.security.SecurityUtils;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ActivityLog;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase;
@@ -13,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -93,6 +95,48 @@ public class PatientServiceClient {
 
     public List<Report> reports() {
         return get("/api/reports", REPORT_LIST);
+    }
+
+    /**
+     * Files an activity-log entry against a patient, as the calling clinician.
+     *
+     * <p>patientservice stamps {@code createdBy} and {@code createdDate} from the token and applies
+     * its own patient scope, so this cannot attribute an entry to someone else however the body is
+     * built.
+     */
+    public ActivityLog createActivityLog(Map<String, Object> body) {
+        return post("/api/activity-logs", body, ActivityLog.class);
+    }
+
+    /** Files a clinical report against a patient, as the calling clinician. */
+    public Report createReport(Map<String, Object> body) {
+        return post("/api/reports", body, Report.class);
+    }
+
+    /**
+     * One POST, as the calling clinician.
+     *
+     * <p><b>Writes do not fail soft, and that is the whole point of a separate method.</b> The reads
+     * above answer empty when patientservice is unreachable, because a degraded dashboard beats a
+     * 500 on a page the clinician could partly use. Applying that to a write would be the opposite
+     * of kind: the clinician would be told their note was filed, and it would not exist. A failure
+     * here propagates so the caller sees a 5xx and — on a phone — the offline queue keeps the entry
+     * and retries it.
+     */
+    private <T> T post(String path, Map<String, Object> body, Class<T> type) {
+        if (!enabled) {
+            throw new IllegalStateException("patientservice is disabled; cannot write " + path);
+        }
+        String token = SecurityUtils.getCurrentUserJWT()
+            .orElseThrow(() -> new IllegalStateException("No caller token available; refusing to write " + path));
+        return restClient
+            .post()
+            .uri(path)
+            .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(body)
+            .retrieve()
+            .body(type);
     }
 
     /**

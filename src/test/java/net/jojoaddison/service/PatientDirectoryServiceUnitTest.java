@@ -1,7 +1,10 @@
 package net.jojoaddison.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
@@ -12,16 +15,26 @@ import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.Task;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.repository.TaskRepository;
+import net.jojoaddison.service.PatientDirectoryService.DirectoryFilter;
+import net.jojoaddison.service.dto.PatientDtos.CreateActivity;
+import net.jojoaddison.service.dto.PatientDtos.CreateReport;
+import net.jojoaddison.service.dto.PatientDtos.PatientListItem;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ActivityLog;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.PatientProfile;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.Report;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
@@ -49,6 +62,7 @@ class PatientDirectoryServiceUnitTest {
     @Mock
     private PatientServiceClient patientService;
 
+    private InMemoryReceiptRepository receiptRepository;
     private PatientDirectoryService service;
 
     @BeforeEach
@@ -64,7 +78,8 @@ class PatientDirectoryServiceUnitTest {
         when(patientService.activityLogs()).thenReturn(List.of());
         when(patientService.medications()).thenReturn(List.of());
         when(patientService.reports()).thenReturn(List.of());
-        service = new PatientDirectoryService(taskRepository, profileRepository, patientService);
+        receiptRepository = new InMemoryReceiptRepository();
+        service = new PatientDirectoryService(taskRepository, profileRepository, patientService, receiptRepository);
     }
 
     private Task task(String patientId) {
@@ -194,5 +209,420 @@ class PatientDirectoryServiceUnitTest {
         assertThat(summary.female()).isEqualTo(2);
         assertThat(summary.male()).isEqualTo(1);
         assertThat(summary.kids()).isEqualTo(1);
+    }
+
+    // --- Paging, filtering and sorting (web-mobile-port.md § Phase 1.1) -----------------------
+
+    /** Three patients, deterministic names and demographics, for the paging tests below. */
+    private void threePatients() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task("p-a"), task("p-b"), task("p-c")));
+        when(patientService.profiles()).thenReturn(
+            List.of(
+                profile("p-a", "Ama", "Mensah", "female", LocalDate.of(1990, 1, 1)),
+                profile("p-b", "Kwesi", "Boateng", "male", LocalDate.of(1985, 1, 1)),
+                profile("p-c", "Akosua", "Owusu", "female", LocalDate.now().minusYears(7))
+            )
+        );
+    }
+
+    @Test
+    void aPageCarriesTheMATCHcountRatherThanTheRowCount() {
+        // The bug this replaces: X-Total-Count was list.size(), so it agreed with the body by
+        // construction and could never tell a client there was another page.
+        threePatients();
+
+        Page<PatientListItem> page = service.directory(PageRequest.of(0, 2), DirectoryFilter.NONE);
+
+        assertThat(page.getContent()).hasSize(2);
+        assertThat(page.getTotalElements()).isEqualTo(3);
+        assertThat(page.getTotalPages()).isEqualTo(2);
+    }
+
+    @Test
+    void thePastTheEndPageIsEmptyRatherThanOutOfBounds() {
+        threePatients();
+
+        Page<PatientListItem> page = service.directory(PageRequest.of(9, 2), DirectoryFilter.NONE);
+
+        assertThat(page.getContent()).isEmpty();
+        assertThat(page.getTotalElements()).isEqualTo(3);
+    }
+
+    @Test
+    void theTotalIsTHEFILTEREDtotal_notTheWholeCaseload() {
+        // Otherwise the client pages through a phantom: 3 total, 1 row, no second page to fetch.
+        threePatients();
+
+        Page<PatientListItem> page = service.directory(PageRequest.of(0, 20), new DirectoryFilter(null, "male", null));
+
+        assertThat(page.getContent()).extracting(PatientListItem::id).containsExactly("p-b");
+        assertThat(page.getTotalElements()).isEqualTo(1);
+    }
+
+    @Test
+    void theQueryMatchesNameOrId_becauseAWristbandCarriesTheId() {
+        threePatients();
+
+        assertThat(service.directory(PageRequest.of(0, 20), new DirectoryFilter("mensah", null, null)).getContent())
+            .extracting(PatientListItem::id)
+            .containsExactly("p-a");
+        assertThat(service.directory(PageRequest.of(0, 20), new DirectoryFilter("P-C", null, null)).getContent())
+            .extracting(PatientListItem::id)
+            .containsExactly("p-c");
+    }
+
+    @Test
+    void childrenOnlyUsesTheAgeComputedPerRead() {
+        threePatients();
+
+        Page<PatientListItem> page = service.directory(PageRequest.of(0, 20), new DirectoryFilter(null, null, true));
+
+        assertThat(page.getContent()).extracting(PatientListItem::id).containsExactly("p-c");
+    }
+
+    @Test
+    void filtersCOMBINE_theyDoNotWiden() {
+        threePatients();
+
+        Page<PatientListItem> page = service.directory(PageRequest.of(0, 20), new DirectoryFilter("akosua", "male", null));
+
+        assertThat(page.getContent()).isEmpty();
+    }
+
+    @Test
+    void aWhitelistedSortIsApplied() {
+        threePatients();
+
+        Page<PatientListItem> page = service.directory(PageRequest.of(0, 20, Sort.by("patientName")), DirectoryFilter.NONE);
+
+        assertThat(page.getContent()).extracting(PatientListItem::patientName).isSorted();
+    }
+
+    @Test
+    void anUnSORTABLEpropertyIsREJECTED_notSilentlyIgnored() {
+        // The list is assembled in memory, so a sort is a comparator lookup an arbitrary sort= would
+        // otherwise reach. Ignoring it instead would look like a backend that lost the clinician's
+        // ordering — which nobody reports as a bug.
+        threePatients();
+
+        assertThatThrownBy(() -> service.directory(PageRequest.of(0, 20, Sort.by("dropTable")), DirectoryFilter.NONE))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("dropTable")
+            .hasMessageContaining("patientName");
+    }
+
+    @Test
+    void anUnpagedRequestStillAnswersWithEverything() {
+        // summary() and any internal caller must not silently receive page 0 of 20.
+        threePatients();
+
+        Page<PatientListItem> page = service.directory(Pageable.unpaged(), DirectoryFilter.NONE);
+
+        assertThat(page.getContent()).hasSize(3);
+        assertThat(page.getTotalElements()).isEqualTo(3);
+    }
+
+    @Test
+    void aNullFilterMeansNoFilter() {
+        threePatients();
+
+        assertThat(service.directory(PageRequest.of(0, 20), null).getTotalElements()).isEqualTo(3);
+    }
+
+    // --- Writes (web-mobile-port.md § Phase 1.3) ----------------------------------------------
+
+    private static final String MINE = "p-mine";
+
+    /** One patient in the caller's caseload, so a write has somewhere legitimate to land. */
+    private void onePatientOfMine() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task(MINE)));
+        when(patientService.profiles()).thenReturn(List.of(profile(MINE, "Ama", "Mensah", "female", LocalDate.of(1990, 1, 1))));
+    }
+
+    private static ActivityLog createdLog(String id, String clientSummary) {
+        return new ActivityLog(
+            id,
+            MINE,
+            null,
+            Instant.parse("2026-08-22T09:15:00Z"),
+            clientSummary,
+            "detail",
+            "OBSERVATION",
+            "CLINICIAN",
+            PROFESSIONAL_ID,
+            LocalDate.of(2026, 8, 22)
+        );
+    }
+
+    @Test
+    void anActivityIsFiledAgainstMyOwnPatient() {
+        onePatientOfMine();
+        when(patientService.createActivityLog(any())).thenReturn(createdLog("al-1", "Wound dressed"));
+
+        var entry = service.appendActivity(MINE, new CreateActivity("Wound dressed", "No exudate", null, null));
+
+        assertThat(entry.id()).isEqualTo("al-1");
+        assertThat(entry.label()).isEqualTo("Wound dressed");
+    }
+
+    @Test
+    void theFRONTENDsFieldNamesAreTranslatedToTheSIBLINGs() {
+        // title/description here, summary/detail over there. The translation happens once, in this
+        // service, rather than making either side rename.
+        onePatientOfMine();
+        when(patientService.createActivityLog(any())).thenReturn(createdLog("al-1", "Wound dressed"));
+
+        service.appendActivity(MINE, new CreateActivity("Wound dressed", "No exudate", null, null));
+
+        ArgumentCaptor<java.util.Map<String, Object>> body = ArgumentCaptor.forClass(java.util.Map.class);
+        verify(patientService).createActivityLog(body.capture());
+        assertThat(body.getValue()).containsEntry("summary", "Wound dressed").containsEntry("detail", "No exudate");
+        assertThat(body.getValue()).doesNotContainKeys("title", "description");
+    }
+
+    @Test
+    void aMissingOccurredAtMeansNOW_ratherThanARefusedNote() {
+        onePatientOfMine();
+        when(patientService.createActivityLog(any())).thenReturn(createdLog("al-1", "s"));
+
+        service.appendActivity(MINE, new CreateActivity("s", "d", null, null));
+
+        ArgumentCaptor<java.util.Map<String, Object>> body = ArgumentCaptor.forClass(java.util.Map.class);
+        verify(patientService).createActivityLog(body.capture());
+        assertThat(body.getValue().get("loggedAt")).asString().isNotBlank();
+    }
+
+    @Test
+    void anUNPARSEABLEoccurredAtIsIgnoredRatherThanRefused() {
+        // Refusing a clinical note over a malformed timestamp is the wrong trade; the audit fields
+        // are stamped from the token by patientservice either way.
+        onePatientOfMine();
+        when(patientService.createActivityLog(any())).thenReturn(createdLog("al-1", "s"));
+
+        assertThat(service.appendActivity(MINE, new CreateActivity("s", "d", "not-a-timestamp", null))).isNotNull();
+    }
+
+    @Test
+    void aPatientOUTSIDEmyCaseloadCannotBeWrittenTo() {
+        // The write half of the same boundary record() enforces. 404-shaped, so a clinician cannot
+        // discover that a patient id is real by trying to file against it.
+        onePatientOfMine();
+
+        assertThatThrownBy(() -> service.appendActivity("p-someone-else", new CreateActivity("s", "d", null, null))).isInstanceOf(
+            PatientDirectoryService.PatientNotInCaseloadException.class
+        );
+        verify(patientService, org.mockito.Mockito.never()).createActivityLog(any());
+    }
+
+    @Test
+    void aRETRIEDwriteFilesTheNoteONCE() {
+        // The reason clientRef exists: a phone that files at the bedside, loses signal before the
+        // response lands and retries on reconnect must not leave two notes in the record.
+        onePatientOfMine();
+        when(patientService.createActivityLog(any())).thenReturn(createdLog("al-1", "Wound dressed"));
+        when(patientService.activityLogs()).thenReturn(List.of(createdLog("al-1", "Wound dressed")));
+
+        var first = service.appendActivity(MINE, new CreateActivity("Wound dressed", "d", null, "ref-1"));
+        var replay = service.appendActivity(MINE, new CreateActivity("Wound dressed", "d", null, "ref-1"));
+
+        verify(patientService, org.mockito.Mockito.times(1)).createActivityLog(any());
+        assertThat(first.id()).isEqualTo("al-1");
+        assertThat(replay.id()).isEqualTo("al-1");
+    }
+
+    @Test
+    void aClientRefSPENTonADIFFERENTwriteIsRefused() {
+        // Two clients generating the same key must not let one read back the other's record.
+        onePatientOfMine();
+        when(patientService.createActivityLog(any())).thenReturn(createdLog("al-1", "s"));
+        service.appendActivity(MINE, new CreateActivity("s", "d", null, "ref-1"));
+
+        assertThatThrownBy(() -> service.appendReport(MINE, new CreateReport("r", "ASSESSMENT", "d", null, "ref-1")))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("already been used");
+    }
+
+    @Test
+    void aWriteWithNOclientRefIsStillAccepted() {
+        // Idempotency is opt-in. A browser posting a form has no queue and needs no key.
+        onePatientOfMine();
+        when(patientService.createActivityLog(any())).thenReturn(createdLog("al-1", "s"));
+
+        service.appendActivity(MINE, new CreateActivity("s", "d", null, null));
+        service.appendActivity(MINE, new CreateActivity("s", "d", null, null));
+
+        verify(patientService, org.mockito.Mockito.times(2)).createActivityLog(any());
+    }
+
+    @Test
+    void aReportTranslatesReportTypeToCategory() {
+        onePatientOfMine();
+        when(patientService.createReport(any())).thenReturn(
+            new Report(
+                "rep-1",
+                MINE,
+                null,
+                "assessment.pdf",
+                "ASSESSMENT",
+                "d",
+                "s",
+                "http://x",
+                PROFESSIONAL_ID,
+                LocalDate.of(2026, 8, 20),
+                LocalDate.of(2026, 8, 20)
+            )
+        );
+
+        var report = service.appendReport(MINE, new CreateReport("assessment.pdf", "ASSESSMENT", "d", "http://x", null));
+
+        ArgumentCaptor<java.util.Map<String, Object>> body = ArgumentCaptor.forClass(java.util.Map.class);
+        verify(patientService).createReport(body.capture());
+        assertThat(body.getValue()).containsEntry("category", "ASSESSMENT");
+        assertThat(report.reportType()).isEqualTo("ASSESSMENT");
+    }
+
+    /** A stand-in for the Mongo repository; only findByClientRef and save are exercised. */
+    private static final class InMemoryReceiptRepository
+        extends org.mockito.Mockito
+        implements net.jojoaddison.repository.PatientWriteReceiptRepository {
+
+        private final java.util.Map<String, net.jojoaddison.domain.PatientWriteReceipt> byRef = new java.util.HashMap<>();
+
+        @Override
+        public java.util.Optional<net.jojoaddison.domain.PatientWriteReceipt> findByClientRef(String clientRef) {
+            return java.util.Optional.ofNullable(byRef.get(clientRef));
+        }
+
+        @Override
+        public <S extends net.jojoaddison.domain.PatientWriteReceipt> S save(S entity) {
+            byRef.put(entity.getClientRef(), entity);
+            return entity;
+        }
+
+        // The rest of MongoRepository is unused here.
+        @Override
+        public <S extends net.jojoaddison.domain.PatientWriteReceipt> java.util.List<S> saveAll(Iterable<S> entities) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public java.util.Optional<net.jojoaddison.domain.PatientWriteReceipt> findById(String s) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean existsById(String s) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public java.util.List<net.jojoaddison.domain.PatientWriteReceipt> findAll() {
+            return java.util.List.copyOf(byRef.values());
+        }
+
+        @Override
+        public java.util.List<net.jojoaddison.domain.PatientWriteReceipt> findAllById(Iterable<String> strings) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public long count() {
+            return byRef.size();
+        }
+
+        @Override
+        public void deleteById(String s) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void delete(net.jojoaddison.domain.PatientWriteReceipt entity) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void deleteAllById(Iterable<? extends String> strings) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void deleteAll(Iterable<? extends net.jojoaddison.domain.PatientWriteReceipt> entities) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void deleteAll() {
+            byRef.clear();
+        }
+
+        @Override
+        public java.util.List<net.jojoaddison.domain.PatientWriteReceipt> findAll(org.springframework.data.domain.Sort sort) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public org.springframework.data.domain.Page<net.jojoaddison.domain.PatientWriteReceipt> findAll(
+            org.springframework.data.domain.Pageable pageable
+        ) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public <S extends net.jojoaddison.domain.PatientWriteReceipt> java.util.Optional<S> findOne(
+            org.springframework.data.domain.Example<S> example
+        ) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public <S extends net.jojoaddison.domain.PatientWriteReceipt> java.util.List<S> findAll(
+            org.springframework.data.domain.Example<S> example
+        ) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public <S extends net.jojoaddison.domain.PatientWriteReceipt> java.util.List<S> findAll(
+            org.springframework.data.domain.Example<S> example,
+            org.springframework.data.domain.Sort sort
+        ) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public <S extends net.jojoaddison.domain.PatientWriteReceipt> org.springframework.data.domain.Page<S> findAll(
+            org.springframework.data.domain.Example<S> example,
+            org.springframework.data.domain.Pageable pageable
+        ) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public <S extends net.jojoaddison.domain.PatientWriteReceipt> long count(org.springframework.data.domain.Example<S> example) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public <S extends net.jojoaddison.domain.PatientWriteReceipt> boolean exists(org.springframework.data.domain.Example<S> example) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public <S extends net.jojoaddison.domain.PatientWriteReceipt, R> R findBy(
+            org.springframework.data.domain.Example<S> example,
+            java.util.function.Function<org.springframework.data.repository.query.FluentQuery.FetchableFluentQuery<S>, R> queryFunction
+        ) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public <S extends net.jojoaddison.domain.PatientWriteReceipt> S insert(S entity) {
+            return save(entity);
+        }
+
+        @Override
+        public <S extends net.jojoaddison.domain.PatientWriteReceipt> java.util.List<S> insert(Iterable<S> entities) {
+            throw new UnsupportedOperationException();
+        }
     }
 }
