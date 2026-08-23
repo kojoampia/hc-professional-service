@@ -460,13 +460,17 @@ public class PatientDirectoryService {
     /**
      * Updates the clinical fields of one of the caller's own cases.
      *
-     * <p><b>This exists for a security reason, not for tidiness.</b> patientservice's PATCH is gated
-     * on its own {@code requireWrite}, which passes for any authenticated non-patient caller —
-     * verified against the deployed stack, where a <em>carer</em> receives 400 rather than 403 from
-     * it. So a role that is read-only in this service can edit a diagnosis by going through the
-     * gateway's {@code patientservice} route directly. Routed through here it is behind
-     * {@code CLINICAL_MUTATION} <em>and</em> the caseload check, which is the posture this service
-     * already applies to every other clinical write.
+     * <p><b>This exists so the caller is scoped, not because the sibling is open.</b> patientservice's
+     * {@code /api/clinical-cases} is generated CRUD with no clinician scope, so a client calling it
+     * directly receives every case in the estate and narrows the list itself. Routed through here it
+     * is behind {@code CLINICAL_MUTATION} <em>and</em> the caseload check.
+     *
+     * <p>An earlier version of this note claimed the sibling's {@code requireWrite} passed for any
+     * authenticated non-patient caller, so a read-only role could edit a diagnosis by going around.
+     * <b>That was wrong and is retracted (2026-08-23):</b> a carer PATCHing a diagnosis there gets
+     * 403, because their {@code ScopeOfPractice} grants OBSERVATION, CARE_PLAN and ENCOUNTER and not
+     * DIAGNOSIS. The probe behind the original claim sent a merge-patch body without the {@code id}
+     * that endpoint requires, so both roles got a 400 from validation before authorisation ran.
      *
      * <p>Only the four fields a clinician edits are forwarded. A whole-document PATCH would let a
      * caller move a case to another patient or reassign it, neither of which is this screen's job.
