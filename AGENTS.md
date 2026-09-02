@@ -21,7 +21,7 @@ Server port: **8081** (dev).
 
 ## Code layout (`src/main/java/net/jojoaddison`)
 
-- `domain/` — MongoDB documents. Generated CRUD entities: `Activity`, `Address`, `Category`, `PersonalDocument`, `Metadata`, `Profile`, `Report`, `Roster`, `Task`, `Team`, `DutyRoster`. Onboarding entities: `ProfessionalApplication`, `OnboardingEvent`, and `EmergencyContact` (embedded in `Profile`). All extend `AbstractAuditingEntity`.
+- `domain/` — MongoDB documents. Generated CRUD entities: `Activity`, `Address`, `Category`, `PersonalDocument`, `Metadata`, `Profile`, `Report`, `Task`, `Team`, `DutyRoster`. Onboarding entities: `ProfessionalApplication`, `OnboardingEvent`, and `EmergencyContact` (embedded in `Profile`). All extend `AbstractAuditingEntity`.
 - `domain/enumeration/` — `DocumentType`, `VerificationStatus` (document credentialing verdict), `OnboardingStatus` (application lifecycle), `DutyRole` and `ShiftType` (duty roster). Each carries a Javadoc stating its contract — read it before adding a value; `ShiftType`'s time windows and `DutyRole`'s nine-role alignment are mirrored in `web/`.
 - `repository/` — one `MongoRepository` per entity.
 - `web/rest/` — one CRUD `*Resource` per generated entity, plus the hand-written `OnboardingResource`, `OnboardingDocumentResource`, `DutyRosterResource`, `ComplianceResource`, and `professionalServiceKafkaResource` (note the lowercase-p class name — existing quirk).

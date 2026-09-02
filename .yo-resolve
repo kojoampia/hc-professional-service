@@ -10,11 +10,8 @@ src/test/java/net/jojoaddison/domain/ProfileTestSamples.java skip
 src/main/java/net/jojoaddison/web/rest/AddressResource.java skip
 src/main/java/net/jojoaddison/domain/Task.java skip
 src/main/java/net/jojoaddison/repository/HCDocumentRepository.java skip
-src/test/java/net/jojoaddison/web/rest/RosterResourceIT.java skip
 src/main/java/net/jojoaddison/repository/ProfileRepository.java skip
 src/test/java/net/jojoaddison/web/rest/HCDocumentResourceIT.java skip
-src/test/java/net/jojoaddison/domain/RosterAsserts.java skip
 src/test/java/net/jojoaddison/domain/ProfileAsserts.java skip
 src/main/java/net/jojoaddison/repository/MetadataRepository.java skip
-src/main/java/net/jojoaddison/domain/Roster.java skip
 src/test/java/net/jojoaddison/web/rest/ProfileResourceIT.java skip
