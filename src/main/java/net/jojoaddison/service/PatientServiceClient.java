@@ -2,8 +2,10 @@ package net.jojoaddison.service;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import net.jojoaddison.security.SecurityUtils;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ActivityLog;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase;
@@ -40,16 +42,49 @@ import org.springframework.web.client.RestClient;
  * same reason: this runs inside a request, so a hung sibling must not hold a worker thread open
  * indefinitely.
  *
- * <p><strong>Known limit, and it is deliberate for now.</strong> patientservice's generated
- * collection endpoints take no filter parameters, so the read-many methods fetch a collection and
- * this service filters in memory. That is fine at the current data volume and is exactly the problem
- * MOB-P2-PRE describes (see {@code docs/mobile-app-plan.md}); when those endpoints learn to page and
- * filter, the filtering below should move into the query rather than growing a cache here.
+ * <p><strong>The read-many methods read the whole collection, over as many requests as that takes.</strong>
+ * patientservice's generated endpoints all take a {@code Pageable}, and until 2026-09-02 this client
+ * sent no {@code size} — so every one of them answered with Spring's default twenty rows and this
+ * service filtered those twenty as if they were the collection. See {@code getAll} for the shape of
+ * the fix and why it does not hardcode which endpoints page.
+ *
+ * <p><strong>Known limit, and it is deliberate for now.</strong> Those endpoints offer no
+ * clinician-scoped filter — no {@code assignedProfessionalId}, no set of patient ids — so a caseload
+ * is still assembled by reading an estate-wide collection and narrowing it in memory. Paging makes
+ * that correct and makes it more expensive, and cross-stack API design was not this fix's to do — so
+ * the volume half is carried as backlog item 23 (see {@code docs/backlog.md}), which has an in-repo
+ * half the sibling already supports (a single {@code patientId} filter, useful to the per-patient
+ * reads) and a cross-stack half that needs a clinician-scoped endpoint over there.
  */
 @Service
 public class PatientServiceClient {
 
     private static final Logger LOG = LoggerFactory.getLogger(PatientServiceClient.class);
+
+    /**
+     * Rows asked for per request.
+     *
+     * <p><b>Not "all of them", and that is deliberate.</b> Spring clamps {@code size} above its
+     * configured maximum, so asking for a million quietly becomes a page of two thousand — a request
+     * for everything is therefore indistinguishable from a request for a page, and truncates in
+     * exactly the way this client already truncated. Paging is the only shape that cannot lie about
+     * being complete.
+     *
+     * <p>Package-private so the paging tests can derive their fixtures from it rather than restating
+     * the number.
+     */
+    static final int PAGE_SIZE = 200;
+
+    /**
+     * Runaway guard: at {@link #PAGE_SIZE} rows a page, twenty thousand rows.
+     *
+     * <p>A limit nobody should reach, not a ceiling on the collection — reaching it is logged at ERROR
+     * because it means this client is no longer reading everything, which is the defect it exists to
+     * fix. The cheaper guard is in {@link #getAll}: a page that contributes no new row stops the read
+     * immediately, so a sibling that ignores {@code page} costs one extra request rather than this
+     * many.
+     */
+    static final int MAX_PAGES = 100;
 
     private static final ParameterizedTypeReference<List<PatientProfile>> PROFILE_LIST = new ParameterizedTypeReference<>() {};
     private static final ParameterizedTypeReference<List<ClinicalCase>> CASE_LIST = new ParameterizedTypeReference<>() {};
@@ -94,24 +129,24 @@ public class PatientServiceClient {
 
     /** Every patient profile. The join key is {@link PatientProfile#patientId()}, not the profile id. */
     public List<PatientProfile> profiles() {
-        return get("/api/profiles", PROFILE_LIST);
+        return getAll("/api/profiles", PROFILE_LIST);
     }
 
     /** Every clinical case. Filter by {@code assignedProfessionalId} for a clinician's own caseload. */
     public List<ClinicalCase> clinicalCases() {
-        return get("/api/clinical-cases", CASE_LIST);
+        return getAll("/api/clinical-cases", CASE_LIST);
     }
 
     public List<ActivityLog> activityLogs() {
-        return get("/api/activity-logs", ACTIVITY_LIST);
+        return getAll("/api/activity-logs", ACTIVITY_LIST);
     }
 
     public List<Medication> medications() {
-        return get("/api/medications", MEDICATION_LIST);
+        return getAll("/api/medications", MEDICATION_LIST);
     }
 
     public List<Report> reports() {
-        return get("/api/reports", REPORT_LIST);
+        return getAll("/api/reports", REPORT_LIST);
     }
 
     /**
@@ -180,13 +215,48 @@ public class PatientServiceClient {
     }
 
     /**
-     * One GET, as the calling clinician, answering empty on any failure.
+     * A whole collection, as the calling clinician, answering empty on any failure.
      *
-     * <p>The exception is swallowed by design — see the class javadoc. It is logged at WARN with the
-     * path so an operator can tell "patientservice is down" from "that collection is genuinely
-     * empty", which are indistinguishable from the response alone.
+     * <h3>Why this pages, and why it does not simply ask for everything</h3>
+     * Every collection endpoint in patientservice takes a {@code Pageable}, so one asked without a
+     * {@code size} answers with <b>twenty rows</b> — and this method used to send none. The rows were
+     * then filtered in memory and served as a clinician's whole caseload: a doctor with a hundred
+     * patients saw nineteen, nineteen being how many of the first twenty rows happened to be theirs.
+     * Asking for one enormous page is not the fix, because Spring clamps {@code size} above its
+     * configured maximum and hands back a smaller page without saying so.
+     *
+     * <h3>It does not encode which endpoints page</h3>
+     * <b>Deliberately, because that answer goes stale.</b> {@code quality/seed-data.py} kept a set of
+     * endpoints known not to paginate and it was wrong within a fortnight of being written — backlog
+     * item 7 (see {@code docs/backlog.md}) gave {@code /api/duty-roster/all} a {@code Pageable} and
+     * the stale constant silently broke that script's idempotency guard. So this loop asks the
+     * collection how it behaves instead:
+     *
+     * <ul>
+     *   <li>a <b>short or empty page</b> is the last one, which is how a paging endpoint ends;
+     *   <li>a page contributing <b>no row this read has not already seen</b> stops it too, which is how
+     *       an endpoint that ignores {@code page} ends — it hands back the same rows for ever, and a
+     *       pager that trusted the parameter would append the collection to itself until the guard
+     *       below tripped;
+     *   <li>{@link #MAX_PAGES} is the backstop for the case neither of those catches.
+     * </ul>
+     *
+     * <p>The rows accumulate in a {@link LinkedHashSet}, so that second rule costs nothing extra: the
+     * dedupe <em>is</em> the progress check, and overlapping pages — the ordinary consequence of a
+     * concurrent write during a multi-page read — cannot deliver a row twice.
+     *
+     * <p><b>{@code sort=id,asc} for the same reason it is not left to the caller elsewhere.</b> Paging
+     * an unsorted query is how page 2 silently repeats or skips a row from page 1; Mongo promises no
+     * order across separate queries. Every document in the sibling carries an {@code id}, so this is
+     * the one key guaranteed to exist and to be unique.
+     *
+     * <p><b>A failure mid-collection answers empty, not truncated.</b> Empty is a signal this codebase
+     * already reads — {@code DutyRosterService.refreshSnapshots} treats an empty profile list as an
+     * outage and keeps the stored snapshots rather than blanking them. Half a collection carries no
+     * such signal: it is the exact shape of the defect above, and every caller would filter it and
+     * render the remainder as a quiet week.
      */
-    private <T> List<T> get(String path, ParameterizedTypeReference<List<T>> type) {
+    private <T> List<T> getAll(String path, ParameterizedTypeReference<List<T>> type) {
         if (!enabled) {
             return List.of();
         }
@@ -197,12 +267,55 @@ public class PatientServiceClient {
             LOG.warn("No caller token available; skipping patientservice read of {}", path);
             return List.of();
         }
+        Set<T> rows = new LinkedHashSet<>();
         try {
-            List<T> body = restClient.get().uri(path).header(HttpHeaders.AUTHORIZATION, "Bearer " + token).retrieve().body(type);
-            return body == null ? List.of() : body;
+            for (int page = 0; page < MAX_PAGES; page++) {
+                List<T> batch = getPage(path, type, token, page);
+                if (batch == null || batch.isEmpty()) {
+                    return List.copyOf(rows);
+                }
+                int before = rows.size();
+                rows.addAll(batch);
+                if (rows.size() == before) {
+                    LOG.warn(
+                        "patientservice returned page {} of {} with no row this read had not already seen; it appears not to page. " +
+                        "Stopping at {} row(s) rather than reading the same page for ever",
+                        page,
+                        path,
+                        rows.size()
+                    );
+                    return List.copyOf(rows);
+                }
+                if (batch.size() < PAGE_SIZE) {
+                    return List.copyOf(rows);
+                }
+            }
+            LOG.error(
+                "patientservice read of {} hit the {}-page guard at {} row(s); the collection is larger than this client will read " +
+                "and the caller is being served an incomplete answer",
+                path,
+                MAX_PAGES,
+                rows.size()
+            );
+            return List.copyOf(rows);
         } catch (Exception e) {
-            LOG.warn("patientservice read of {} failed ({}); returning empty", path, e.getMessage());
+            LOG.warn("patientservice read of {} failed after {} row(s) ({}); returning empty", path, rows.size(), e.getMessage());
             return List.of();
         }
+    }
+
+    /**
+     * One page of one collection. Throws on failure — {@link #getAll} decides what a failure means.
+     */
+    private <T> List<T> getPage(String path, ParameterizedTypeReference<List<T>> type, String token, int page) {
+        return restClient
+            .get()
+            .uri(
+                uriBuilder ->
+                    uriBuilder.path(path).queryParam("page", page).queryParam("size", PAGE_SIZE).queryParam("sort", "id,asc").build()
+            )
+            .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+            .retrieve()
+            .body(type);
     }
 }
