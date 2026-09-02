@@ -85,7 +85,9 @@ class PatientServiceClientTransportTest {
 
     private PatientServiceClient clientForThisServer() {
         String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
-        return new PatientServiceClient(RestClient.builder(), baseUrl, true, 5);
+        // 5s per page, 30s for a whole collection. Neither is reached here; the paging test is where
+        // the two bounds are the subject.
+        return new PatientServiceClient(RestClient.builder(), baseUrl, true, 5, 30);
     }
 
     /**

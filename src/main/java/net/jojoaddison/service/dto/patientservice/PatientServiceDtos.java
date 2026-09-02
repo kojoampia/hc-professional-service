@@ -23,6 +23,31 @@ public final class PatientServiceDtos {
     private PatientServiceDtos() {}
 
     /**
+     * A row of one of the sibling's collections — anything {@code PatientServiceClient.getAll} pages.
+     *
+     * <p><b>It exists to make one invariant compile-checked: every projection carries the id.</b> The
+     * paging read de-duplicates rows so that a page contributing nothing new can end a read from an
+     * endpoint that ignores {@code page}. Keyed on {@code id} that is exact. Keyed on record value
+     * equality — which is what it was, and which needs no interface at all — it is exact only while
+     * every record happens to include the id, and nothing said so.
+     *
+     * <p>These records are <em>deliberately partial</em> and are edited when a field goes unused; see
+     * {@link ActivityLog}, whose javadoc records precisely such a rewrite. {@link Medication} and
+     * {@link Report} are the exposed cases: two rows of the same drug, dose, status, patient and start
+     * date differ only by id. Dropping {@code id} from one of them for tidiness would have failed
+     * twice and silently — the duplicate row dropped, and the page then looking as if it contributed
+     * nothing, ending the read early and blaming the sibling for ignoring {@code page}. Data loss
+     * presenting as a paging diagnosis.
+     *
+     * <p>Sealed, so the five rows are the five rows: adding a collection to the client means adding
+     * its DTO here, and removing the {@code id} component from any of them stops the build.
+     */
+    public sealed interface PatientServiceRow permits PatientProfile, ClinicalCase, ActivityLog, Medication, Report {
+        /** The sibling's document id. Present on every document there, and the paging read's key. */
+        String id();
+    }
+
+    /**
      * A patient's demographics, from {@code GET /api/profiles}.
      *
      * <p>{@code patientId} is the join key. {@code id} is the profile's own identifier and is not
@@ -42,7 +67,8 @@ public final class PatientServiceDtos {
         String email,
         String contacts,
         Address address
-    ) {
+    )
+        implements PatientServiceRow {
         /** Display name, tolerant of the middle names being absent, which they usually are. */
         public String fullName() {
             StringBuilder name = new StringBuilder();
@@ -145,7 +171,8 @@ public final class PatientServiceDtos {
          * null on anything read through here.
          */
         Instant archivedAt
-    ) {}
+    )
+        implements PatientServiceRow {}
 
     /**
      * An entry in the patient's activity log, from {@code GET /api/activity-logs}.
@@ -172,7 +199,8 @@ public final class PatientServiceDtos {
         String source,
         String authorId,
         LocalDate createdDate
-    ) {}
+    )
+        implements PatientServiceRow {}
 
     /**
      * A medication record, from {@code GET /api/medications}.
@@ -191,7 +219,8 @@ public final class PatientServiceDtos {
         String status,
         LocalDate startedOn,
         LocalDate createdDate
-    ) {}
+    )
+        implements PatientServiceRow {}
 
     /**
      * A clinical report, from {@code GET /api/reports}.
@@ -212,5 +241,6 @@ public final class PatientServiceDtos {
         String authorId,
         LocalDate reportDate,
         LocalDate createdDate
-    ) {}
+    )
+        implements PatientServiceRow {}
 }
