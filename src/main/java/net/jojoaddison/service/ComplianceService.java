@@ -72,13 +72,31 @@ public class ComplianceService {
      * Idempotent: already-suspended applications are counted but not
      * re-transitioned, so the scheduler can run daily without duplicating
      * audit events.
+     * <p>
+     * A professional who has since <b>renewed</b> is skipped entirely — not suspended, no
+     * {@code compliance.alert}, no {@code license-expired} audit event. Renewing adds a document and
+     * nothing retires the lapsed one, so the expired row stays in the collection for ever; without
+     * this guard the nightly sweep found it and undid the administrator's reinstatement at 04:00,
+     * every night, blaming a licence that was valid (backlog.md item 17). The guard asks
+     * {@link OnboardingService#hasCurrentVerifiedLicense} — the same predicate reactivation is
+     * granted on — because the defect was precisely that the two questions had separate answers.
      */
     public SweepResult sweepExpiredLicenses(String actor) {
         List<PersonalDocument> expired = personalDocumentRepository.findByTypeAndExpiryDateLessThan(DocumentType.LICENSE, LocalDate.now());
         int suspended = 0;
+        int renewed = 0;
         for (PersonalDocument license : expired) {
             ProfessionalApplication application = applicationRepository.findByProfileId(license.getProfileId()).orElse(null);
             if (application == null || application.getStatus() != OnboardingStatus.ACTIVE) {
+                continue;
+            }
+            if (onboardingService.hasCurrentVerifiedLicense(license.getProfileId())) {
+                log.debug(
+                    "Compliance sweep: profile {} has a current license; superseded {} ignored",
+                    license.getProfileId(),
+                    license.getId()
+                );
+                renewed++;
                 continue;
             }
             onboardingService.markStatus(
@@ -90,7 +108,12 @@ public class ComplianceService {
             domainEventPublisher.publishComplianceAlert(LICENSE_EXPIRED_REASON, license.getId(), application.getAccountId(), actor);
             suspended++;
         }
-        log.info("Compliance sweep: {} expired licenses, {} applications suspended", expired.size(), suspended);
+        log.info(
+            "Compliance sweep: {} expired licenses, {} applications suspended, {} skipped as renewed",
+            expired.size(),
+            suspended,
+            renewed
+        );
         return new SweepResult(expired.size(), suspended);
     }
 

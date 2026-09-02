@@ -325,18 +325,43 @@ public class OnboardingService {
     }
 
     private void requireCurrentVerifiedLicense(ProfessionalApplication application) {
-        boolean hasCurrentLicense = documentsFor(application)
-            .stream()
-            .anyMatch(
-                d ->
-                    d.getType() == DocumentType.LICENSE &&
-                    d.getVerificationStatus() == VerificationStatus.VERIFIED &&
-                    d.getExpiryDate() != null &&
-                    !d.getExpiryDate().isBefore(java.time.LocalDate.now())
-            );
-        if (!hasCurrentLicense) {
+        if (documentsFor(application).stream().noneMatch(OnboardingService::isCurrentVerifiedLicense)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, REACTIVATION_REQUIRES_LICENSE);
         }
+    }
+
+    /**
+     * The single definition of "this licence is current": a verified LICENSE carrying an expiry date
+     * that has not passed.
+     *
+     * <p>It is one method rather than one per caller because the two callers used to disagree, and
+     * the disagreement was a production defect (backlog.md item 17). Reactivation asked "is there a
+     * current licence" while {@link ComplianceService#sweepExpiredLicenses} asked "is there an
+     * expired one", and after a renewal <em>both were true at once</em> — a renewal adds a document
+     * and nothing retires the lapsed one — so an administrator's reinstatement was undone by the
+     * 04:00 sweep, with an audit trail blaming a licence that was valid.
+     */
+    private static boolean isCurrentVerifiedLicense(PersonalDocument document) {
+        return (
+            document.getType() == DocumentType.LICENSE &&
+            document.getVerificationStatus() == VerificationStatus.VERIFIED &&
+            document.getExpiryDate() != null &&
+            !document.getExpiryDate().isBefore(java.time.LocalDate.now())
+        );
+    }
+
+    /**
+     * Profile-scoped form of {@link #isCurrentVerifiedLicense}, for the compliance sweep.
+     *
+     * <p>Profile-scoped rather than application-scoped because the sweep starts from an expired
+     * document and already holds its profile id; taking an application would only make it re-derive
+     * the same value. Null-tolerant for the same reason — a document may name no profile.
+     */
+    public boolean hasCurrentVerifiedLicense(String profileId) {
+        return (
+            profileId != null &&
+            personalDocumentRepository.findByProfileId(profileId).stream().anyMatch(OnboardingService::isCurrentVerifiedLicense)
+        );
     }
 
     public List<ProfessionalApplication> listApplications(OnboardingStatus status) {
