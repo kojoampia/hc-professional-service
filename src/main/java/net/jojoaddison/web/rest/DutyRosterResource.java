@@ -14,10 +14,14 @@ import net.jojoaddison.security.AuthoritiesConstants;
 import net.jojoaddison.security.SecurityUtils;
 import net.jojoaddison.service.DutyRosterService;
 import net.jojoaddison.service.RosterTrailService;
+import net.jojoaddison.service.dto.DutyRosterDtos;
 import net.jojoaddison.service.dto.PatientDtos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -32,6 +36,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+import tech.jhipster.web.util.PaginationUtil;
 
 /**
  * Professional duty-roster assignments (professional-onboarding-workflow.md
@@ -125,11 +131,26 @@ public class DutyRosterResource {
         return ResponseEntity.noContent().build();
     }
 
-    /** Every assignment on the estate. Admin only — see the inversion note on the class. */
+    /**
+     * Every assignment on the estate, a page at a time. Admin only — see the inversion note on the
+     * class.
+     *
+     * <p><b>Paginated, and projected.</b> It used to be an unbounded {@code findAll} returning stored
+     * {@link DutyRoster} documents, which made it both the largest response this service could
+     * produce and a disclosure of every customer snapshot on the estate. {@code X-Total-Count} is now
+     * the collection's real count rather than the size of the list in the body — the distinction
+     * {@code GET /api/patients} still gets wrong. The pattern is {@code ProfileResource}'s, which is
+     * the only genuinely paginated read this service had.
+     *
+     * @param pageable page, size and sort; defaults to date then shift — see
+     *     {@link DutyRosterService#estateRoster}.
+     */
     @GetMapping("/all")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
-    public List<DutyRoster> listAll() {
-        return dutyRosterRepository.findAllByOrderByDateAscShiftAsc();
+    public ResponseEntity<List<DutyRosterDtos.Round>> listAll(@org.springdoc.core.annotations.ParameterObject Pageable pageable) {
+        Page<DutyRoster> page = dutyRosterService.estateRoster(pageable);
+        HttpHeaders headers = PaginationUtil.generatePaginationHttpHeaders(ServletUriComponentsBuilder.fromCurrentRequest(), page);
+        return ResponseEntity.ok().headers(headers).body(DutyRosterDtos.rounds(page.getContent()));
     }
 
     /**
@@ -140,21 +161,34 @@ public class DutyRosterResource {
      * <p>{@code from} and {@code to} are optional, inclusive, and independent (DR2). Omitting both
      * returns the whole roster, which is what DR1 did and what the dashboard still asks for, so the
      * range is an addition rather than a change.
+     *
+     * <p><b>Projected, and this is the read that made the projection necessary.</b> Omitting both
+     * bounds is the dashboard's every-load call, so serialising the stored document here shipped
+     * every customer name, address and phone number on the caller's whole roster to draw a grid of
+     * shift names. {@link DutyRosterDtos.Round} has nowhere to put them; {@link #day} is where the
+     * snapshot is served, deliberately and one day at a time.
      */
     @GetMapping
-    public List<DutyRoster> myAssignments(
+    public List<DutyRosterDtos.Round> myAssignments(
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
     ) {
-        return ownProfileId().map(professionalId -> dutyRosterService.forProfessional(professionalId, from, to)).orElse(List.of());
+        return ownProfileId()
+            .map(professionalId -> DutyRosterDtos.rounds(dutyRosterService.forProfessional(professionalId, from, to)))
+            .orElse(List.of());
     }
 
     /**
      * The caller's rounds for one date, with customer snapshots refreshed (DR6, docs § 6).
      *
-     * <p>The day view's read, and **the only one that carries customer names, addresses and phone
-     * numbers to a browser**. The range read draws a grid of shift names and needs none of them; this
-     * one is opened deliberately, by someone about to walk to the address.
+     * <p>The day view's read, and <b>the only one that carries customer names, addresses and phone
+     * numbers to a browser</b>. That is true because this is the only roster read that returns the
+     * stored {@link DutyRoster} — the range read and {@code /all} go through
+     * {@link DutyRosterDtos.Round}, which has no field to put a snapshot in, and the summary read
+     * returns counts. <b>Until item 7 this paragraph was an intention rather than a description:</b>
+     * all three reads serialised the document, so the claim was false on the wire in the exact place a
+     * reader would come to check it. If you add a fourth read, it takes the projection unless it has
+     * this one's reason not to — opened deliberately, by someone about to walk to the address.
      *
      * <p>Refreshing here is a write on a read path, which § 6 flagged and accepted — it is what makes
      * the snapshot self-healing whenever `hc-patient` is up. See

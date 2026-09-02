@@ -34,7 +34,15 @@ import org.springframework.stereotype.Repository;
 public interface DutyRosterRepository extends MongoRepository<DutyRoster, String> {
     List<DutyRoster> findByProfessionalIdOrderByDateAscShiftAsc(String professionalId);
 
-    List<DutyRoster> findAllByOrderByDateAscShiftAsc();
+    /*
+     * There is deliberately no unbounded whole-estate finder. `findAllByOrderByDateAscShiftAsc` was
+     * one and is gone: it backed GET /api/duty-roster/all, which returned every assignment on the
+     * estate in a single response and grew with the roster rather than with the number of
+     * professionals. The estate read is paged now — `findAll(Pageable)` through
+     * `DutyRosterService.estateRoster`, which supplies the date/shift sort this finder's name used to
+     * carry. Do not add another; a finder that cannot be bounded is one an endpoint will eventually
+     * expose unbounded.
+     */
 
     /** Inclusive on both ends — a range read of "from the 1st to the 7th" includes the 7th. */
     @Query(value = "{ 'professional_id': ?0, 'date': { $gte: ?1, $lte: ?2 } }", sort = "{ 'date': 1, 'shift': 1 }")
