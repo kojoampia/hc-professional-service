@@ -35,6 +35,18 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class OnboardingService {
 
+    /**
+     * Refusal reason when a SUSPENDED application tries to go ACTIVE without a current licence.
+     *
+     * <p>Public because the integration tests assert it, and they should assert the same string the
+     * path throws rather than a copy of it — a reword must not be able to break a test silently.
+     * {@link ComplianceService#LICENSE_EXPIRED_REASON} is the same idea for the sweep's audit reason.
+     */
+    public static final String REACTIVATION_REQUIRES_LICENSE = "Reactivation requires a verified, unexpired license";
+
+    /** Refusal prefix when a transition to ACTIVE fails the eight-requirement completion contract; the missing keys follow. */
+    public static final String ACTIVATION_REQUIRES_COMPLETE_PROFILE = "Activation requires a complete profile";
+
     private static final Logger log = LoggerFactory.getLogger(OnboardingService.class);
 
     private static final Set<DocumentType> IDENTITY_TYPES = EnumSet.of(
@@ -308,7 +320,7 @@ public class OnboardingService {
                 .filter(requirement -> !requirement.done())
                 .map(OnboardingProgressDTO.Requirement::key)
                 .collect(java.util.stream.Collectors.joining(", "));
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Activation requires a complete profile; still missing: " + missing);
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ACTIVATION_REQUIRES_COMPLETE_PROFILE + "; still missing: " + missing);
         }
     }
 
@@ -323,7 +335,7 @@ public class OnboardingService {
                     !d.getExpiryDate().isBefore(java.time.LocalDate.now())
             );
         if (!hasCurrentLicense) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Reactivation requires a verified, unexpired license");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, REACTIVATION_REQUIRES_LICENSE);
         }
     }
 

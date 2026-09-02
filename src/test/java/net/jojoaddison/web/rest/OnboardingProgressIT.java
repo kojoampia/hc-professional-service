@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -18,6 +19,7 @@ import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.service.OnboardingService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -166,7 +168,14 @@ class OnboardingProgressIT {
                 .consentAcceptedAt(java.time.Instant.now())
         );
 
-        restMockMvc.perform(put("/api/onboarding/applications/" + application.getId() + "/activate")).andExpect(status().isConflict());
+        // The body is asserted, not just the status. A bare 409 outlives the reason it was written for:
+        // any of the other refusals on this path — an illegal transition, a missing profile — returns
+        // the same code, so a status-only assertion would keep passing while this test stopped being
+        // about completeness at all. That is how backlog item 14 started.
+        restMockMvc
+            .perform(put("/api/onboarding/applications/" + application.getId() + "/activate"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.detail").value(containsString(OnboardingService.ACTIVATION_REQUIRES_COMPLETE_PROFILE)));
     }
 
     @Test

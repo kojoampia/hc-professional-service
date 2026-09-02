@@ -26,6 +26,7 @@ import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.service.ComplianceService;
+import net.jojoaddison.service.OnboardingService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -179,7 +180,7 @@ class ComplianceFlowIT {
         restMockMvc
             .perform(put("/api/onboarding/applications/" + application.getId() + "/activate"))
             .andExpect(status().isConflict())
-            .andExpect(jsonPath("$.detail").value(containsString("Reactivation requires a verified, unexpired license")));
+            .andExpect(jsonPath("$.detail").value(containsString(OnboardingService.REACTIVATION_REQUIRES_LICENSE)));
 
         // A new verified, unexpired license unlocks reactivation. This is the line that was red from
         // 2026-08-20 — see setUp(): 409 was the right answer to an incomplete profile, not a defect
