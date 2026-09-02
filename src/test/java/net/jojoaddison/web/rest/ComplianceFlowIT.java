@@ -198,6 +198,26 @@ class ComplianceFlowIT {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("ACTIVE"));
 
+        // The renewal does not remove the lapsed licence — nothing does — so the next sweep still
+        // finds it. It must leave this professional alone (backlog.md item 17): before the fix this
+        // line read `expected:<0> but was:<1>`, which in production was a clinician reinstated by an
+        // administrator and locked out again at 04:00, every night, by a `license-expired` audit
+        // entry naming a licence that was valid. The count is asserted rather than the status alone
+        // because a re-suspension followed by a re-activation would leave the status right and the
+        // audit trail wrong.
+        restMockMvc
+            .perform(post("/api/onboarding/compliance/sweep"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.expiredLicenses").value(1))
+            .andExpect(jsonPath("$.applicationsSuspended").value(0));
+        assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(OnboardingStatus.ACTIVE);
+        // Skipped, not merely un-suspended: no second audit event, and by the same `continue` no
+        // second `compliance.alert` on the broker either.
+        assertThat(eventRepository.findByApplicationIdOrderByAtAsc(application.getId()))
+            .extracting(OnboardingEvent::getReason)
+            .filteredOn(reason -> reason != null && reason.startsWith(ComplianceService.LICENSE_EXPIRED_REASON))
+            .hasSize(1);
+
         // full audit chain: suspension and reactivation are both events
         assertThat(eventRepository.findByApplicationIdOrderByAtAsc(application.getId()))
             .extracting(OnboardingEvent::getToStatus)
