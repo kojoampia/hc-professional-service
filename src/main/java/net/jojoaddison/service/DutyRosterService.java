@@ -26,6 +26,10 @@ import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.PatientProfile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 /**
@@ -135,6 +139,27 @@ public class DutyRosterService {
     }
 
     /**
+     * Every assignment on the estate, one page at a time — the administrator's read.
+     *
+     * <p><b>Paginated because it grows with the roster, not with the number of professionals.</b> It
+     * was an unbounded {@code findAll} until item 7: admin-gated, but one response carrying every
+     * round the estate has ever had, and the collection only ever gets longer. The bound belongs on
+     * the server, since a client that forgets to ask for one is exactly the client that cannot cope
+     * with the answer.
+     *
+     * <p>Sorting defaults to date then shift when the caller names none, which is the order
+     * {@code findAllByOrderByDateAscShiftAsc} always returned. A {@code Pageable} with no sort would
+     * otherwise page over an <b>unspecified</b> order, and page 2 could repeat or skip rows from page
+     * 1 without anything looking wrong — the failure mode of paginating without an ordering.
+     */
+    public Page<DutyRoster> estateRoster(Pageable pageable) {
+        Pageable sorted = pageable.getSort().isSorted()
+            ? pageable
+            : PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), Sort.by("date", "shift"));
+        return dutyRosterRepository.findAll(sorted);
+    }
+
+    /**
      * One record per day the professional is rostered in the given year, earliest first.
      *
      * <p><b>Only days with something on them</b> — a round, an absence, or both. Returning all 365
@@ -224,12 +249,19 @@ public class DutyRosterService {
      * The caller's rounds for one date, with their customer snapshots brought up to date
      * (docs/duty-roster.md § 6, DR6).
      *
-     * <p><b>This is the only read that refreshes, and that is the design rather than an omission.</b>
-     * § 6 says "opening a day fetches the current profiles and updates the stored snapshots behind the
-     * render" — a *day*, not a range. The calendar's range read draws coloured squares and shift
-     * names; it needs no customer at all, so refreshing there would spend a cross-stack call on every
-     * page-turn to update data nothing is about to show. One day, opened deliberately, is where the
-     * address is about to be read off the screen and walked to.
+     * <p><b>This is the only read that refreshes, and the only one that discloses.</b> § 6 says
+     * "opening a day fetches the current profiles and updates the stored snapshots behind the render"
+     * — a <em>day</em>, not a range. The calendar's range read draws coloured squares and shift names
+     * and is served {@code DutyRosterDtos.Round}, which carries no customer at all, so refreshing
+     * there would spend a cross-stack call on every page-turn to update data the caller is not even
+     * sent. One day, opened deliberately, is where the address is about to be read off the screen and
+     * walked to.
+     *
+     * <p><b>"Needs no customer" was a statement about the client and not about the response, and the
+     * gap between those two was item 7.</b> The range read did not need the snapshot and was shipping
+     * it anyway. Returning rounds from here rather than a projection is therefore a deliberate
+     * exception now, not the default it used to be by accident: callers of this method serve the
+     * document, so add one only for a screen that shows an address.
      *
      * <p><b>It is a write on a read path</b>, which § 6 flagged and accepted. Two things keep it
      * honest: only rounds whose snapshot actually changed are saved, so the common case of opening

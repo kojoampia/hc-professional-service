@@ -213,7 +213,9 @@ public class DutyRoster extends AbstractAuditingEntity<String> implements Serial
      * <p>Only the count appears. This service logs assignments on the write path, so a {@code
      * toString} that rendered the round would put customer names, addresses and phone numbers into
      * the logs of a stack that holds them only as a short-lived display snapshot — and log retention
-     * is not the 90-day purge. {@code DutyRosterVisitPrivacyIT} asserts this.
+     * is not the 90-day purge. {@code DutyRosterVisitPrivacyTest} asserts this. (This said
+     * {@code ...IT}, which did not exist until item 7 added one — and that one asserts response
+     * bodies, not this method. The two sit side by side because they guard different channels.)
      */
     // prettier-ignore
     @Override

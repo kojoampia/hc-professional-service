@@ -31,7 +31,16 @@ import org.springframework.data.mongodb.core.mapping.Field;
  * (professional-onboarding-workflow.md § Domain events), and a snapshot must never reach a Kafka
  * envelope, a log line or an OpenTelemetry span attribute — the agent is baked into the image and
  * attributes are easy to add without thinking. {@link DutyRoster#toString()} deliberately omits the
- * visits for exactly this reason, and {@code DutyRosterVisitPrivacyIT} holds that line.
+ * visits for exactly this reason, and {@code DutyRosterVisitPrivacyTest} holds that line.
+ *
+ * <p><b>That list used to have three channels in it and needed a fourth: the HTTP response.</b> It
+ * named the exotic leaks and omitted the ordinary one, and the ordinary one was open — every roster
+ * read serialised this class in full, so the range read the dashboard makes on every load returned
+ * the caller's whole roster of names, addresses and phone numbers to draw a grid of shift names.
+ * Reads other than the day view go through {@code DutyRosterDtos.Round} now, which has no field for
+ * a snapshot, and {@code DutyRosterVisitPrivacyIT} asserts these three field names are absent from
+ * those response bodies. <b>Guard the boring channel first</b> — a {@code toString} leak needs
+ * somebody to log the object, and a response leak needs nobody at all.
  */
 public class Visit implements Serializable {
 
