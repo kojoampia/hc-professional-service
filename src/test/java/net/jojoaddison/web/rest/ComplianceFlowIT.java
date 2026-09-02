@@ -1,6 +1,7 @@
 package net.jojoaddison.web.rest;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -8,8 +9,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import net.jojoaddison.IntegrationTest;
+import net.jojoaddison.domain.Address;
+import net.jojoaddison.domain.EmergencyContact;
 import net.jojoaddison.domain.OnboardingEvent;
 import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
@@ -61,10 +65,47 @@ class ComplianceFlowIT {
     private ProfessionalApplication application;
     private PersonalDocument expiredLicense;
 
+    /**
+     * A fully onboarded ACTIVE nurse whose licence lapsed yesterday.
+     *
+     * <p><b>The fixture is deliberately complete, and that completeness is the fix for backlog.md
+     * item 14 — a test that was red from 2026-08-20 to 2026-09-02.</b> It used to build a two-field
+     * profile with a single document and then assert that reactivation returned 200. It returned 409,
+     * and <em>the 409 was correct</em>: the production path was never wrong, the assertion had simply
+     * outlived the behaviour it was written against.
+     *
+     * <p>What changed under it was {@code f8f579d7}, which added
+     * {@code OnboardingService.requireCompleteProfile} so that a transition to ACTIVE requires the
+     * eight-requirement completion contract as well as admin vetting. The old fixture satisfied exactly
+     * one of the eight — the licence, ironically — so the response body was
+     * {@code "Activation requires a complete profile; still missing: consent, profile, address,
+     * nextOfKin, certificate, identity, photo"}. Seven names, and not one of them about licences.
+     *
+     * <p>That commit completed the two {@code OnboardingFlowIT} fixtures it broke and added
+     * {@code OnboardingProgressIT}, which asserts this same activation path in both directions and has
+     * agreed with the code ever since. It missed this class because its stated gate was
+     * {@code Onboarding*IT} — a glob that does not match {@code ComplianceFlowIT}.
+     *
+     * <p>Completing the fixture is not a way round the gate, it is the state this test always meant to
+     * describe: an application cannot <em>be</em> ACTIVE without having passed the completeness gate on
+     * the way in, so an incomplete ACTIVE application is a state production cannot reach.
+     */
     @BeforeEach
     void setUp() {
         cleanup();
-        profile = profileRepository.save(new Profile().accountId(PRO).firstName("Com").lastName("Pliance"));
+        profile = profileRepository.save(
+            new Profile()
+                .accountId(PRO)
+                .firstName("Com")
+                .lastName("Pliance")
+                .birthDate(LocalDate.of(1990, 1, 1))
+                .sex("female")
+                .mobilePhone("+233200000000")
+                .cardType("GHANACARD")
+                .cardNumber("GHA-1")
+                .address(new Address().streetAddress("1 Road").city("Accra").region("Greater Accra").country("Ghana"))
+                .emergencyContact(new EmergencyContact().name("Ama").relationship("Sister").phone("+233200000001"))
+        );
         application = applicationRepository.save(
             new ProfessionalApplication()
                 .accountId(PRO)
@@ -73,15 +114,27 @@ class ComplianceFlowIT {
                 .requestedRole("ROLE_NURSE")
                 .status(OnboardingStatus.ACTIVE)
                 .source("web-careers")
+                .consentAcceptedAt(Instant.now())
         );
         expiredLicense = personalDocumentRepository.save(
-            new PersonalDocument()
-                .name("nursing-license.pdf")
-                .profileId(profile.getId())
-                .type(DocumentType.LICENSE)
-                .expiryDate(LocalDate.now().minusDays(1))
-                .verificationStatus(VerificationStatus.VERIFIED)
+            mandatoryDocument(DocumentType.LICENSE, LocalDate.now().minusDays(1)).name("nursing-license.pdf")
         );
+        // The other three mandatory documents. The lapsed licence above already satisfies the
+        // `license` requirement — that one only asks for a LICENSE carrying an expiry date, expired or
+        // not — so completeness holds throughout this class and licence *currency* is the only thing
+        // that changes between the two reactivation attempts below.
+        personalDocumentRepository.save(mandatoryDocument(DocumentType.CERTIFICATE, null).name("nursing-certificate.pdf"));
+        personalDocumentRepository.save(mandatoryDocument(DocumentType.GHANACARD, null).name("ghana-card.pdf"));
+        personalDocumentRepository.save(mandatoryDocument(DocumentType.PASSPHOTO, null).name("passport-photo.jpg"));
+    }
+
+    /** Verified because this professional is ACTIVE: nothing reaches that status un-vetted. */
+    private PersonalDocument mandatoryDocument(DocumentType type, LocalDate expiryDate) {
+        return new PersonalDocument()
+            .profileId(profile.getId())
+            .type(type)
+            .expiryDate(expiryDate)
+            .verificationStatus(VerificationStatus.VERIFIED);
     }
 
     @AfterEach
@@ -119,10 +172,18 @@ class ComplianceFlowIT {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.applicationsSuspended").value(0));
 
-        // reactivation is blocked while the only license is expired
-        restMockMvc.perform(put("/api/onboarding/applications/" + application.getId() + "/activate")).andExpect(status().isConflict());
+        // Reactivation is blocked while the only license is expired. Before setUp() was completed this
+        // assertion held for the wrong reason: the request 409'd on the completeness gate long before
+        // it reached requireCurrentVerifiedLicense, so it would have passed with a perfectly current
+        // licence too. It is the expired licence that has to be refusing it, so the body is asserted.
+        restMockMvc
+            .perform(put("/api/onboarding/applications/" + application.getId() + "/activate"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.detail").value(containsString("Reactivation requires a verified, unexpired license")));
 
-        // a new verified, unexpired license unlocks reactivation
+        // A new verified, unexpired license unlocks reactivation. This is the line that was red from
+        // 2026-08-20 — see setUp(): 409 was the right answer to an incomplete profile, not a defect
+        // in the reactivation path.
         personalDocumentRepository.save(
             new PersonalDocument()
                 .name("nursing-license-renewed.pdf")
