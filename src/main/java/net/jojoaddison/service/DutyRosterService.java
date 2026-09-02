@@ -139,6 +139,31 @@ public class DutyRosterService {
     }
 
     /**
+     * The estate read's default ordering: <b>newest date first</b>, then shift, then id.
+     *
+     * <p><b>Descending, and that is a deliberate reversal.</b> It was {@code Sort.by("date", "shift")}
+     * — ascending — for the first day of item 7, which meant page 0 of a paged read was the most
+     * ancient assignments the estate has ever held. The estate accumulates history and is never
+     * pruned, so the failure was immediate and read as a lost write: an administrator creates a round
+     * for tomorrow, the list refreshes onto page 0, and twenty rounds from months ago come back with
+     * the new one nine pages away. Nothing was wrong and the screen said the create had not taken.
+     * Unpaginated it could not happen, because everything arrived and the administrator could scroll.
+     *
+     * <p>This list is an administrator's <em>working set</em> — the thing being built, moved or
+     * removed is nearly always near today — and newest-first is the working order. The decision lives
+     * here rather than in the client on purpose: the web list sends no {@code sort} at all and holds
+     * no copy of this, so there is one place to change it and no second copy to drift.
+     *
+     * <p><b>{@code id} is the tiebreaker, and it is what makes the paging claim true.</b> {@code date}
+     * and {@code shift} together are very non-unique — every professional rostered on the same date
+     * and shift ties, which is the ordinary shape of an estate, not an edge of it — and Mongo
+     * guarantees no order among tied documents across two separate queries. A page boundary falling
+     * inside a tie group could therefore repeat a row on page 2 or drop it entirely, which is exactly
+     * the failure this docstring used to warn about while choosing an ordering that had it.
+     */
+    private static final Sort DEFAULT_ESTATE_SORT = Sort.by(Sort.Order.desc("date"), Sort.Order.asc("shift"), Sort.Order.asc("id"));
+
+    /**
      * Every assignment on the estate, one page at a time — the administrator's read.
      *
      * <p><b>Paginated because it grows with the roster, not with the number of professionals.</b> It
@@ -147,16 +172,25 @@ public class DutyRosterService {
      * the server, since a client that forgets to ask for one is exactly the client that cannot cope
      * with the answer.
      *
-     * <p>Sorting defaults to date then shift when the caller names none, which is the order
-     * {@code findAllByOrderByDateAscShiftAsc} always returned. A {@code Pageable} with no sort would
-     * otherwise page over an <b>unspecified</b> order, and page 2 could repeat or skip rows from page
-     * 1 without anything looking wrong — the failure mode of paginating without an ordering.
+     * <p>Sorting defaults to {@link #DEFAULT_ESTATE_SORT} — newest date first — when the caller names
+     * none. A {@code Pageable} with no sort would otherwise page over an <b>unspecified</b> order, and
+     * page 2 could repeat or skip rows from page 1 without anything looking wrong.
+     *
+     * <p>A caller who <em>does</em> name a sort keeps it, and gets {@code id} appended unless they
+     * ordered by it themselves. Their ordering is untouched by that — {@code id} is unique, so it can
+     * only decide ties the named keys left undecided — and without it a caller-chosen sort has the
+     * same non-unique page boundary the default had. A guarantee worth making is not worth making
+     * only for the callers who ask for nothing.
      */
     public Page<DutyRoster> estateRoster(Pageable pageable) {
-        Pageable sorted = pageable.getSort().isSorted()
-            ? pageable
-            : PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), Sort.by("date", "shift"));
-        return dutyRosterRepository.findAll(sorted);
+        Sort sort = pageable.getSort().isSorted() ? stableOrder(pageable.getSort()) : DEFAULT_ESTATE_SORT;
+        return dutyRosterRepository.findAll(PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), sort));
+    }
+
+    /** A caller's sort with {@code id} appended as a total tiebreaker, unless it already orders by id. */
+    private static Sort stableOrder(Sort sort) {
+        boolean ordersById = sort.stream().anyMatch(order -> "id".equals(order.getProperty()));
+        return ordersById ? sort : sort.and(Sort.by(Sort.Order.asc("id")));
     }
 
     /**

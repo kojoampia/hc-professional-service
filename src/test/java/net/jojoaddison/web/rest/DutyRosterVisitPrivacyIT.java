@@ -192,16 +192,18 @@ class DutyRosterVisitPrivacyIT {
             // distinction GET /api/patients still gets wrong, where the header is just list.size().
             .andExpect(header().string("X-Total-Count", "3"))
             .andExpect(header().exists("Link"))
-            // Default sort is date then shift, so paging is over a defined order and page 2 can
-            // neither repeat nor skip a row from page 1.
-            .andExpect(jsonPath("$[0].name").value("Ward 3"))
+            // Default sort is date DESCENDING, then shift, then id, so paging is over a total order
+            // and page 2 can neither repeat nor skip a row from page 1. Newest first because the
+            // estate accumulates history and page 0 of an ascending read is its most ancient rows —
+            // see DutyRosterEstateOrderIT, which is where that is the subject rather than a detail.
+            .andExpect(jsonPath("$[0].name").value("Ward 12"))
             .andExpect(jsonPath("$[1].name").value("Ward 9"));
 
         restMockMvc
             .perform(get("/api/duty-roster/all").param("page", "1").param("size", "2"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(1))
-            .andExpect(jsonPath("$[0].name").value("Ward 12"))
+            .andExpect(jsonPath("$[0].name").value("Ward 3"))
             .andExpect(header().string("X-Total-Count", "3"));
     }
 
