@@ -41,9 +41,34 @@ public class SecurityConfiguration {
                     // endpoints stay open to authenticated users, with admin-only decisions
                     // enforced via method security on OnboardingResource.
                     .requestMatchers("/api/onboarding/**").authenticated()
-                    // Messaging is correspondence, not clinical data. Under the POST /api/** rule
-                    // below, carer/angel/chemist/technician could receive a message and never
-                    // answer one; this is the same exception onboarding already makes.
+                    // The estate-wide recipient directory: account id, LOGIN and role for every
+                    // ACTIVE professional, unpaginated. The login is what /api/authenticate takes,
+                    // so an unauthorised read of this is the estate's valid-login list. All ten
+                    // rather than CLINICAL_MUTATION's six, because it is a read and because the
+                    // mobile recipient picker is what a carer composes from.
+                    .requestMatchers(HttpMethod.GET, "/api/messaging/recipients").hasAnyAuthority(AuthoritiesConstants.CLINICAL_AND_ADMIN)
+                    // Starting a thread writes into OTHER PEOPLE'S inboxes — including a
+                    // recipientRole broadcast to every nurse or doctor, with a push notification
+                    // behind it. Exact path, so a reply into a thread the caller is already a member
+                    // of (/conversations/{id}/messages) is unaffected: that one is own-scoped, and
+                    // MessagingService.reply refuses a non-member with a 404 whatever this says.
+                    .requestMatchers(HttpMethod.POST, "/api/messaging/conversations").hasAnyAuthority(AuthoritiesConstants.CLINICAL_AND_ADMIN)
+                    // Everything else under messaging is correspondence, not clinical data, and is
+                    // scoped to the caller's own MessageRecipient rows. Under the POST /api/** rule
+                    // below, carer/angel/chemist/technician could receive a message and never answer
+                    // one; this is the same exception onboarding already makes.
+                    //
+                    // THE TWO RULES ABOVE ARE THE SECOND LAYER, and they answer a different question
+                    // from the gateway's. The gateway decides who reaches this service; this decides
+                    // who may act, and it must hold on its own — the three gateways share one
+                    // signing key and this service validates no issuer, so a sibling stack's token
+                    // arrives here indistinguishable from one of ours. Held at .authenticated()
+                    // across the whole prefix, the mutation matrix below never applied to messaging
+                    // at all and the service caught nothing the gateway let through. An applicant is
+                    // deliberately not a correspondent: nothing in this domain addresses one, since
+                    // MessagingService.recipients and resolveRole both read ACTIVE applications
+                    // only, and onboarding correspondence travels as correctionNotes on the
+                    // application. See ClinicalAuthorityMatrixIT and docs/backlog.md item 19.
                     .requestMatchers("/api/messaging/**").authenticated()
                     // Registering a device for push is not a clinical mutation. This MUST sit
                     // above the POST /api/** rule below: otherwise a carer, angel, chemist or
