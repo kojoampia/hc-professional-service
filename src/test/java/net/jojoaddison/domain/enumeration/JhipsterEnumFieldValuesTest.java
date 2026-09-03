@@ -29,11 +29,21 @@ import org.junit.jupiter.api.Test;
  *
  * <p><b>Nothing here is a list of names.</b> The files are found by walking the directory, the fields
  * by looking for {@code fieldValues}, the enum by the {@code fieldType} it names, and the expectation
- * by {@link Class#getEnumConstants()}. Adding a value to any enum in this package fails this test
- * until its generator input is updated, and adding a whole new enum-typed field to any entity is
+ * by {@link Class#getEnumConstants()}. Adding a value to any enum <b>a generator input names</b> fails
+ * this test until that input is updated, and adding a whole new enum-typed field to any entity is
  * covered on the day it is written, with nobody having edited this file. A test that names its own
  * coverage stops covering things: hc-admin had eight endpoints go unpaginated for a fortnight behind
  * a test asserting a literal list of twenty-three paths.
+ *
+ * <p><b>"Any enum a generator input names" is narrower than "any enum in this package", and the
+ * difference is the point.</b> Four of the seven enums here are reached — {@code ShiftType},
+ * {@code DutyRole}, {@code DocumentType}, {@code VerificationStatus}. {@code OnboardingStatus},
+ * {@code AbsenceStatus} and {@code AbsenceType} are named by no {@code .jhipster} file, so adding a
+ * value to one of them fails nothing here, and nothing else covers them either. That is the honest
+ * state rather than a gap to paper over: their entities are hand-written and have no generator input
+ * to drift from ({@code Absence}, {@code ProfessionalApplication} and {@code OnboardingEvent} carry no
+ * {@code .jhipster} file at all). This paragraph exists because the sentence above claimed the wider
+ * coverage for its first day, in a file whose whole subject is claims that quietly stop being true.
  *
  * <p><b>Order is part of the contract</b>, not only membership — the generator emits the constants in
  * the order {@code fieldValues} lists them, so a set comparison would pass on an input that
