@@ -39,5 +39,37 @@ public final class AuthoritiesConstants {
      */
     public static final String[] CLINICAL_MUTATION = { ADMIN, DOCTOR, NURSE, PARAMEDIC, PHARMACIST, THERAPIST };
 
+    /**
+     * The administrator and all nine clinical authorities — "somebody who works here", as opposed to
+     * "somebody who may write clinical data".
+     *
+     * <p><b>All nine, not the six of {@link #CLINICAL_MUTATION}.</b> Carer, angel, chemist and
+     * technician are read-only in v1, which is a rule about clinical <em>writes</em>. Using the six
+     * here would take those four out of the recipient directory and out of starting a conversation —
+     * a colleague who can receive a message and never open one, which is the exact failure
+     * {@code MessagingResource}'s hoist above the mutation matrix exists to prevent.
+     *
+     * <p><b>{@code ROLE_USER} is deliberately absent.</b> An applicant holds it and nothing else, and
+     * so does a caller from either sibling stack: the three gateways share one signing key, this
+     * service validates no issuer, and hc-patient grants {@code ROLE_USER} alongside
+     * {@code ROLE_PATIENT}. Anything gated on this array is therefore closed to a token this stack
+     * did not mint, which is what makes it the second layer behind the gateway's
+     * {@code CLINICAL_AND_ADMIN} rule rather than a copy of it. The two arrays hold the same ten
+     * names and are deliberately not shared: the gateway decides who reaches this service, this
+     * service decides who may act, and one of them may narrow without the other.
+     */
+    public static final String[] CLINICAL_AND_ADMIN = {
+        ADMIN,
+        DOCTOR,
+        NURSE,
+        PARAMEDIC,
+        PHARMACIST,
+        THERAPIST,
+        CARER,
+        ANGEL,
+        CHEMIST,
+        TECHNICIAN,
+    };
+
     private AuthoritiesConstants() {}
 }

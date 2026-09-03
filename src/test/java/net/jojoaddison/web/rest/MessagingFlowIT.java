@@ -202,8 +202,14 @@ class MessagingFlowIT {
         assertThat(messagingService.unreadCount(STRANGER)).isEqualTo(2);
     }
 
+    /**
+     * The authority is not incidental. {@code POST /api/messaging/conversations} requires
+     * {@code CLINICAL_AND_ADMIN} since 2026-09-03 — it writes into other people's inboxes — so this
+     * case would otherwise be refused before the handler and assert a 403 while claiming to assert
+     * the empty-recipient guard. {@code ROLE_NURSE} matches the two broadcast cases below.
+     */
     @Test
-    @WithMockUser(username = SENDER)
+    @WithMockUser(username = SENDER, authorities = { "ROLE_NURSE" })
     void sendingRequiresARecipientOrARole() throws Exception {
         mockMvc
             .perform(post("/api/messaging/conversations").contentType(MediaType.APPLICATION_JSON).content("{\"body\":\"hello\"}"))
@@ -323,7 +329,9 @@ class MessagingFlowIT {
     void aREADONLYroleCanStillReadAThreadAndMarkItRead() throws Exception {
         // /api/messaging/** is hoisted above the CLINICAL_MUTATION rules for exactly this:
         // correspondence is not a clinical mutation, and a carer who could receive a message but
-        // never answer or clear it would be worse than one who got none.
+        // never answer or clear it would be worse than one who got none. The 2026-09-03 tightening
+        // narrowed the hoist to the own-scoped endpoints and left this one among them; the carer's
+        // access to the directory and to composing is asserted in ClinicalAuthorityMatrixIT.
         messagingService.startConversation(SENDER, SENDER, "One", "body", java.util.List.of("msg-carer"), null);
         String conversationId = messagingService.conversationsFor("msg-carer").get(0).getId();
 

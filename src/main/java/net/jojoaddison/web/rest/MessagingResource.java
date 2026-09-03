@@ -25,10 +25,19 @@ import org.springframework.web.server.ResponseStatusException;
  * mutation matrix in {@code SecurityConfiguration} restricts {@code POST /api/**} to
  * {@code CLINICAL_MUTATION} — admin, doctor, nurse, paramedic, pharmacist, therapist — which would
  * leave carer, angel, chemist and technician able to receive a message but never answer one.
- * Messaging is correspondence, not clinical data, so this surface is {@code .authenticated()}
- * instead, the same exception {@code /api/onboarding/**} already makes for applicants who hold only
- * ROLE_USER. If that is not wanted, move these paths back under the matrix and read-only roles
- * become read-only correspondents too.
+ * Messaging is correspondence, not clinical data, so this surface sits above the matrix, the same
+ * exception {@code /api/onboarding/**} already makes for applicants who hold only ROLE_USER. If that
+ * is not wanted, move these paths back under the matrix and read-only roles become read-only
+ * correspondents too.
+ *
+ * <p><b>Above the matrix is not the same as open to anyone signed in, and two endpoints here are
+ * the reason.</b> The whole prefix was {@code .authenticated()} until 2026-09-03, so a bare
+ * {@code ROLE_USER} — every applicant, and every caller from the two sibling stacks, since the three
+ * gateways share one key and this service validates no issuer — could read
+ * {@link #recipients(String, String)}, which is the estate's ACTIVE professionals <em>with their
+ * logins</em>, and could {@link #startConversation(NewConversation)} into anyone's inbox, role
+ * broadcast included. Those two now require {@code CLINICAL_AND_ADMIN}. Everything else stays open
+ * to any authenticated caller, because everything else is scoped to the caller's own recipient rows.
  *
  * <p>Every endpoint resolves the caller from the security context and never takes an account id
  * from the request. A conversation or message id is not authority to read it: the service resolves
