@@ -9,11 +9,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.time.Instant;
 import java.time.LocalDate;
 import net.jojoaddison.IntegrationTest;
-import net.jojoaddison.domain.Address;
-import net.jojoaddison.domain.EmergencyContact;
 import net.jojoaddison.domain.OnboardingEvent;
 import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
@@ -90,52 +87,34 @@ class ComplianceFlowIT {
      * <p>Completing the fixture is not a way round the gate, it is the state this test always meant to
      * describe: an application cannot <em>be</em> ACTIVE without having passed the completeness gate on
      * the way in, so an incomplete ACTIVE application is a state production cannot reach.
+     *
+     * <p>The completion contract itself now comes from {@link CompleteOnboardingFixture}, shared with
+     * the two {@code Onboarding*IT} classes (backlog.md item 18), so a ninth requirement reaches this
+     * class as well as those. Only this class's own variation stays here: the lapsed licence, and the
+     * VERIFIED status that an ACTIVE professional's documents must carry.
      */
     @BeforeEach
     void setUp() {
         cleanup();
-        profile = profileRepository.save(
-            new Profile()
-                .accountId(PRO)
-                .firstName("Com")
-                .lastName("Pliance")
-                .birthDate(LocalDate.of(1990, 1, 1))
-                .sex("female")
-                .mobilePhone("+233200000000")
-                .cardType("GHANACARD")
-                .cardNumber("GHA-1")
-                .address(new Address().streetAddress("1 Road").city("Accra").region("Greater Accra").country("Ghana"))
-                .emergencyContact(new EmergencyContact().name("Ama").relationship("Sister").phone("+233200000001"))
-        );
+        profile = profileRepository.save(CompleteOnboardingFixture.completeProfile(PRO));
         application = applicationRepository.save(
-            new ProfessionalApplication()
-                .accountId(PRO)
+            CompleteOnboardingFixture.consentedApplication(PRO, OnboardingStatus.ACTIVE)
                 .login(PRO)
                 .profileId(profile.getId())
                 .requestedRole("ROLE_NURSE")
-                .status(OnboardingStatus.ACTIVE)
                 .source("web-careers")
-                .consentAcceptedAt(Instant.now())
         );
-        expiredLicense = personalDocumentRepository.save(
-            mandatoryDocument(DocumentType.LICENSE, LocalDate.now().minusDays(1)).name("nursing-license.pdf")
-        );
-        // The other three mandatory documents. The lapsed licence above already satisfies the
-        // `license` requirement — that one only asks for a LICENSE carrying an expiry date, expired or
-        // not — so completeness holds throughout this class and licence *currency* is the only thing
-        // that changes between the two reactivation attempts below.
-        personalDocumentRepository.save(mandatoryDocument(DocumentType.CERTIFICATE, null).name("nursing-certificate.pdf"));
-        personalDocumentRepository.save(mandatoryDocument(DocumentType.GHANACARD, null).name("ghana-card.pdf"));
-        personalDocumentRepository.save(mandatoryDocument(DocumentType.PASSPHOTO, null).name("passport-photo.jpg"));
-    }
-
-    /** Verified because this professional is ACTIVE: nothing reaches that status un-vetted. */
-    private PersonalDocument mandatoryDocument(DocumentType type, LocalDate expiryDate) {
-        return new PersonalDocument()
-            .profileId(profile.getId())
-            .type(type)
-            .expiryDate(expiryDate)
-            .verificationStatus(VerificationStatus.VERIFIED);
+        // The lapsed licence satisfies the `license` requirement like any other — that one only asks
+        // for a LICENSE carrying an expiry date, expired or not — so completeness holds throughout
+        // this class and licence *currency* is the only thing that changes between the two
+        // reactivation attempts below. VERIFIED because this professional is ACTIVE: nothing reaches
+        // that status un-vetted.
+        expiredLicense = personalDocumentRepository
+            .saveAll(CompleteOnboardingFixture.mandatoryDocuments(profile, LocalDate.now().minusDays(1), VerificationStatus.VERIFIED))
+            .stream()
+            .filter(document -> document.getType() == DocumentType.LICENSE)
+            .findFirst()
+            .orElseThrow();
     }
 
     @AfterEach
@@ -186,12 +165,12 @@ class ComplianceFlowIT {
         // 2026-08-20 — see setUp(): 409 was the right answer to an incomplete profile, not a defect
         // in the reactivation path.
         personalDocumentRepository.save(
-            new PersonalDocument()
-                .name("nursing-license-renewed.pdf")
-                .profileId(profile.getId())
-                .type(DocumentType.LICENSE)
-                .expiryDate(LocalDate.now().plusYears(1))
-                .verificationStatus(VerificationStatus.VERIFIED)
+            CompleteOnboardingFixture.document(
+                profile,
+                DocumentType.LICENSE,
+                CompleteOnboardingFixture.currentLicenseExpiry(),
+                VerificationStatus.VERIFIED
+            ).name("nursing-license-renewed.pdf")
         );
         restMockMvc
             .perform(put("/api/onboarding/applications/" + application.getId() + "/activate"))

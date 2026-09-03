@@ -69,22 +69,9 @@ class OnboardingFlowIT {
         // Complete, not minimal: since the completion contract landed, the transition to ACTIVE
         // refuses a profile that is missing any of the eight requirements (see OnboardingProgressIT).
         // This fixture exists to exercise the transition chain, so it has to clear that gate — the
-        // gate itself is asserted there rather than here.
-        profile = profileRepository.save(
-            new Profile()
-                .accountId(APPLICANT)
-                .firstName("Appli")
-                .lastName("Cant")
-                .birthDate(java.time.LocalDate.of(1990, 1, 1))
-                .sex("female")
-                .mobilePhone("+233200000000")
-                .cardType("GHANACARD")
-                .cardNumber("GHA-1")
-                .address(
-                    new net.jojoaddison.domain.Address().streetAddress("1 Road").city("Accra").region("Greater Accra").country("Ghana")
-                )
-                .emergencyContact(new net.jojoaddison.domain.EmergencyContact().name("Ama").relationship("Sister").phone("+233200000001"))
-        );
+        // gate itself is asserted there rather than here, and its shape is CompleteOnboardingFixture's
+        // rather than this class's, so a ninth requirement lands on all three at once (item 18).
+        profile = profileRepository.save(CompleteOnboardingFixture.completeProfile(APPLICANT));
     }
 
     @AfterEach
@@ -261,16 +248,11 @@ class OnboardingFlowIT {
     @Test
     @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
     void fullLegalPathWithGuardsAndAuditTrail() throws Exception {
-        // applicant part done directly through the repositories/service guards
-        // consentAcceptedAt is stamped because this fixture skips the applicant steps that would
-        // normally set it, and the transition to ACTIVE now counts consent among the eight
-        // completion requirements.
+        // Applicant part done directly through the repositories/service guards. consentAcceptedAt comes
+        // stamped from the fixture because this test skips the applicant steps that would normally set
+        // it, and the transition to ACTIVE counts consent among the eight completion requirements.
         ProfessionalApplication application = applicationRepository.save(
-            new ProfessionalApplication()
-                .accountId(APPLICANT)
-                .profileId(profile.getId())
-                .status(OnboardingStatus.CREDENTIAL_REVIEW)
-                .consentAcceptedAt(java.time.Instant.now())
+            CompleteOnboardingFixture.consentedApplication(APPLICANT, OnboardingStatus.CREDENTIAL_REVIEW).profileId(profile.getId())
         );
         seedMandatoryDocuments();
 
@@ -348,19 +330,11 @@ class OnboardingFlowIT {
     }
 
     private void seedMandatoryDocuments() {
-        personalDocumentRepository.save(doc(DocumentType.CERTIFICATE, null));
-        personalDocumentRepository.save(doc(DocumentType.LICENSE, LocalDate.now().plusYears(1)));
-        personalDocumentRepository.save(doc(DocumentType.GHANACARD, null));
-        personalDocumentRepository.save(doc(DocumentType.PASSPHOTO, null));
+        personalDocumentRepository.saveAll(CompleteOnboardingFixture.mandatoryDocuments(profile));
     }
 
     private PersonalDocument doc(DocumentType type, LocalDate expiry) {
-        return new PersonalDocument()
-            .profileId(profile.getId())
-            .name(type.name().toLowerCase() + ".pdf")
-            .type(type)
-            .expiryDate(expiry)
-            .verificationStatus(VerificationStatus.PENDING);
+        return CompleteOnboardingFixture.document(profile, type, expiry);
     }
 
     private org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder uploadFile(
