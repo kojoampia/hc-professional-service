@@ -6,11 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.time.LocalDate;
 import net.jojoaddison.IntegrationTest;
-import net.jojoaddison.domain.Address;
-import net.jojoaddison.domain.EmergencyContact;
-import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
@@ -141,11 +137,13 @@ class OnboardingProgressIT {
     void doesNotCreditALicenceWithNoExpiryDate() throws Exception {
         startedApplication();
         Profile saved = profileRepository.save(completeProfile());
-        personalDocumentRepository.save(document(saved, DocumentType.LICENSE, null));
+        personalDocumentRepository.save(CompleteOnboardingFixture.document(saved, DocumentType.LICENSE, null));
 
         restMockMvc.perform(get("/api/onboarding/progress")).andExpect(jsonPath("$.requirements[?(@.key=='license')].done").value(false));
 
-        personalDocumentRepository.save(document(saved, DocumentType.LICENSE, LocalDate.now().plusYears(1)));
+        personalDocumentRepository.save(
+            CompleteOnboardingFixture.document(saved, DocumentType.LICENSE, CompleteOnboardingFixture.currentLicenseExpiry())
+        );
 
         restMockMvc.perform(get("/api/onboarding/progress")).andExpect(jsonPath("$.requirements[?(@.key=='license')].done").value(true));
     }
@@ -159,14 +157,7 @@ class OnboardingProgressIT {
     @Test
     @WithMockUser(username = ADMIN, authorities = { "ROLE_ADMIN" })
     void refusesToActivateAnIncompleteProfile() throws Exception {
-        ProfessionalApplication application = applicationRepository.save(
-            new ProfessionalApplication()
-                .accountId(APPLICANT)
-                .login(APPLICANT)
-                .requestedRole("ROLE_NURSE")
-                .status(OnboardingStatus.ROSTER_CONFIGURED)
-                .consentAcceptedAt(java.time.Instant.now())
-        );
+        ProfessionalApplication application = applicationRepository.save(applicationIn(OnboardingStatus.ROSTER_CONFIGURED));
 
         // The body is asserted, not just the status. A bare 409 outlives the reason it was written for:
         // any of the other refusals on this path — an illegal transition, a missing profile — returns
@@ -181,14 +172,7 @@ class OnboardingProgressIT {
     @Test
     @WithMockUser(username = ADMIN, authorities = { "ROLE_ADMIN" })
     void activatesOnceEveryRequirementIsSatisfied() throws Exception {
-        ProfessionalApplication application = applicationRepository.save(
-            new ProfessionalApplication()
-                .accountId(APPLICANT)
-                .login(APPLICANT)
-                .requestedRole("ROLE_NURSE")
-                .status(OnboardingStatus.ROSTER_CONFIGURED)
-                .consentAcceptedAt(java.time.Instant.now())
-        );
+        ProfessionalApplication application = applicationRepository.save(applicationIn(OnboardingStatus.ROSTER_CONFIGURED));
         uploadAllMandatoryDocuments(profileRepository.save(completeProfile()));
 
         restMockMvc
@@ -198,38 +182,23 @@ class OnboardingProgressIT {
     }
 
     private ProfessionalApplication startedApplication() {
-        return applicationRepository.save(
-            new ProfessionalApplication()
-                .accountId(APPLICANT)
-                .login(APPLICANT)
-                .requestedRole("ROLE_NURSE")
-                .status(OnboardingStatus.APPLICATION_STARTED)
-                .consentAcceptedAt(java.time.Instant.now())
-        );
+        return applicationRepository.save(applicationIn(OnboardingStatus.APPLICATION_STARTED));
+    }
+
+    /**
+     * The application half of the contract — consent — plus the two fields this class's applicant
+     * happens to carry. Nothing else is applied here: which of the remaining requirements a test
+     * satisfies is the test's own business, and several deliberately satisfy none of them.
+     */
+    private ProfessionalApplication applicationIn(OnboardingStatus status) {
+        return CompleteOnboardingFixture.consentedApplication(APPLICANT, status).login(APPLICANT).requestedRole("ROLE_NURSE");
     }
 
     private Profile completeProfile() {
-        return new Profile()
-            .accountId(APPLICANT)
-            .firstName("Appli")
-            .lastName("Cant")
-            .birthDate(LocalDate.of(1990, 1, 1))
-            .sex("female")
-            .mobilePhone("+233200000000")
-            .cardType("GHANACARD")
-            .cardNumber("GHA-1")
-            .address(new Address().streetAddress("1 Road").city("Accra").region("Greater Accra").country("Ghana"))
-            .emergencyContact(new EmergencyContact().name("Ama").relationship("Sister").phone("+233200000001"));
+        return CompleteOnboardingFixture.completeProfile(APPLICANT);
     }
 
     private void uploadAllMandatoryDocuments(Profile profile) {
-        personalDocumentRepository.save(document(profile, DocumentType.CERTIFICATE, null));
-        personalDocumentRepository.save(document(profile, DocumentType.LICENSE, LocalDate.now().plusYears(1)));
-        personalDocumentRepository.save(document(profile, DocumentType.GHANACARD, null));
-        personalDocumentRepository.save(document(profile, DocumentType.PASSPHOTO, null));
-    }
-
-    private PersonalDocument document(Profile profile, DocumentType type, LocalDate expiry) {
-        return new PersonalDocument().profileId(profile.getId()).type(type).expiryDate(expiry);
+        personalDocumentRepository.saveAll(CompleteOnboardingFixture.mandatoryDocuments(profile));
     }
 }
