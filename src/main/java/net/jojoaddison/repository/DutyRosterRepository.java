@@ -67,4 +67,24 @@ public interface DutyRosterRepository extends MongoRepository<DutyRoster, String
 
     /** The purge sweep's candidate set: rounds old enough that their snapshots must go. */
     List<DutyRoster> findByDateLessThan(LocalDate date);
+
+    /**
+     * Rounds that include a visit to one customer, within a date range — the patient day plan.
+     *
+     * <p><b>The one finder here that does not lead with {@code professional_id}</b>, and the class
+     * note above says to keep new ones in that shape. This one cannot be: the question is "who is
+     * visiting <em>me</em>", so the professional is the answer rather than the input. It leads with
+     * {@code visits.customer_id} instead, which is why {@link DutyRoster} gained an index on that
+     * path in the same change — without one this is a collection scan that grows with the estate's
+     * whole history rather than with one patient's.
+     *
+     * <p>Hand-written and inclusive for the two reasons the class note gives: {@code Between} is
+     * exclusive in the MongoDB module, and the two-condition spelling is rejected at call time.
+     *
+     * <p><b>It is a filter, not an authorization check.</b> Passing a customer id here returns that
+     * customer's rounds whoever is asking; {@code CustomerDayPlanService} decides who may ask, and
+     * nothing should reach this without going through it.
+     */
+    @Query(value = "{ 'visits.customer_id': ?0, 'date': { $gte: ?1, $lte: ?2 } }", sort = "{ 'date': 1, 'shift': 1 }")
+    List<DutyRoster> findRoundsForCustomer(String customerId, LocalDate from, LocalDate to);
 }

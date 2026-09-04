@@ -12,6 +12,7 @@ import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.security.AuthoritiesConstants;
 import net.jojoaddison.security.SecurityUtils;
+import net.jojoaddison.service.CustomerDayPlanService;
 import net.jojoaddison.service.DutyRosterService;
 import net.jojoaddison.service.RosterTrailService;
 import net.jojoaddison.service.dto.DutyRosterDtos;
@@ -72,19 +73,22 @@ public class DutyRosterResource {
     private final DomainEventPublisher domainEventPublisher;
     private final DutyRosterService dutyRosterService;
     private final RosterTrailService rosterTrailService;
+    private final CustomerDayPlanService customerDayPlanService;
 
     public DutyRosterResource(
         DutyRosterRepository dutyRosterRepository,
         ProfileRepository profileRepository,
         DomainEventPublisher domainEventPublisher,
         DutyRosterService dutyRosterService,
-        RosterTrailService rosterTrailService
+        RosterTrailService rosterTrailService,
+        CustomerDayPlanService customerDayPlanService
     ) {
         this.dutyRosterRepository = dutyRosterRepository;
         this.profileRepository = profileRepository;
         this.domainEventPublisher = domainEventPublisher;
         this.dutyRosterService = dutyRosterService;
         this.rosterTrailService = rosterTrailService;
+        this.customerDayPlanService = customerDayPlanService;
     }
 
     @PostMapping
@@ -299,6 +303,53 @@ public class DutyRosterResource {
      */
     @ExceptionHandler(RosterTrailService.TrailForbiddenException.class)
     public ResponseEntity<String> handleTrailForbidden(RosterTrailService.TrailForbiddenException exception) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(exception.getMessage());
+    }
+
+    /**
+     * A customer's own day plan — who is visiting them, and when (2026-09-04).
+     *
+     * <p><b>Reached from hc-patient's portal, through that gateway's {@code professionalservice}
+     * route.</b> This service holds the only copy of the answer: hc-patient's {@code DutyRoster} had
+     * no date and no patient id and was deleted, and hc-admin's took its subject from the path and
+     * checked nothing about who was asking, so it was deleted with the {@code ROLE_PATIENT} matcher
+     * that made it reachable. The data is {@code visits[].customerId}, here.
+     *
+     * <p><b>The id in the path is the same shape hc-admin's endpoint had, and the difference is what
+     * this one does with it.</b> {@link CustomerDayPlanService} refuses unless the caller <em>is</em>
+     * that customer, resolved from the token rather than from the request — so the path variable
+     * names the subject and cannot choose it.
+     *
+     * <p>Authenticated rather than role-gated, like the trail below and for a sharper version of the
+     * same reason: the authority that would be named here is {@code ROLE_PATIENT}, which this
+     * gateway never issues and which no rule in this service should start depending on. Identity is
+     * the boundary, and the service enforces it.
+     *
+     * <p>{@code from} and {@code to} are optional and inclusive; omitting both gives the fortnight
+     * around today rather than the patient's whole history.
+     */
+    @GetMapping("/customer/{customerId}")
+    public List<DutyRosterDtos.CustomerVisit> customerDayPlan(
+        @PathVariable String customerId,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
+    ) {
+        return customerDayPlanService.forCustomer(customerId, from, to, LocalDate.now());
+    }
+
+    /**
+     * Not your day plan is a <b>403</b>, and so is a customer id that belongs to nobody.
+     *
+     * <p>Identical status, identical body, and that is the whole point rather than an accident of
+     * implementation: two different answers here would make this endpoint an oracle for "does this
+     * customer exist", answerable for every id on the platform by any authenticated caller on three
+     * stacks. {@code CustomerDayPlanForbiddenIT} asserts the two responses are byte-for-byte the
+     * same.
+     *
+     * <p>The body repeats nothing the caller did not already send.
+     */
+    @ExceptionHandler(CustomerDayPlanService.DayPlanForbiddenException.class)
+    public ResponseEntity<String> handleDayPlanForbidden(CustomerDayPlanService.DayPlanForbiddenException exception) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(exception.getMessage());
     }
 

@@ -65,6 +65,7 @@ public final class DutyRosterDtos {
         ShiftType shift,
         String name,
         String description,
+        String geographicSpaceId,
         List<RoundVisit> visits
     ) {
         public static Round of(DutyRoster round) {
@@ -76,6 +77,7 @@ public final class DutyRosterDtos {
                 round.getShift(),
                 round.getName(),
                 round.getDescription(),
+                round.getGeographicSpaceId(),
                 round.getVisits().stream().map(RoundVisit::of).toList()
             );
         }
@@ -85,4 +87,32 @@ public final class DutyRosterDtos {
     public static List<Round> rounds(List<DutyRoster> rounds) {
         return rounds.stream().map(Round::of).toList();
     }
+
+    /**
+     * One call, as the customer it is for may see it — the patient day plan (2026-09-04).
+     *
+     * <p><b>A third projection rather than a reuse of {@link Round}, because the reader is different
+     * in a way that changes what may be in the response.</b> A round carries every customer on it;
+     * handing one to a patient would tell them who else their clinician is visiting today, which is
+     * a disclosure with no purpose and no consent behind it. This type has one visit — theirs — and
+     * has nowhere to put another.
+     *
+     * <p>What it does carry beyond the times is who is coming. That is the question the plan exists
+     * to answer, and the clinician's name is already reference data on the patient stack. It carries
+     * no customer id at all: the caller supplied it and learns nothing by being told it back.
+     *
+     * <p>{@code geographicSpaceId} is opaque here as it is everywhere in this service — hc-admin
+     * owns the tree and serves the name.
+     */
+    public record CustomerVisit(
+        String roundId,
+        LocalDate date,
+        ShiftType shift,
+        DutyRole duty,
+        String professionalId,
+        String professionalName,
+        String geographicSpaceId,
+        LocalTime startTime,
+        LocalTime endTime
+    ) {}
 }

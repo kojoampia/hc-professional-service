@@ -465,16 +465,20 @@ public class DutyRosterService {
             .stream()
             .filter(candidate -> candidate.getShift() == source.getShift())
             .findFirst()
-            .orElseGet(
-                () ->
-                    new DutyRoster()
-                        .date(source.getDate())
-                        .duty(source.getDuty())
-                        .professionalId(toProfessionalId)
-                        .shift(source.getShift())
-                        .name(source.getName())
-                        .description(source.getDescription())
-            );
+            .orElseGet(() ->
+                new DutyRoster()
+                    .date(source.getDate())
+                    .duty(source.getDuty())
+                    .professionalId(toProfessionalId)
+                    .shift(source.getShift())
+                    .name(source.getName())
+                    .description(source.getDescription())
+                    // The space travels with the visit. It describes where the work is, not who
+                    // does it, so a round created to receive a reassigned visit is in the same
+                    // place as the one it came from — and a null here would leave a patient's
+                    // day plan unable to name the area for that one call while naming it for
+                    // every neighbour.
+                    .geographicSpaceId(source.getGeographicSpaceId()));
         target.getVisits().add(visit);
         validateRound(target);
 

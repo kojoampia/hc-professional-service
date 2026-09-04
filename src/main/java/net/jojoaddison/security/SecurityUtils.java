@@ -20,7 +20,41 @@ public final class SecurityUtils {
 
     public static final String AUTHORITIES_KEY = "auth";
 
+    /**
+     * The claim hc-patient's gateway mints so a service with no user management can tell <em>which
+     * patient</em> is calling.
+     *
+     * <p>Read here for exactly one endpoint — {@code GET /api/duty-roster/customer/{customerId}},
+     * the patient day plan — and nothing else in this service uses it. The three gateways share one
+     * signing key, so a patient token validates here; the subject is a login that matches nothing in
+     * this database, and the email is the only identifier the two stacks have in common. It is the
+     * same chain hc-patient's own {@code PatientScope} follows, which is why it is spelled the same
+     * way.
+     *
+     * <p>Tokens this stack's own gateway mints carry <b>no</b> {@code email} claim, so a clinician
+     * asking for a customer day plan resolves to nobody and is refused — the correct answer, at no
+     * coordination cost between the two products.
+     */
+    public static final String EMAIL_KEY = "email";
+
     private SecurityUtils() {}
+
+    /**
+     * The {@code email} claim on the caller's token, when there is one.
+     *
+     * <p>A blank claim is {@link Optional#empty()} rather than an empty string: hc-patient's gateway
+     * writes {@code ""} for an account with no email address, and an empty string compared against
+     * stored data is a value that could match something.
+     */
+    public static Optional<String> getCurrentUserEmail() {
+        SecurityContext securityContext = SecurityContextHolder.getContext();
+        return Optional.ofNullable(securityContext.getAuthentication())
+            .map(Authentication::getPrincipal)
+            .filter(Jwt.class::isInstance)
+            .map(Jwt.class::cast)
+            .map(jwt -> jwt.getClaimAsString(EMAIL_KEY))
+            .filter(email -> !email.isBlank());
+    }
 
     /**
      * Get the login of the current user.
