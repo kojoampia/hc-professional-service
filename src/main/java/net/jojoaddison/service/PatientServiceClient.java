@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import net.jojoaddison.security.SecurityUtils;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ActivityLog;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase;
@@ -167,6 +168,50 @@ public class PatientServiceClient {
     /** Every patient profile. The join key is {@link PatientProfile#patientId()}, not the profile id. */
     public List<PatientProfile> profiles() {
         return getAll("/api/profiles", PROFILE_LIST);
+    }
+
+    /**
+     * The one profile belonging to an email address — the patient day plan's identity hop.
+     *
+     * <p><b>A single-record read, deliberately not {@link #profiles} filtered in memory.</b> That
+     * one pages the whole collection; this answers one question about the caller, on the critical
+     * path of a patient-facing request, and reading twelve hundred rows to find one is the shape
+     * backlog item 23 is about. patientservice serves {@code /api/profiles/email/{email}} as the
+     * dashboard's own entry point into the record, and scopes it on the <em>token's</em> email
+     * rather than on the resolved patient id — so a patient may look themselves up and nobody else,
+     * and this call inherits that rule rather than reimplementing it.
+     *
+     * <p><b>Empty on any failure, and the caller must read that as "cannot establish who is
+     * asking".</b> {@code CustomerDayPlanService} turns it into a 403, which fails closed: an
+     * unreachable patient stack refuses a day plan rather than serving somebody else's. That is the
+     * one direction this may fail in.
+     */
+    public Optional<PatientProfile> profileByEmail(String email) {
+        if (!enabled || email == null || email.isBlank()) {
+            return Optional.empty();
+        }
+        String token = SecurityUtils.getCurrentUserJWT().orElse(null);
+        if (token == null) {
+            LOG.warn("No caller token available; cannot resolve a patientservice profile by email");
+            return Optional.empty();
+        }
+        try {
+            return Optional.ofNullable(
+                restClient
+                    .get()
+                    .uri("/api/profiles/email/{email}", email)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                    .retrieve()
+                    .body(PatientProfile.class)
+            );
+        } catch (Exception e) {
+            // The address itself is not logged: it identifies the caller, and this line is read out
+            // of support tickets. A 404 arrives here too — patientservice answers one for a caller
+            // asking about an address that is not their own, which is that endpoint's own way of
+            // refusing without confirming the address exists.
+            LOG.warn("patientservice profile lookup by email failed ({}); treating the caller as unresolved", e.getMessage());
+            return Optional.empty();
+        }
     }
 
     /** Every clinical case. Filter by {@code assignedProfessionalId} for a clinician's own caseload. */

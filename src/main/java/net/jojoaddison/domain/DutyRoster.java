@@ -42,6 +42,22 @@ import org.springframework.data.mongodb.core.mapping.Field;
  * second because it is the range half; the equality half leads.
  */
 @CompoundIndex(name = "professional_date_idx", def = "{'professional_id': 1, 'date': 1}")
+/*
+ * (visits.customer_id, date) — the patient day plan's access pattern, added 2026-09-04 with
+ * DutyRosterRepository.findRoundsForCustomer.
+ *
+ * It is the one read this collection serves that does NOT lead with professional_id: "who is
+ * visiting me on Thursday" takes a customer and yields professionals. Without this index that query
+ * scans the whole collection, which grows with the estate's entire roster history while the answer
+ * grows with one patient's fortnight — the arithmetic runs the wrong way, and it is a patient-facing
+ * request on the critical path of hc-patient's portal.
+ *
+ * A multikey index: visits is an array, so Mongo indexes every customer id on the round. That is
+ * exactly what is wanted here and is worth naming, because multikey indexes cannot be compounded
+ * with a second array field — there is only one, and adding another array to this document would
+ * make this index illegal rather than merely slower.
+ */
+@CompoundIndex(name = "customer_date_idx", def = "{'visits.customer_id': 1, 'date': 1}")
 public class DutyRoster extends AbstractAuditingEntity<String> implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -84,6 +100,28 @@ public class DutyRoster extends AbstractAuditingEntity<String> implements Serial
     @Valid
     @Field("visits")
     private List<Visit> visits = new ArrayList<>();
+
+    /**
+     * Where the round is worked, as an <b>opaque</b> {@code GeographicSpace} id owned by hc-admin.
+     *
+     * <p>Added 2026-09-04 with hc-admin's planner, which chooses a professional partly by how near
+     * their home space is to the round's, and writes the id it ranked on. It is stored and echoed
+     * back and <em>nothing in this service interprets it</em>: there is no tree here, no parent
+     * chain, and no check that the id exists.
+     *
+     * <p><b>That is the design rather than an omission.</b> hc-admin owns the geography and serves
+     * {@code GET /api/geographic-spaces/{id}} — id, name, type, parent — precisely so this service
+     * can render a place name without modelling somebody else's tree. Resolving happens in
+     * {@code web/}, cached, at display time. Modelling it here would put a second copy of a
+     * hierarchy into the estate and would make this service refuse rounds whose geography it had not
+     * been told about yet, which is a coupling the opaque id exists to avoid.
+     *
+     * <p>Nullable, and every round written before this field existed has none. A round with no space
+     * is one nobody has said where to work — an ordinary state for a round created through this
+     * service's own admin write rather than by the planner.
+     */
+    @Field("geographic_space_id")
+    private String geographicSpaceId;
 
     @Override
     public String getId() {
@@ -189,6 +227,19 @@ public class DutyRoster extends AbstractAuditingEntity<String> implements Serial
     /** A null list is normalised to empty — see the field javadoc; callers never null-check it. */
     public void setVisits(List<Visit> visits) {
         this.visits = visits == null ? new ArrayList<>() : visits;
+    }
+
+    public String getGeographicSpaceId() {
+        return this.geographicSpaceId;
+    }
+
+    public DutyRoster geographicSpaceId(String geographicSpaceId) {
+        this.geographicSpaceId = geographicSpaceId;
+        return this;
+    }
+
+    public void setGeographicSpaceId(String geographicSpaceId) {
+        this.geographicSpaceId = geographicSpaceId;
     }
 
     @Override
