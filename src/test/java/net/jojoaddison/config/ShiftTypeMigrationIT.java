@@ -17,12 +17,17 @@ import org.springframework.data.mongodb.core.query.Query;
 /**
  * {@link ShiftTypeMigration} — the DR1 rewrite of retired {@code ShiftType} values.
  *
- * <p>The runner is {@code @Profile("!test")}, so it does not fire here; this constructs it and calls
- * it directly. That is deliberate rather than a workaround — a runner that rewrote rows while other
- * integration tests were setting up would make their failures inexplicable — and it is the only way
- * to exercise the migration at all, since {@code MORNING} and {@code AFTERNOON} can no longer be
- * expressed through the enum. The fixtures are written as raw strings through {@link MongoTemplate},
- * which is exactly how the documents already in the database hold them.
+ * <p>This constructs the runner and calls it directly. That was attributed to
+ * {@code @Profile("!test")} until 2026-09-04 — "the runner does not fire here, so the test calls it"
+ * — and the attribution was wrong twice over: {@code !test} excluded nothing from a build (the pom
+ * activates {@code testdev}/{@code testprod}, never {@code test}), and Spring Boot does not invoke
+ * {@link org.springframework.boot.ApplicationRunner} beans under {@code @SpringBootTest} whatever
+ * profile they register on. So a runner rewriting rows under another test's setup was never a risk
+ * the annotation was averting. Calling it directly is simply the only way to exercise the migration
+ * at all, since {@code MORNING} and {@code AFTERNOON} can no longer be expressed through the enum.
+ * The fixtures are written as raw strings through {@link MongoTemplate}, which is exactly how the
+ * documents already in the database hold them. See {@link ShiftTypeMigrationProfileTest} for what the
+ * annotation now excludes and why it changed.
  */
 @IntegrationTest
 class ShiftTypeMigrationIT {

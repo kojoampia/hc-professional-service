@@ -13,7 +13,6 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
-import tech.jhipster.config.JHipsterConstants;
 
 /**
  * Migrates retired {@link ShiftType} values on the {@code duty_roster} collection (docs/duty-roster.md
@@ -47,14 +46,31 @@ import tech.jhipster.config.JHipsterConstants;
  * matches nothing and updates nothing; there is no marker document to keep in step and no "has this
  * run" flag that could be wrong. Deployments roll forward and restart freely.
  *
- * <p>Excluded from the test profile so it cannot rewrite an integration test's fixtures underneath
- * it. {@code ShiftTypeMigrationIT} therefore constructs this class directly and calls
+ * <p><b>Excluded from {@code testdev} and {@code testprod}</b> — the two profiles {@code pom.xml}
+ * activates for an integration-test run, via {@code -Dspring.profiles.active=${profile.test}} on
+ * surefire/failsafe. It said {@code !test} until 2026-09-04 and was changed here <b>while nothing was
+ * broken in this repo</b>, because the same expression had already caused an outage next door: the
+ * Spring profile {@code test} is never active under {@code ./mvnw verify}, so {@code !test} excluded
+ * nothing from a build, while it does exclude a {@code dev,test} deployment. hc-admin's quality stack
+ * runs {@code dev,test} and its migration therefore never ran there, leaving twelve {@code wage_rate}
+ * rows null and every earnings screen answering 500. <b>This repo's quality stack is {@code dev} only,
+ * so it works today by coincidence</b> — the day anyone adds {@code test} to get seed fixtures, this
+ * migration stops running with no log line and no failing test.
+ *
+ * <p><b>An integration test was never protected by this annotation, whichever expression it held.</b>
+ * Spring Boot does not invoke {@link ApplicationRunner} beans under {@code @SpringBootTest} — it is
+ * {@code SpringApplication.run} that calls them — so no IT's fixtures were ever reachable from here.
+ * The expression above is the house idiom ({@code AsyncConfiguration} beside it) and starts genuinely
+ * excluding IT contexts, which {@code !test} never did.
+ *
+ * <p>{@code ShiftTypeMigrationIT} therefore constructs this class directly and calls
  * {@link #run(ApplicationArguments)} itself, which is also the only way to exercise it now that the
  * retired values cannot be expressed through the enum — the test writes the raw strings through
  * {@code MongoTemplate}, exactly as the documents in the database already hold them.
+ * {@code ShiftTypeMigrationProfileTest} pins the registration itself.
  */
 @Component
-@Profile("!" + JHipsterConstants.SPRING_PROFILE_TEST)
+@Profile("!testdev & !testprod")
 public class ShiftTypeMigration implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(ShiftTypeMigration.class);
