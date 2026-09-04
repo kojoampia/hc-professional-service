@@ -168,6 +168,45 @@ class DutyRosterRoundsIT {
             .andExpect(jsonPath("$.visits.length()").value(0));
     }
 
+    /**
+     * A rest day is a real rostered row and must still be writable — the whole reason {@code OFF}
+     * exists is that "nothing rostered" and "rostered off" are different statements about a day, and
+     * hc-admin's staffing grid needs three cell states rather than two.
+     */
+    @Test
+    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    void acceptsAnOffDayWithNoVisits() throws Exception {
+        restMockMvc
+            .perform(post("/api/duty-roster").contentType(MediaType.APPLICATION_JSON).content(roundJson("OFF", "")))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.shift").value("OFF"))
+            .andExpect(jsonPath("$.visits.length()").value(0));
+    }
+
+    /**
+     * The rule {@code OFF} brought with it: a rest day has no rounds.
+     *
+     * <p>A 400 rather than a 500, and the message must name the rest day rather than a window.
+     * {@code resolve} answers empty for {@code OFF}, so this would be refused either way — but with
+     * "Visit start 09:00 is outside the OFF window", which sends the reader looking for hours
+     * {@code OFF} does not have. The assertion is on the wording for that reason and not for its own
+     * sake.
+     */
+    @Test
+    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    void rejectsVisitsOnAnOffDayAsFourHundred() throws Exception {
+        restMockMvc
+            .perform(
+                post("/api/duty-roster")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(roundJson("OFF", visitJson(CUSTOMER, "09:00", "10:00")))
+            )
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string(org.hamcrest.Matchers.containsString("OFF day")));
+
+        assertThat(dutyRosterRepository.count()).isZero();
+    }
+
     @Test
     @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
     void rejectsAVisitOutsideTheShiftWindowAsFourHundred() throws Exception {
