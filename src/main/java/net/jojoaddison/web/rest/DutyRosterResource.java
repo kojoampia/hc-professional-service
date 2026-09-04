@@ -343,8 +343,11 @@ public class DutyRosterResource {
      * <p>Identical status, identical body, and that is the whole point rather than an accident of
      * implementation: two different answers here would make this endpoint an oracle for "does this
      * customer exist", answerable for every id on the platform by any authenticated caller on three
-     * stacks. {@code CustomerDayPlanForbiddenIT} asserts the two responses are byte-for-byte the
-     * same.
+     * stacks. {@code CustomerDayPlanIT.anUnknownCustomerIsRefusedIdenticallyToSomebodyElses} asserts
+     * the two responses are byte-for-byte the same. (This named
+     * {@code CustomerDayPlanForbiddenIT} until 2026-09-05; no such class was ever written, so a
+     * reader checking the claim found nothing and had no way to tell an absent test from a
+     * misremembered name.)
      *
      * <p>The body repeats nothing the caller did not already send.
      */
