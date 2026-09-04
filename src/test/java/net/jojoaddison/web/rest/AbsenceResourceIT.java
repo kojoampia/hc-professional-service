@@ -289,6 +289,43 @@ class AbsenceResourceIT {
 
     @Test
     @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    void anOffDayInsideTheLeaveDoesNotBlockApproval() throws Exception {
+        // The conflict rule counts rounds rather than visits, because a shift with no visits is still
+        // a shift somebody has to cover. OFF is where that stops being true: a rostered rest day is
+        // not cover, so leave across it leaves no hole. Without the exclusion this is a 409 naming a
+        // rest day — a refusal to grant leave over a day the clinician was already not working, which
+        // reads as a bug in the roster rather than as a rule.
+        Absence absence = stored(nurse, FROM, TO, AbsenceStatus.REQUESTED);
+        dutyRosterRepository.save(
+            new DutyRoster().date(FROM).duty(DutyRole.NURSE).professionalId(nurse.getId()).shift(ShiftType.OFF).name("Rest day")
+        );
+
+        restMockMvc
+            .perform(put("/api/absences/" + absence.getId() + "/approve"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("APPROVED"));
+    }
+
+    @Test
+    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    void anOffDayDoesNotHideARealRoundInTheSameRange() throws Exception {
+        // The other half, and the one an over-broad exclusion would break: filtering OFF must drop
+        // that row and nothing else. A rest day on the first absent day beside a DAY round on the
+        // second is still a conflict, and still names exactly one round.
+        Absence absence = stored(nurse, FROM, TO, AbsenceStatus.REQUESTED);
+        dutyRosterRepository.save(
+            new DutyRoster().date(FROM).duty(DutyRole.NURSE).professionalId(nurse.getId()).shift(ShiftType.OFF).name("Rest day")
+        );
+        roster(nurse, FROM.plusDays(1));
+
+        restMockMvc
+            .perform(put("/api/absences/" + absence.getId() + "/approve"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.conflictingRosterIds.length()").value(1));
+    }
+
+    @Test
+    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
     void approvingTwiceIsNotAnError() throws Exception {
         Absence absence = stored(nurse, FROM, TO, AbsenceStatus.APPROVED);
 

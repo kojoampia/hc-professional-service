@@ -26,7 +26,7 @@
       "fieldName": "shift",
       "fieldType": "ShiftType",
       "fieldValidateRules": ["required"],
-      "fieldValues": "DAY,EVENING,NIGHT,FLEXIBLE"
+      "fieldValues": "DAY,EVENING,NIGHT,OFF,FLEXIBLE"
     },
     {
       "fieldName": "name",

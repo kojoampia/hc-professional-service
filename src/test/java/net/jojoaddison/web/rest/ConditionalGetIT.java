@@ -5,7 +5,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.LocalDate;
 import net.jojoaddison.IntegrationTest;
+import net.jojoaddison.domain.DutyRoster;
+import net.jojoaddison.domain.Profile;
+import net.jojoaddison.domain.enumeration.DutyRole;
+import net.jojoaddison.domain.enumeration.ShiftType;
+import net.jojoaddison.repository.DutyRosterRepository;
+import net.jojoaddison.repository.ProfileRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -30,6 +37,12 @@ class ConditionalGetIT {
 
     @Autowired
     private MockMvc restMockMvc;
+
+    @Autowired
+    private DutyRosterRepository dutyRosterRepository;
+
+    @Autowired
+    private ProfileRepository profileRepository;
 
     /** The ETag of a GET, or null when the filter is not registered on that path. */
     private String etagOf(String path) throws Exception {
@@ -81,6 +94,50 @@ class ConditionalGetIT {
         MvcResult result = restMockMvc.perform(get("/api/duty-roster/day/2026-08-22")).andExpect(status().isOk()).andReturn();
 
         assertThat(result.getResponse().getHeader(HttpHeaders.ETAG)).isNull();
+    }
+
+    /**
+     * A rostered rest day invalidates a cached roster, like any other row.
+     *
+     * <p>The ETag include list is one of the three places {@code backlog.md} item 9 named as never
+     * having been exercised with a shift value that means "no window", and this is what that check
+     * comes to. The filter is shallow — it hashes the bytes the endpoint produced — so the whole
+     * correctness argument is "{@code OFF} rounds are in the response, therefore the hash moves".
+     * Both halves are load-bearing and only one is visible from {@code WebConfigurer}: an endpoint
+     * that quietly omitted {@code OFF} would keep serving 304 to a phone whose clinician had just
+     * been given a rest day, with nothing in the filter, the resource or a status assertion noticing.
+     * A test that only asked "does this path carry an ETag" cannot see that either, which is why this
+     * one changes the data and compares two validators.
+     */
+    @Test
+    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    void rosteringAnOffDayInvalidatesTheCachedRoster() throws Exception {
+        Profile profile = profileRepository.save(new Profile().accountId(NURSE).firstName("Eta").lastName("Gee"));
+        try {
+            String before = etagOf("/api/duty-roster");
+            assertThat(before).isNotBlank();
+
+            dutyRosterRepository.save(
+                new DutyRoster()
+                    .date(LocalDate.now().plusDays(1))
+                    .duty(DutyRole.NURSE)
+                    .professionalId(profile.getId())
+                    .shift(ShiftType.OFF)
+                    .name("Rest day")
+            );
+
+            // Not merely "the ETag changed": the previously valid validator must now miss, which is
+            // the behaviour a polling handset actually depends on.
+            restMockMvc
+                .perform(get("/api/duty-roster").header(HttpHeaders.IF_NONE_MATCH, before))
+                .andExpect(status().isOk())
+                .andExpect(header().exists(HttpHeaders.ETAG));
+
+            assertThat(etagOf("/api/duty-roster")).isNotEqualTo(before);
+        } finally {
+            dutyRosterRepository.deleteAll();
+            profileRepository.deleteAll();
+        }
     }
 
     @Test

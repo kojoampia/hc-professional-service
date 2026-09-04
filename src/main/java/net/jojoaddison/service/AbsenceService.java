@@ -254,6 +254,14 @@ public class AbsenceService {
      * <p>Note this counts <em>rounds</em>, not visits: a shift with no visits is still a shift
      * somebody has to cover, and approving leave over it would leave a hole nobody notices.
      *
+     * <p><b>An {@code OFF} round is the exception that sentence does not cover, and it is excluded.</b>
+     * A rostered rest day is not work anybody has to cover, so granting leave across it leaves no
+     * hole. Counting it would report a conflict on a day the clinician was already not working and
+     * refuse the approval with a 409 naming a rest day — which reads as a bug in the roster rather
+     * than a rule. The filter went in with {@code OFF} on 2026-09-04; until then every value of the
+     * enum meant "worked", which is what made "rounds, not visits" a complete rule rather than an
+     * almost-complete one.
+     *
      * <p><b>The day before counts too, if it is a {@code NIGHT}.</b> That shift runs 23:00 until
      * 07:00 the next morning, so a `NIGHT` round dated the day before an absence starts is worked
      * almost entirely <em>inside</em> it. Asking only for rounds dated within the range reads
@@ -267,6 +275,8 @@ public class AbsenceService {
         return dutyRosterRepository
             .findRoundsInRange(absence.getProfessionalId(), eve, absence.getToDate())
             .stream()
+            // A rest day is not cover, so it is not a conflict.
+            .filter(round -> round.getShift() != ShiftType.OFF)
             // Everything from the eve is out except a NIGHT, which reaches into the first absent day.
             .filter(round -> !round.getDate().equals(eve) || round.getShift() == ShiftType.NIGHT)
             .map(DutyRoster::getId)

@@ -265,6 +265,14 @@ public class DutyRosterService {
      * <p>An empty set is the safe answer and the common one — a professional with no rounds, or an
      * account with no profile at all, reads nothing. Callers must treat empty as "deny", never as
      * "unfiltered".
+     *
+     * <p><b>{@code OFF} needs no filter here and must not grow one</b> (checked when the value was
+     * added, 2026-09-04). This widens by {@code visits[]}, and an {@code OFF} round has none —
+     * {@code validateRound} refuses to store one that does — so a rest day contributes nothing to the
+     * set by construction. That is the stronger property: a filter on the shift would have to be kept
+     * in step with the enum, while "no visits, therefore no customers" holds for any value that
+     * carries no visits. {@code RosterTrailIT} pins it, because "contributes nothing" and "is not
+     * reached" are indistinguishable from a green build.
      */
     public Set<String> trailCustomerIds(String professionalId, LocalDate reference) {
         if (professionalId == null || reference == null) {
@@ -495,11 +503,24 @@ public class DutyRosterService {
      * Every rule a round must satisfy, in the order that gives the most useful message first.
      *
      * <p>A round with no visits passes everything — ward cover and on-call time are real shifts.
+     *
+     * <p><b>An {@code OFF} round with visits is refused, and the check comes first.</b> A rostered
+     * rest day has no rounds; a round of visits on one is not a scheduling edge case to be resolved,
+     * it is two contradictory statements about the same day and only the person who wrote them knows
+     * which was meant. Ordering matters here for the message and not for the outcome: {@link #resolve}
+     * answers empty for {@code OFF}, so leaving this out would still reject the round — with
+     * "Visit start 09:00 is outside the OFF window", which sends the reader looking for the window
+     * {@code OFF} does not have instead of telling them the day is a rest day.
      */
     public void validateRound(DutyRoster round) {
         List<Visit> visits = round.getVisits();
         if (visits.isEmpty()) {
             return;
+        }
+        if (round.getShift() == ShiftType.OFF) {
+            throw new InvalidRoundException(
+                "A round on %s is an OFF day and cannot carry visits — reassign them or change the shift".formatted(round.getDate())
+            );
         }
         List<Interval> intervals = new ArrayList<>();
         for (Visit visit : visits) {
@@ -609,17 +630,27 @@ public class DutyRosterService {
      *   <li>{@code NIGHT} 23:00–07:00 splits — 23:00 and later is the assignment date, before 07:00 is
      *       <b>the next day</b>. Everything between 07:00 and 23:00 is outside it.
      *   <li>{@code FLEXIBLE} covers the whole assignment date and accepts any time on it.
+     *   <li>{@code OFF} accepts <b>nothing</b>. It is a rest day, so there is no time on it at which
+     *       a visit could be placed — and this is the one case where "no window" means "no times"
+     *       rather than "all times", which is why it is spelled out here beside {@code FLEXIBLE}
+     *       rather than sharing its branch.
      * </ul>
      *
      * <p>Bounds are inclusive at both ends here, so a visit may start exactly at the window's open and
      * end exactly at its close; {@link #validateRound} separately requires end to be after start,
      * which is what stops a zero-length visit at the boundary.
+     *
+     * <p>Callers should not be reaching this with {@code OFF} in practice — {@link #validateRound}
+     * refuses an {@code OFF} round with visits before it resolves any time, so that the message names
+     * the rest day rather than an out-of-window minute. The empty answer here is the second line, for
+     * anything that resolves a time without going through validation.
      */
     public static Optional<LocalDateTime> resolve(LocalDate date, ShiftType shift, LocalTime time) {
         if (date == null || shift == null || time == null) {
             return Optional.empty();
         }
         return switch (shift) {
+            case OFF -> Optional.empty();
             case FLEXIBLE -> Optional.of(date.atTime(time));
             case DAY -> within(date, time, LocalTime.of(7, 0), LocalTime.of(15, 0));
             case EVENING -> within(date, time, LocalTime.of(15, 0), LocalTime.of(23, 0));

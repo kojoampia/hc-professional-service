@@ -223,6 +223,29 @@ class RosterTrailIT {
         restMockMvc.perform(get(trail(MINE))).andExpect(status().isForbidden());
     }
 
+    /**
+     * A rest day widens nobody's entitlement — asserted rather than reasoned about.
+     *
+     * <p>{@code trailCustomerIds} widens by {@code visits[]}, and an {@code OFF} round has none, so
+     * this holds by construction rather than by a filter on the shift. That is the stronger property
+     * and the reason no filter was added there. But "contributes nothing" and "was never reached" are
+     * indistinguishable from a green build, and the trail query is one of the three places
+     * `backlog.md` item 9 named as never having been exercised with a value meaning "no window" — so
+     * the construction is pinned here rather than left as an argument in a comment.
+     */
+    @Test
+    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    void anOffDayGrantsNoTrailEntitlement() throws Exception {
+        dutyRosterRepository.deleteAll();
+        dutyRosterRepository.save(
+            new DutyRoster().date(LocalDate.now()).duty(DutyRole.NURSE).professionalId(mine.getId()).shift(ShiftType.OFF).name("Rest day")
+        );
+
+        // The clinician is rostered today and has read this customer's trail on other days; today
+        // they are off, the round carries no visits, and the entitlement set is empty.
+        restMockMvc.perform(get(trail(MINE))).andExpect(status().isForbidden());
+    }
+
     // ------------------------------------------------------------- degradation
 
     @Test

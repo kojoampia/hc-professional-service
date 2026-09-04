@@ -32,6 +32,14 @@ import tech.jhipster.config.JHipsterConstants;
  * was accepted when the mapping was agreed: <b>a historic shift may display slightly differently
  * from how it was actually worked.</b>
  *
+ * <p><b>{@code OFF} (2026-09-04) needed nothing added here, and that is worth stating rather than
+ * leaving to be inferred.</b> The superset change <em>added</em> a value rather than retiring one, so
+ * no stored document holds a string the enum can no longer parse and there is nothing to rewrite —
+ * this run stays a no-op for it. The class and this note are kept because "the migration was empty"
+ * and "the migration was forgotten" look identical from a green build, and because a pre-launch
+ * database that has not been started since DR1 is still out there to be found. hc-admin's half of the
+ * change grew its own {@code ShiftTypeMigration} in the same shape, and for the same reason.
+ *
  * <p>There is no migration framework in this repo — no Liquibase, no Mongock — so this runs as an
  * {@link ApplicationRunner}, in the shape of {@link DeviceTokenIndexInitializer} beside it.
  *

@@ -104,12 +104,42 @@ class DutyRosterServiceUnitTest {
         assertThat(DutyRosterService.resolve(DATE, ShiftType.FLEXIBLE, LocalTime.of(23, 59))).contains(DATE.atTime(23, 59));
     }
 
+    /**
+     * The two values with no window are not the same kind of "no window", and this is the assertion
+     * that says so. {@code FLEXIBLE} means any time on the date; {@code OFF} means no time at all.
+     * Reading either as the other is the mistake this pair exists to catch.
+     */
+    @Test
+    void offAcceptsNoTimeAtAll() {
+        assertThat(DutyRosterService.resolve(DATE, ShiftType.OFF, LocalTime.MIDNIGHT)).isEmpty();
+        assertThat(DutyRosterService.resolve(DATE, ShiftType.OFF, LocalTime.of(9, 0))).isEmpty();
+        assertThat(DutyRosterService.resolve(DATE, ShiftType.OFF, LocalTime.of(23, 59))).isEmpty();
+    }
+
     // -------------------------------------------------------------- validation
 
     @Test
     void acceptsARoundWithNoVisits() {
         // Ward cover, on call, administrative time. A shift is not required to serve anyone.
         assertThatCode(() -> service.validateRound(round(ShiftType.DAY))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void acceptsAnOffDayWithNoVisits() {
+        // A rostered rest day is a real row: "nothing rostered" and "rostered off" are different
+        // statements about a day, which is the whole reason OFF exists.
+        assertThatCode(() -> service.validateRound(round(ShiftType.OFF))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsVisitsOnAnOffDayNamingTheRestDayRatherThanAWindow() {
+        // resolve() answers empty for OFF, so this would be refused either way — with "Visit start
+        // 09:00 is outside the OFF window", which sends the reader looking for hours OFF does not
+        // have. The explicit check runs first for the message, and the message is what is asserted.
+        assertThatThrownBy(() -> service.validateRound(round(ShiftType.OFF, visit("c-1", "09:00", "10:00"))))
+            .isInstanceOf(InvalidRoundException.class)
+            .hasMessageContaining("OFF day")
+            .hasMessageNotContaining("window");
     }
 
     @Test
