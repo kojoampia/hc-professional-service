@@ -11,6 +11,7 @@ import net.jojoaddison.IntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.FieldSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
@@ -150,5 +151,50 @@ class PaginationLinkHeaderIT {
     @Test
     void aPrefixedRequestIsStillSubjectToTheSecurityChain() throws Exception {
         restMockMvc.perform(asRelayedByTheGateway("/api/patients")).andExpect(status().isUnauthorized());
+    }
+
+    /**
+     * A forged prefix does not open an endpoint, whatever value it carries.
+     *
+     * <p>The test above asserts a 401 on an unauthenticated read and was, on its own, a tautology: an
+     * unauthenticated {@code GET /api/patients} is 401 with this filter, without it, and with the bean
+     * deleted. It proved nothing about the thing its name claims. This is the assertion that carries
+     * the security argument.
+     *
+     * <p>{@code ForwardedHeaderFilter} rewrites {@code getRequestURI()} and {@code getContextPath()}
+     * from a header the caller may one day be able to set, and Spring Security matches on
+     * {@code pathWithinApplication}. The claim is that the rewrite is invariant — prefix added, prefix
+     * subtracted — so no value can move a request out from behind {@code /api/**}. The values below
+     * are the ones that could plausibly try: the prefix that equals the matched pattern, the one that
+     * equals the whole path, a bare {@code /}, a traversal, and one with no leading slash (which makes
+     * {@code DefaultRequestPath.validateContextPath} throw, so the interesting part is that it fails
+     * closed rather than open).
+     *
+     * <p>What is asserted is deliberately weak on the exact code and strong on the only thing that
+     * matters: <b>never 2xx</b>. A 401, 400 or 500 are all acceptable refusals; a 200 is the bug.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = { "/api", "/api/patients", "/", "/a/..", "foo", "//evil.com", GATEWAY_PREFIX })
+    void noForgedPrefixTurnsAGuardedReadIntoAnOpenOne(String forgedPrefix) throws Exception {
+        int status;
+        try {
+            status = restMockMvc
+                .perform(get("/api/patients?page=0&size=20").header("X-Forwarded-Prefix", forgedPrefix))
+                .andReturn()
+                .getResponse()
+                .getStatus();
+        } catch (Exception failedClosed) {
+            // A prefix with no leading slash makes DefaultRequestPath.validateContextPath throw inside
+            // the filter chain, before any handler runs. MockMvc rethrows it; a deployment turns it
+            // into a 500. Ugly, and worth knowing that a misconfigured proxy can produce it — but it
+            // is a refusal, which is the property under test. Asserted rather than swallowed so this
+            // stays true if the framework ever starts returning a status instead.
+            assertThat(failedClosed).as("a malformed prefix must fail closed, not open").hasMessageContaining("Invalid contextPath");
+            return;
+        }
+
+        assertThat(status)
+            .as("X-Forwarded-Prefix '%s' must not make an authenticated-only read succeed", forgedPrefix)
+            .matches(code -> code < 200 || code >= 300, "a refusal rather than 2xx");
     }
 }

@@ -58,14 +58,29 @@ public class WebConfigurer implements ServletContextInitializer {
      * {@code /api/duty-roster/all}. Not one of them was wrong in its own code — they are all wrong in
      * the same way, which is why the fix belongs here and not in five call sites.
      *
+     * <p><b>⚠ THIS IS INERT UNTIL THE GATEWAY IS CONFIGURED, AND THAT IS NOT DONE.</b> The half of
+     * the contract that sends the header does not currently run. Spring Cloud Gateway <b>5.0.2</b> —
+     * what {@code gateway/} resolves through {@code spring-cloud 2025.1.2}, verified from the jar
+     * inside the running image — gates {@code XForwardedHeadersFilter} on
+     * {@code TrustedProxies$XForwardedTrustedProxiesCondition}, which requires
+     * {@code spring.cloud.gateway.trusted-proxies} to be set and non-blank. It is set **nowhere** in
+     * this estate. Worse, the same version registers {@code RemoveXForwardedHeadersFilter} on the
+     * inverse condition, which strips every {@code x-forwarded-*} header from the relayed request. So
+     * the gateway does not merely omit {@code X-Forwarded-Prefix} — it deletes it, and
+     * {@code ForwardedHeaderFilter.shouldNotFilter} then short-circuits on every real request.
+     *
+     * <p>This bean is therefore <b>necessary but not sufficient</b> for backlog item 31, and on its
+     * own changes nothing a client can observe. Do not read a green
+     * {@code PaginationLinkHeaderIT} as evidence the deployed {@code Link} is fixed: that test sets
+     * the three forwarded headers by hand, so it exercises this filter rather than the deployment.
+     * Closing item 31 needs {@code trusted-proxies} on the gateway <i>and</i> the nginx scrub in
+     * §"Trust boundary" below, in the same change — see {@code docs/backlog.md} item 31.
+     *
      * <p><b>Why the framework filter and not a hardcoded prefix.</b> The prefix is not this service's
      * to know: it is whatever the component in front stripped, and that component says so in
-     * {@code X-Forwarded-Prefix}. Spring Cloud Gateway's {@code XForwardedHeadersFilter} sends it —
-     * along with {@code -Proto}, {@code -Host} and {@code -Port} — and is on by default
-     * ({@code spring.cloud.gateway.server.webflux.x-forwarded.prefix-enabled}); nothing in this
-     * estate's compose files turns it off. {@code ForwardedHeaderFilter} is the servlet-side half of
-     * that contract, and the nginx configuration in {@code deploy/docker/proxy-headers.inc} already
-     * names it by name. A direct call carries none of those headers, the filter is then a no-op, and
+     * {@code X-Forwarded-Prefix}. {@code ForwardedHeaderFilter} is the servlet-side half of that
+     * contract, and the nginx configuration in {@code deploy/docker/proxy-headers.inc} already names
+     * it by name. A direct call carries none of those headers, the filter is then a no-op, and
      * {@code fromCurrentRequest()} keeps answering {@code /api/patients} — which is correct, because
      * on a direct call that is the URL.
      *
@@ -79,13 +94,36 @@ public class WebConfigurer implements ServletContextInitializer {
      * variables in compose, and a property can be switched off from there by accident — silently, with
      * the only symptom being a header nobody reads until they do. A bean cannot.
      *
-     * <p><b>Trust boundary.</b> The filter believes whatever proxy is in front of it, so the header
-     * must not be settable by the caller. {@code quality/host-site.conf} blanks a client-supplied
-     * {@code X-Forwarded-Prefix} with the comment "only the gateway may set this: it is the one
-     * component that knows what it stripped". {@code deploy/docker/proxy-headers.inc} does not yet do
-     * the same, and should — see the note on item 31. The exposure is small either way (a caller can
-     * only poison the {@code Link} in its own response; nothing here redirects on it, and no cache sits
-     * in front of {@code /services/**}), but "small" is not "absent".
+     * <p><b>Trust boundary — the reason the two halves must land together.</b> This filter believes
+     * whatever is in front of it, so the header must not be settable by the caller. Today the
+     * gateway's {@code RemoveXForwardedHeadersFilter} strips it, which is the only reason a
+     * client-supplied value cannot reach here — a protection that disappears the instant
+     * {@code trusted-proxies} is set to make this bean do its job. At that point the edge must scrub
+     * it, and <b>three</b> files need it, not one:
+     *
+     * <ul>
+     *   <li>{@code quality/host-site.conf:126} — already does, in {@code location /} only; its
+     *       {@code location /websocket/} block does not.</li>
+     *   <li>{@code deploy/docker/proxy-headers.inc} — does not. It sets {@code Host},
+     *       {@code X-Real-IP}, {@code X-Forwarded-For}, {@code -Host} and {@code -Proto}, and names
+     *       this filter in a comment, but never blanks the prefix.</li>
+     *   <li>{@code deploy/prod-server/hc-professional-app.conf} — the internet-facing hop, and does
+     *       not either. nginx passes unrecognised client headers straight through.</li>
+     * </ul>
+     *
+     * <p>The blast radius is wider than the prefix, which is worth stating because it is easy to scope
+     * this to {@code Link}: the same filter makes {@code getRemoteAddr()} return the first entry of
+     * {@code X-Forwarded-For}, and both nginx hops use {@code $proxy_add_x_forwarded_for}, which
+     * <i>appends</i> — so that first entry is whatever the client sent. Any future IP-based logging,
+     * rate limiting or allow-listing in this service would be spoofable from the day it is written.
+     *
+     * <p>An authentication bypass is <i>not</i> reachable, and the reason is worth recording so nobody
+     * has to re-derive it: this filter overrides {@code getRequestURI()} and {@code getContextPath()}
+     * but not {@code getServletPath()}/{@code getPathInfo()}, and both Spring Security and
+     * {@code DispatcherServlet} match on {@code pathWithinApplication} — which is
+     * {@code prefix + path} minus {@code prefix}, invariant under any prefix value. A prefix that
+     * moved the security match would move the handler mapping identically, giving a 404 rather than
+     * an unguarded 200.
      *
      * <p>Ordered ahead of everything, including {@link #conditionalGetFilter()} and the security
      * chain: a filter that rewrites the request URI has to run before anything that reads it.
@@ -94,6 +132,15 @@ public class WebConfigurer implements ServletContextInitializer {
     public FilterRegistrationBean<ForwardedHeaderFilter> forwardedHeaderFilter() {
         FilterRegistrationBean<ForwardedHeaderFilter> registration = new FilterRegistrationBean<>(new ForwardedHeaderFilter());
         registration.setName("forwardedHeaderFilter");
+        // REQUEST, ASYNC and ERROR — the same three Boot's own ForwardedHeaderFilterConfiguration
+        // registers, and not the REQUEST-only default. ForwardedHeaderFilter deliberately overrides
+        // shouldNotFilterAsyncDispatch() and shouldNotFilterErrorDispatch() to false and carries a
+        // getErrorRequestUri() for the error dispatch; leaving the default would mean the /error
+        // forward runs unwrapped, so ExceptionTranslator's problem-detail `path` would revert to the
+        // unprefixed URI on exactly the responses where a caller is already being told something went
+        // wrong. Registering the bean rather than setting server.forward-headers-strategy is only
+        // worth doing if it is not the weaker registration of the two.
+        registration.setDispatcherTypes(DispatcherType.REQUEST, DispatcherType.ASYNC, DispatcherType.ERROR);
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
         return registration;
     }
