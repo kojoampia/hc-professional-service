@@ -1,8 +1,6 @@
 package net.jojoaddison.web.rest;
 
 import jakarta.validation.Valid;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -17,6 +15,7 @@ import net.jojoaddison.service.DutyRosterService;
 import net.jojoaddison.service.RosterTrailService;
 import net.jojoaddison.service.dto.DutyRosterDtos;
 import net.jojoaddison.service.dto.PatientDtos;
+import net.jojoaddison.web.rest.util.LocationUri;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -39,6 +38,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import tech.jhipster.web.util.PaginationUtil;
+import tech.jhipster.web.util.ResponseUtil;
 
 /**
  * Professional duty-roster assignments (professional-onboarding-workflow.md
@@ -93,7 +93,7 @@ public class DutyRosterResource {
 
     @PostMapping
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
-    public ResponseEntity<DutyRoster> assign(@Valid @RequestBody DutyRoster dutyRoster) throws URISyntaxException {
+    public ResponseEntity<DutyRoster> assign(@Valid @RequestBody DutyRoster dutyRoster) {
         // Identifiers only. This used to log the whole object, which was harmless while a roster row
         // was six scalars and is not now that it carries customer names, addresses and phone numbers
         // (DR2). DutyRoster.toString() omits the visits for the same reason; both have to hold.
@@ -111,7 +111,7 @@ public class DutyRosterResource {
         }
         DutyRoster saved = dutyRosterService.assign(dutyRoster);
         domainEventPublisher.publishEntityCreated("DutyRoster", saved.getId(), null, SecurityUtils.getCurrentUserLogin().orElse("system"));
-        return ResponseEntity.created(new URI("/api/duty-roster/" + saved.getId())).body(saved);
+        return ResponseEntity.created(LocationUri.of(saved.getId())).body(saved);
     }
 
     /**
@@ -126,6 +126,31 @@ public class DutyRosterResource {
     @ExceptionHandler(DutyRosterService.InvalidRoundException.class)
     public ResponseEntity<String> handleInvalidRound(DutyRosterService.InvalidRoundException exception) {
         return ResponseEntity.badRequest().body(exception.getMessage());
+    }
+
+    /**
+     * One assignment by id — the destination of the {@code Location} the create emits.
+     *
+     * <p><b>This existed nowhere until item 41's review.</b> `assign` has advertised a
+     * {@code Location} of {@code /api/duty-roster/{id}} since DR1, and this resource had no
+     * {@code GET /{id}} to serve it: every mapping was either a collection, a named sub-path, or a
+     * {@code DELETE}. So the header named a URL that 404s. Fixing the header's *prefix* (item 41)
+     * would have left it naming a different unreachable URL — the review caught that the change
+     * improved ten of eleven endpoints and moved the eleventh's failure rather than removing it.
+     * {@code LocationHeaderIT} now follows every {@code Location} it asserts, which is the check that
+     * would have caught this without a reviewer.
+     *
+     * <p><b>Projected, not the stored document</b>, and admin-only — deliberately identical to what
+     * {@link #listAll} already serves. A round carries customer snapshots since DR2, and
+     * {@link #day} is the one read that discloses them, one day at a time and to the clinician whose
+     * round it is. Serving the document here would have made this the second, for a wider audience,
+     * as a side effect of making a header followable. {@link DutyRosterDtos.Round} has nowhere to put
+     * a customer, so the single-item read discloses exactly what the estate-wide list already does.
+     */
+    @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
+    public ResponseEntity<DutyRosterDtos.Round> one(@PathVariable String id) {
+        return ResponseUtil.wrapOrNotFound(dutyRosterRepository.findById(id).map(DutyRosterDtos.Round::of));
     }
 
     @DeleteMapping("/{id}")

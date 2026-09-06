@@ -1,7 +1,5 @@
 package net.jojoaddison.web.rest;
 
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -9,6 +7,7 @@ import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.Report;
 import net.jojoaddison.repository.ReportRepository;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
+import net.jojoaddison.web.rest.util.LocationUri;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -45,10 +44,9 @@ public class ReportResource {
      *
      * @param report the report to create.
      * @return the {@link ResponseEntity} with status {@code 201 (Created)} and with body the new report, or with status {@code 400 (Bad Request)} if the report has already an ID.
-     * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PostMapping("")
-    public ResponseEntity<Report> createReport(@RequestBody Report report) throws URISyntaxException {
+    public ResponseEntity<Report> createReport(@RequestBody Report report) {
         log.debug("REST request to save Report : {}", report);
         if (report.getId() != null) {
             throw new BadRequestAlertException("A new report cannot already have an ID", ENTITY_NAME, "idexists");
@@ -60,7 +58,7 @@ public class ReportResource {
             null,
             net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
         );
-        return ResponseEntity.created(new URI("/api/reports/" + report.getId()))
+        return ResponseEntity.created(LocationUri.of(report.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, report.getId()))
             .body(report);
     }
@@ -73,11 +71,9 @@ public class ReportResource {
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the updated report,
      * or with status {@code 400 (Bad Request)} if the report is not valid,
      * or with status {@code 500 (Internal Server Error)} if the report couldn't be updated.
-     * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PutMapping("/{id}")
-    public ResponseEntity<Report> updateReport(@PathVariable(value = "id", required = false) final String id, @RequestBody Report report)
-        throws URISyntaxException {
+    public ResponseEntity<Report> updateReport(@PathVariable(value = "id", required = false) final String id, @RequestBody Report report) {
         log.debug("REST request to update Report : {}, {}", id, report);
         if (report.getId() == null) {
             throw new BadRequestAlertException("Invalid id", ENTITY_NAME, "idnull");
@@ -105,13 +101,12 @@ public class ReportResource {
      * or with status {@code 400 (Bad Request)} if the report is not valid,
      * or with status {@code 404 (Not Found)} if the report is not found,
      * or with status {@code 500 (Internal Server Error)} if the report couldn't be updated.
-     * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PatchMapping(value = "/{id}", consumes = { "application/json", "application/merge-patch+json" })
     public ResponseEntity<Report> partialUpdateReport(
         @PathVariable(value = "id", required = false) final String id,
         @RequestBody Report report
-    ) throws URISyntaxException {
+    ) {
         log.debug("REST request to partial update Report partially : {}, {}", id, report);
         if (report.getId() == null) {
             throw new BadRequestAlertException("Invalid id", ENTITY_NAME, "idnull");

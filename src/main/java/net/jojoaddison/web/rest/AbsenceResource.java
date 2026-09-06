@@ -1,13 +1,12 @@
 package net.jojoaddison.web.rest;
 
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import net.jojoaddison.domain.Absence;
 import net.jojoaddison.security.AuthoritiesConstants;
 import net.jojoaddison.service.AbsenceService;
+import net.jojoaddison.web.rest.util.LocationUri;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -104,9 +103,9 @@ public class AbsenceResource {
      * where it can tell an administrator's submission from a clinician's.
      */
     @PostMapping
-    public ResponseEntity<Absence> request(@RequestBody Absence absence) throws URISyntaxException {
+    public ResponseEntity<Absence> request(@RequestBody Absence absence) {
         Absence saved = absenceService.request(absence);
-        return ResponseEntity.created(new URI("/api/absences/" + saved.getId())).body(saved);
+        return ResponseEntity.created(LocationUri.of(saved.getId())).body(saved);
     }
 
     /** Grant a request. Admin only, and 409 while the days are still rostered. */

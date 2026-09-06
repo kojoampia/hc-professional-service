@@ -1,7 +1,5 @@
 package net.jojoaddison.web.rest;
 
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -10,6 +8,7 @@ import net.jojoaddison.domain.Profile;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.service.ProfileService;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
+import net.jojoaddison.web.rest.util.LocationUri;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -62,10 +61,9 @@ public class ProfileResource {
      *
      * @param profile the profile to create.
      * @return the {@link ResponseEntity} with status {@code 201 (Created)} and with body the new profile, or with status {@code 400 (Bad Request)} if the profile has already an ID.
-     * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PostMapping
-    public ResponseEntity<Profile> createProfile(@RequestBody Profile profile) throws URISyntaxException {
+    public ResponseEntity<Profile> createProfile(@RequestBody Profile profile) {
         log.debug("REST request to save Profile : {}", profile);
         if (profile.getId() != null) {
             throw new BadRequestAlertException("A new profile cannot already have an ID", ENTITY_NAME, "idexists");
@@ -77,7 +75,7 @@ public class ProfileResource {
             profile.getAccountId(),
             net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
         );
-        return ResponseEntity.created(new URI("/api/profiles/" + profile.getId()))
+        return ResponseEntity.created(LocationUri.of(profile.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, profile.getId()))
             .body(profile);
     }
@@ -90,13 +88,12 @@ public class ProfileResource {
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the updated profile,
      * or with status {@code 400 (Bad Request)} if the profile is not valid,
      * or with status {@code 500 (Internal Server Error)} if the profile couldn't be updated.
-     * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PutMapping("/{id}")
     public ResponseEntity<Profile> updateProfile(
         @PathVariable(value = "id", required = false) final String id,
         @RequestBody Profile profile
-    ) throws URISyntaxException {
+    ) {
         log.debug("REST request to update Profile : {}, {}", id, profile);
         if (profile.getId() == null) {
             throw new BadRequestAlertException("Invalid id", ENTITY_NAME, "idnull");
@@ -124,13 +121,12 @@ public class ProfileResource {
      * or with status {@code 400 (Bad Request)} if the profile is not valid,
      * or with status {@code 404 (Not Found)} if the profile is not found,
      * or with status {@code 500 (Internal Server Error)} if the profile couldn't be updated.
-     * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PatchMapping(value = "/{id}", consumes = { "application/json", "application/merge-patch+json" })
     public ResponseEntity<Profile> partialUpdateProfile(
         @PathVariable(value = "id", required = false) final String id,
         @RequestBody Profile profile
-    ) throws URISyntaxException {
+    ) {
         log.debug("REST request to partial update Profile partially : {}, {}", id, profile);
         if (profile.getId() == null) {
             throw new BadRequestAlertException("Invalid id", ENTITY_NAME, "idnull");

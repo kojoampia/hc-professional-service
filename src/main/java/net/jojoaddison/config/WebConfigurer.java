@@ -58,23 +58,32 @@ public class WebConfigurer implements ServletContextInitializer {
      * {@code /api/duty-roster/all}. Not one of them was wrong in its own code — they are all wrong in
      * the same way, which is why the fix belongs here and not in five call sites.
      *
-     * <p><b>⚠ THIS IS INERT UNTIL THE GATEWAY IS CONFIGURED, AND THAT IS NOT DONE.</b> The half of
-     * the contract that sends the header does not currently run. Spring Cloud Gateway <b>5.0.2</b> —
-     * what {@code gateway/} resolves through {@code spring-cloud 2025.1.2}, verified from the jar
-     * inside the running image — gates {@code XForwardedHeadersFilter} on
-     * {@code TrustedProxies$XForwardedTrustedProxiesCondition}, which requires
-     * {@code spring.cloud.gateway.trusted-proxies} to be set and non-blank. It is set **nowhere** in
-     * this estate. Worse, the same version registers {@code RemoveXForwardedHeadersFilter} on the
-     * inverse condition, which strips every {@code x-forwarded-*} header from the relayed request. So
-     * the gateway does not merely omit {@code X-Forwarded-Prefix} — it deletes it, and
-     * {@code ForwardedHeaderFilter.shouldNotFilter} then short-circuits on every real request.
+     * <p><b>This bean is necessary and not sufficient, and the first attempt shipped only this
+     * half.</b> Spring Cloud Gateway <b>5.0.2</b> — what {@code gateway/} resolves through
+     * {@code spring-cloud 2025.1.2}, verified from the jar inside the running image — gates
+     * {@code XForwardedHeadersFilter} on {@code TrustedProxies$XForwardedTrustedProxiesCondition},
+     * which requires {@code spring.cloud.gateway.server.webflux.trusted-proxies} to be set and
+     * non-blank. Worse, the same version registers {@code RemoveXForwardedHeadersFilter} on the
+     * inverse condition, which strips every {@code x-forwarded-*} header from the relayed request.
+     * So an unconfigured gateway does not merely omit {@code X-Forwarded-Prefix} — it deletes it,
+     * and {@code ForwardedHeaderFilter.shouldNotFilter} then short-circuits on every real request.
+     * The property is set nowhere by default and the short form
+     * {@code spring.cloud.gateway.trusted-proxies} binds silently without taking effect, which is a
+     * second way to arrive at the same inert result.
      *
-     * <p>This bean is therefore <b>necessary but not sufficient</b> for backlog item 31, and on its
-     * own changes nothing a client can observe. Do not read a green
-     * {@code PaginationLinkHeaderIT} as evidence the deployed {@code Link} is fixed: that test sets
-     * the three forwarded headers by hand, so it exercises this filter rather than the deployment.
-     * Closing item 31 needs {@code trusted-proxies} on the gateway <i>and</i> the nginx scrub in
-     * §"Trust boundary" below, in the same change — see {@code docs/backlog.md} item 31.
+     * <p><b>Both halves are now in place</b> (2026-09-05): {@code trusted-proxies},
+     * {@code x-forwarded.port-enabled=false} and {@code prefix-append=false} are set on the gateway
+     * in {@code deploy/prod-server/compose.yml}, {@code deploy/docker-compose.yml} and
+     * {@code quality/compose.yml}, and all three nginx files scrub the inbound header (below). This
+     * paragraph said the gateway side was "NOT DONE" until that landed; do not restore that reading
+     * without checking those five files.
+     *
+     * <p>What remains true is the warning about evidence. Do not read a green
+     * {@code PaginationLinkHeaderIT} — or {@code LocationHeaderIT} — as proof the deployed headers
+     * are right: both set the forwarded headers by hand, so they exercise this filter rather than
+     * the deployment. Neither header has yet been observed on a running system; that is
+     * {@code docs/backlog.md} item 42, and it is the only check that distinguishes this fix from the
+     * no-op that preceded it.
      *
      * <p><b>Why the framework filter and not a hardcoded prefix.</b> The prefix is not this service's
      * to know: it is whatever the component in front stripped, and that component says so in
@@ -94,22 +103,33 @@ public class WebConfigurer implements ServletContextInitializer {
      * variables in compose, and a property can be switched off from there by accident — silently, with
      * the only symptom being a header nobody reads until they do. A bean cannot.
      *
-     * <p><b>Trust boundary — the reason the two halves must land together.</b> This filter believes
-     * whatever is in front of it, so the header must not be settable by the caller. Today the
-     * gateway's {@code RemoveXForwardedHeadersFilter} strips it, which is the only reason a
-     * client-supplied value cannot reach here — a protection that disappears the instant
-     * {@code trusted-proxies} is set to make this bean do its job. At that point the edge must scrub
-     * it, and <b>three</b> files need it, not one:
+     * <p><b>Trust boundary — the reason the two halves had to land together.</b> This filter
+     * believes whatever is in front of it, so the header must not be settable by the caller. While
+     * the gateway was unconfigured its {@code RemoveXForwardedHeadersFilter} stripped the header,
+     * and that was the only reason a client-supplied value could not reach here — a protection that
+     * disappears the instant {@code trusted-proxies} is set to make this bean do its job. So the
+     * edge scrub and the gateway setting are one change, and <b>three</b> nginx files needed it,
+     * not one: {@code deploy/docker/proxy-headers.inc}, {@code deploy/prod-server/hc-professional-app.conf}
+     * (the internet-facing hop) and {@code quality/host-site.conf}, whose {@code location /} block
+     * had the scrub from the start and whose {@code location /websocket/} sibling did not. All three
+     * now blank {@code X-Forwarded-Prefix} and {@code X-Forwarded-Port}; nginx passes unrecognised
+     * client headers straight through, so a missing line is a silently open door rather than an
+     * error.
      *
-     * <ul>
-     *   <li>{@code quality/host-site.conf:126} — already does, in {@code location /} only; its
-     *       {@code location /websocket/} block does not.</li>
-     *   <li>{@code deploy/docker/proxy-headers.inc} — does not. It sets {@code Host},
-     *       {@code X-Real-IP}, {@code X-Forwarded-For}, {@code -Host} and {@code -Proto}, and names
-     *       this filter in a comment, but never blanks the prefix.</li>
-     *   <li>{@code deploy/prod-server/hc-professional-app.conf} — the internet-facing hop, and does
-     *       not either. nginx passes unrecognised client headers straight through.</li>
-     * </ul>
+     * <p><b>A second reader of these headers arrived with item 41.</b>
+     * {@link net.jojoaddison.web.rest.util.LocationUri} builds the {@code Location} of every
+     * {@code 201} from the same forwarded values, and {@code ExceptionTranslator.extractURI}
+     * reflects the prefixed path into problem-detail bodies. No new <i>header</i> is exposed — a
+     * forged prefix could already steer the {@code Link} — but the scrub now underwrites three
+     * things rather than one.
+     *
+     * <p><b>{@code X-Forwarded-Host} is a separate question and is not scrubbed.</b> Both nginx hops
+     * set it from {@code $http_host}, so the host in every absolute URL this service emits is the
+     * {@code Host} the client sent — bounded by which {@code Host} values the vhost accepts, which
+     * is decided by a {@code server_name} in {@code /etc/nginx}, a file this workspace does not own
+     * and cannot read from here. That is pre-existing from item 31 rather than new, and it is worth
+     * stating rather than leaving inside a sentence about the prefix: if a wildcard vhost ever
+     * answers, the {@code Location} of a create becomes attacker-choosable in its authority half.
      *
      * <p>The blast radius is wider than the prefix, which is worth stating because it is easy to scope
      * this to {@code Link}: the same filter makes {@code getRemoteAddr()} return the first entry of
