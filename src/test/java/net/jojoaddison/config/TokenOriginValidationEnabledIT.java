@@ -1,11 +1,13 @@
 package net.jojoaddison.config;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.nimbusds.jose.util.Base64;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -13,6 +15,7 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.Profile;
+import net.jojoaddison.management.SecurityMetersService;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.security.SecurityUtils;
 import org.junit.jupiter.api.AfterEach;
@@ -69,6 +72,9 @@ class TokenOriginValidationEnabledIT {
     @Autowired
     private ProfileRepository profileRepository;
 
+    @Autowired
+    private MeterRegistry meterRegistry;
+
     @Value("${jhipster.security.authentication.jwt.base64-secret}")
     private String jwtKey;
 
@@ -112,6 +118,34 @@ class TokenOriginValidationEnabledIT {
     }
 
     @Test
+    void anOriginRejectionIsCountedAsUntrustedOriginRatherThanLoggedAsUnknown() throws Exception {
+        // The cutover has to be watchable. Until this meter existed a rejection matched none of SecurityJwtConfiguration's
+        // message branches and landed in the else, so every live pre-claims session produced one ERROR labelled
+        // "Unknown JWT error" and no metric at all — and "old tokens draining as expected" was indistinguishable from
+        // "the issuer string is wrong and nobody can sign in".
+        double before = untrustedOriginCount();
+
+        restMockMvc
+            .perform(
+                get("/api/onboarding/profile").header(
+                    "Authorization",
+                    "Bearer " + token("hc-patient-gateway", "hc-patient", COLLIDING_LOGIN, 3600)
+                )
+            )
+            .andExpect(status().isUnauthorized());
+
+        assertThat(untrustedOriginCount()).isEqualTo(before + 1);
+    }
+
+    private double untrustedOriginCount() {
+        return meterRegistry
+            .get(SecurityMetersService.INVALID_TOKENS_METER_NAME)
+            .tag(SecurityMetersService.INVALID_TOKENS_METER_CAUSE_DIMENSION, "untrusted-origin")
+            .counter()
+            .count();
+    }
+
+    @Test
     void aTokenWithoutTheClaimsIsRejected() throws Exception {
         // Every token this stack minted before 2026-09-06. Exactly why the flag defaults to off.
         restMockMvc
@@ -125,7 +159,12 @@ class TokenOriginValidationEnabledIT {
         // check without delegating to JwtValidators.createDefault() would stop expiry being enforced at all.
         restMockMvc
             .perform(
-                get("/api/onboarding/profile").header("Authorization", "Bearer " + token(OUR_ISSUER, OUR_AUDIENCE, COLLIDING_LOGIN, -60))
+                get("/api/onboarding/profile").header(
+                    "Authorization",
+                    // An hour past, not a minute: JwtTimestampValidator allows 60 seconds of clock skew by default,
+                    // so a token expiring 60 seconds ago sits exactly on the boundary this test depends on.
+                    "Bearer " + token(OUR_ISSUER, OUR_AUDIENCE, COLLIDING_LOGIN, -3600)
+                )
             )
             .andExpect(status().isUnauthorized());
     }
@@ -134,10 +173,18 @@ class TokenOriginValidationEnabledIT {
         byte[] keyBytes = Base64.from(jwtKey).decode();
         SecretKey key = new SecretKeySpec(keyBytes, 0, keyBytes.length, MacAlgorithm.HS512.getName());
         Instant now = Instant.now();
+        Instant expiresAt = now.plus(secondsUntilExpiry, ChronoUnit.SECONDS);
+        // A token that has already expired has to be dated from before it expired — NimbusJwtEncoder refuses a
+        // claim set whose iat is after its exp — and far enough back that JwtTimestampValidator's 60-second default
+        // clock skew cannot make the expired case look live.
+        Instant issuedAt = expiresAt.minus(300, ChronoUnit.SECONDS);
+        if (issuedAt.isAfter(now.minus(120, ChronoUnit.SECONDS))) {
+            issuedAt = now.minus(120, ChronoUnit.SECONDS);
+        }
 
         JwtClaimsSet.Builder claims = JwtClaimsSet.builder()
-            .issuedAt(now.minus(120, ChronoUnit.SECONDS))
-            .expiresAt(now.plus(secondsUntilExpiry, ChronoUnit.SECONDS))
+            .issuedAt(issuedAt)
+            .expiresAt(expiresAt)
             .subject(subject)
             // ROLE_USER and nothing else: what an applicant holds here, and what hc-patient hands every patient
             // alongside ROLE_PATIENT. Rejecting ROLE_PATIENT is deliberately NOT the fix — which authorities the

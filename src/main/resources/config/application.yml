@@ -310,7 +310,15 @@ application:
       # only once the claims have been live longer than the longest token lifetime (30 days, the
       # JHipster remember-me window), and turn it on here and on the gateway together.
       validate-origin: false
-      # Add a sibling's issuer here to accept its tokens deliberately, rather than by accident.
-      trusted-issuers:
-        - hc-professional-gateway
-      audience: hc-professional
+      # trusted-issuers and audience are DELIBERATELY NOT SET HERE, exactly as in the gateway's
+      # application.yml. This repo cannot derive them from a constant — it has no TokenProvider, so
+      # ApplicationProperties holds the literals "hc-professional-gateway" / "hc-professional" and
+      # they are the other end of the gateway's TokenProvider.ISSUER / AUDIENCE. One literal per
+      # repo is unavoidable; two is not. Restating them here would add a second copy that nothing
+      # binds — the test classpath REPLACES config/application.yml, so no test ever reads this file
+      # — and the drift would only surface as this service rejecting every token the gateway mints,
+      # on the day validate-origin was turned on.
+      #
+      # To trust a sibling's issuer, set application.security.jwt.trusted-issuers per environment,
+      # listing hc-professional-gateway in it as well: binding a list REPLACES the default rather
+      # than adding to it.

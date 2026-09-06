@@ -237,6 +237,11 @@ public class ApplicationProperties {
              * <p>The literal rather than a constant shared with the gateway: this repo does not
              * depend on that one, and the estate's convention is {@code hc-<product>-gateway}.
              * {@code TokenProvider.ISSUER} there is the other end of the same string.
+             *
+             * <p>It is the <strong>only</strong> copy of that string in this repo, and
+             * {@code config/application.yml} deliberately does not restate it: nothing binds that
+             * file in tests, so a second copy there could drift from this one unnoticed until the
+             * day {@code validate-origin} was turned on.
              */
             private List<String> trustedIssuers = List.of("hc-professional-gateway");
 
