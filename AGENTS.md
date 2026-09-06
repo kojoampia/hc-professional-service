@@ -79,16 +79,17 @@ npm run docker:db:up       # MongoDB only
 ./mvnw checkstyle:check    # style gate (checkstyle.xml, includes nohttp)
 npm run lint / lint:fix    # ESLint (tooling/config files)
 npm run prettier:check / prettier:format
-./build-image.sh [version] # WP8: Jib production image hc-professional-service; PUSH=1 to push to the registry
 ```
+
+**There is no image build in this repo.** `build-image.sh` was deleted on 2026-09-06 (`../docs/backlog.md` item 34); it drove Jib against `docker-registry.jojoaddison.net`, a registry hostname that is not in use, and no image had been built from it since the deployment bundle was restructured in August. The production image is built from `../deploy/docker/api.Dockerfile` with this repo as the build context — by `../deploy/build.sh` on the `local` channel, and by this repo's own `.github/workflows/release.yml` on the `github` channel, which checks out `hc-professional-ci` for the Dockerfile.
 
 ### Build toolchain gotchas
 
-The pom targets **release 25** and builds on **JDK 25**. The enforcer's `requireJavaVersion` is `[25,27)` as of 2026-08-08; it used to be `[26,)`, which demanded a JDK newer than the bytecode this build emits and made a plain `./mvnw verify` fail on a JDK 25 host with `release version 25 not supported`. 26 stays in range on purpose — `../deploy/docker/api.Dockerfile` builds on `maven:3.9-eclipse-temurin-26` — so don't narrow it without changing that Dockerfile too. `build-image.sh` still pins `JAVA_HOME=/usr/lib/jvm/jdk-26-oracle-x64` when present; it is superseded by `../deploy/docker/` and the pin is harmless while 26 remains in range.
+The pom targets **release 25** and builds on **JDK 25**. The enforcer's `requireJavaVersion` is `[25,27)` as of 2026-08-08; it used to be `[26,)`, which demanded a JDK newer than the bytecode this build emits and made a plain `./mvnw verify` fail on a JDK 25 host with `release version 25 not supported`. 26 stays in range on purpose — `../deploy/docker/api.Dockerfile` builds on `maven:3.9-eclipse-temurin-26` — so don't narrow it without changing that Dockerfile too.
 
 **Build with `JAVA_HOME=/usr/lib/jvm/jdk-25.0.2-oracle-x64`, and verify with `clean verify`.** The workstation's ambient `JAVA_HOME` is `/usr/lib/jvm/java-25-openjdk-amd64`, a **JRE with no `javac`**. This repo happens to survive it — its compiler plugin forks to the `javac` on `PATH`, which is the real 25.0.2 — while `gateway`'s uses the in-process compiler and fails with `release version 25 not supported`, a message that points at the enforcer range rather than at the missing compiler. An incremental build hides the problem entirely, because a populated `target/classes` needs no compiler at all. Two related pins exist because Jib 3.4.1's bundled ASM cannot read Java 25 class files (major 69): `jib-maven-plugin.version` is **3.4.6**, and the jib `<container>` block sets an explicit `<mainClass>` so Jib never falls back to its class scan. Both carry explanatory comments — don't "clean up" either.
 
-Deployment of the whole three-repo stack lives in `../deploy/` at the workspace root (`docker-compose.professional.yml`, runbook in its `README.md`), not here. It invokes this repo's `build-image.sh` as `(cd ../api && ./build-image.sh <version>)`.
+Deployment of the whole three-repo stack lives in `../deploy/` at the workspace root (runbook in its `README.md`), not here — it is its own git repository, `hc-professional-ci`, and it supplies the Dockerfile rather than calling anything in this repo.
 
 ## Testing
 
