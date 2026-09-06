@@ -1,7 +1,5 @@
 package net.jojoaddison.web.rest;
 
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -9,6 +7,7 @@ import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.Task;
 import net.jojoaddison.repository.TaskRepository;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
+import net.jojoaddison.web.rest.util.LocationUri;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -45,10 +44,9 @@ public class TaskResource {
      *
      * @param task the task to create.
      * @return the {@link ResponseEntity} with status {@code 201 (Created)} and with body the new task, or with status {@code 400 (Bad Request)} if the task has already an ID.
-     * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PostMapping("")
-    public ResponseEntity<Task> createTask(@RequestBody Task task) throws URISyntaxException {
+    public ResponseEntity<Task> createTask(@RequestBody Task task) {
         log.debug("REST request to save Task : {}", task);
         if (task.getId() != null) {
             throw new BadRequestAlertException("A new task cannot already have an ID", ENTITY_NAME, "idexists");
@@ -60,7 +58,7 @@ public class TaskResource {
             null,
             net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
         );
-        return ResponseEntity.created(new URI("/api/tasks/" + task.getId()))
+        return ResponseEntity.created(LocationUri.of(task.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, task.getId()))
             .body(task);
     }
@@ -73,11 +71,9 @@ public class TaskResource {
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the updated task,
      * or with status {@code 400 (Bad Request)} if the task is not valid,
      * or with status {@code 500 (Internal Server Error)} if the task couldn't be updated.
-     * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PutMapping("/{id}")
-    public ResponseEntity<Task> updateTask(@PathVariable(value = "id", required = false) final String id, @RequestBody Task task)
-        throws URISyntaxException {
+    public ResponseEntity<Task> updateTask(@PathVariable(value = "id", required = false) final String id, @RequestBody Task task) {
         log.debug("REST request to update Task : {}, {}", id, task);
         if (task.getId() == null) {
             throw new BadRequestAlertException("Invalid id", ENTITY_NAME, "idnull");
@@ -103,11 +99,9 @@ public class TaskResource {
      * or with status {@code 400 (Bad Request)} if the task is not valid,
      * or with status {@code 404 (Not Found)} if the task is not found,
      * or with status {@code 500 (Internal Server Error)} if the task couldn't be updated.
-     * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PatchMapping(value = "/{id}", consumes = { "application/json", "application/merge-patch+json" })
-    public ResponseEntity<Task> partialUpdateTask(@PathVariable(value = "id", required = false) final String id, @RequestBody Task task)
-        throws URISyntaxException {
+    public ResponseEntity<Task> partialUpdateTask(@PathVariable(value = "id", required = false) final String id, @RequestBody Task task) {
         log.debug("REST request to partial update Task partially : {}, {}", id, task);
         if (task.getId() == null) {
             throw new BadRequestAlertException("Invalid id", ENTITY_NAME, "idnull");

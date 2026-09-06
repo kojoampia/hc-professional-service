@@ -148,6 +148,12 @@ public class ExceptionTranslator extends ResponseEntityExceptionHandler {
         return specialStatus == null ? HttpStatus.valueOf(statusCode).getReasonPhrase() : specialStatus.reason();
     }
 
+    // Since item 31 registered ForwardedHeaderFilter (config/WebConfigurer), getRequestURI() returns the
+    // path the *caller* used — gateway prefix included — rather than the one the gateway relayed. That is
+    // the value we want: the problem-detail "path" then names a URL the client can recognise, the same way
+    // item 41 made Location follow the request. It is therefore reflected caller-influenced input, and its
+    // safety rests on the edge scrubbing a client-supplied X-Forwarded-Prefix — done in
+    // deploy/docker/proxy-headers.inc, deploy/prod-server/hc-professional-app.conf and quality/host-site.conf.
     private String extractURI(NativeWebRequest request) {
         HttpServletRequest nativeRequest = request.getNativeRequest(HttpServletRequest.class);
         return nativeRequest != null ? nativeRequest.getRequestURI() : StringUtils.EMPTY;

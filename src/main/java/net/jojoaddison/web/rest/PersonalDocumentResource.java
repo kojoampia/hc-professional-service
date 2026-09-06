@@ -1,7 +1,5 @@
 package net.jojoaddison.web.rest;
 
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -10,6 +8,7 @@ import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.service.PersonalDocumentService;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
+import net.jojoaddison.web.rest.util.LocationUri;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -53,11 +52,9 @@ public class PersonalDocumentResource {
      *
      * @param personalDocument the personalDocument to create.
      * @return the {@link ResponseEntity} with status {@code 201 (Created)} and with body the new personalDocument, or with status {@code 400 (Bad Request)} if the personalDocument has already an ID.
-     * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PostMapping("")
-    public ResponseEntity<PersonalDocument> createPersonalDocument(@RequestBody PersonalDocument personalDocument)
-        throws URISyntaxException {
+    public ResponseEntity<PersonalDocument> createPersonalDocument(@RequestBody PersonalDocument personalDocument) {
         log.debug("REST request to save PersonalDocument : {}", personalDocument);
         if (personalDocument.getId() != null) {
             throw new BadRequestAlertException("A new personalDocument cannot already have an ID", ENTITY_NAME, "idexists");
@@ -69,7 +66,7 @@ public class PersonalDocumentResource {
             null,
             net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
         );
-        return ResponseEntity.created(new URI("/api/personal-documents/" + personalDocument.getId()))
+        return ResponseEntity.created(LocationUri.of(personalDocument.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, personalDocument.getId()))
             .body(personalDocument);
     }
@@ -82,13 +79,12 @@ public class PersonalDocumentResource {
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the updated personalDocument,
      * or with status {@code 400 (Bad Request)} if the personalDocument is not valid,
      * or with status {@code 500 (Internal Server Error)} if the personalDocument couldn't be updated.
-     * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PutMapping("/{id}")
     public ResponseEntity<PersonalDocument> updatePersonalDocument(
         @PathVariable(value = "id", required = false) final String id,
         @RequestBody PersonalDocument personalDocument
-    ) throws URISyntaxException {
+    ) {
         log.debug("REST request to update PersonalDocument : {}, {}", id, personalDocument);
         if (personalDocument.getId() == null) {
             throw new BadRequestAlertException("Invalid id", ENTITY_NAME, "idnull");
@@ -116,13 +112,12 @@ public class PersonalDocumentResource {
      * or with status {@code 400 (Bad Request)} if the personalDocument is not valid,
      * or with status {@code 404 (Not Found)} if the personalDocument is not found,
      * or with status {@code 500 (Internal Server Error)} if the personalDocument couldn't be updated.
-     * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PatchMapping(value = "/{id}", consumes = { "application/json", "application/merge-patch+json" })
     public ResponseEntity<PersonalDocument> partialUpdatePersonalDocument(
         @PathVariable(value = "id", required = false) final String id,
         @RequestBody PersonalDocument personalDocument
-    ) throws URISyntaxException {
+    ) {
         log.debug("REST request to partial update PersonalDocument partially : {}, {}", id, personalDocument);
         if (personalDocument.getId() == null) {
             throw new BadRequestAlertException("Invalid id", ENTITY_NAME, "idnull");
