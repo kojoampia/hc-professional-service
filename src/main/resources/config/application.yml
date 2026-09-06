@@ -297,3 +297,28 @@ application:
         # with the sandbox and its token returns BadDeviceToken against production — which looks
         # exactly like an expired token. Match this to the build you are testing.
         production: true
+  security:
+    jwt:
+      # Reject tokens minted by hc-admin or hc-patient, which share this signing key and are
+      # therefore accepted here by signature alone (backlog.md item 27). It matters most in this
+      # service: every own-scoped read resolves the caller by matching Profile.accountId against the
+      # sub claim — a login — so a colliding login on a sibling stack reads as that professional.
+      #
+      # OFF BY DEFAULT, AND THAT DEFAULT IS LOAD-BEARING. Turning it on rejects every token that
+      # carries no iss/aud — which is every token the gateway issued before it started stamping them,
+      # so flipping this on the day of the release signs out every live session at once. Turn it on
+      # only once the claims have been live longer than the longest token lifetime (30 days, the
+      # JHipster remember-me window), and turn it on here and on the gateway together.
+      validate-origin: false
+      # trusted-issuers and audience are DELIBERATELY NOT SET HERE, exactly as in the gateway's
+      # application.yml. This repo cannot derive them from a constant — it has no TokenProvider, so
+      # ApplicationProperties holds the literals "hc-professional-gateway" / "hc-professional" and
+      # they are the other end of the gateway's TokenProvider.ISSUER / AUDIENCE. One literal per
+      # repo is unavoidable; two is not. Restating them here would add a second copy that nothing
+      # binds — the test classpath REPLACES config/application.yml, so no test ever reads this file
+      # — and the drift would only surface as this service rejecting every token the gateway mints,
+      # on the day validate-origin was turned on.
+      #
+      # To trust a sibling's issuer, set application.security.jwt.trusted-issuers per environment,
+      # listing hc-professional-gateway in it as well: binding a list REPLACES the default rather
+      # than adding to it.

@@ -4,6 +4,7 @@ import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
+import net.jojoaddison.config.ApplicationProperties;
 import net.jojoaddison.config.SecurityConfiguration;
 import net.jojoaddison.config.SecurityJwtConfiguration;
 import net.jojoaddison.config.WebConfigurer;
@@ -20,6 +21,9 @@ import tech.jhipster.config.JHipsterProperties;
         WebConfigurer.class,
         SecurityConfiguration.class,
         SecurityJwtConfiguration.class,
+        // SecurityJwtConfiguration reads its origin-validation settings from ApplicationProperties, and this
+        // context lists its classes explicitly — so the binding has to be listed too or the context will not start.
+        ApplicationProperties.class,
         SecurityMetersService.class,
         JwtAuthenticationTestUtils.class,
     }

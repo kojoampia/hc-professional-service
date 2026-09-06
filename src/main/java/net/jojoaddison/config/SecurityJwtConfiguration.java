@@ -13,8 +13,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
@@ -28,14 +30,54 @@ public class SecurityJwtConfiguration {
     @Value("${jhipster.security.authentication.jwt.base64-secret}")
     private String jwtKey;
 
+    /**
+     * Origin-validation settings. Injected as typed properties rather than read with {@code @Value} because the
+     * {@code application.*} prefix is bound strictly — an unknown key there fails context startup rather than being
+     * ignored, so the binding has to be declared.
+     */
+    private final ApplicationProperties.Security.Jwt jwtProperties;
+
+    public SecurityJwtConfiguration(ApplicationProperties applicationProperties) {
+        this.jwtProperties = applicationProperties.getSecurity().getJwt();
+    }
+
     @Bean
     public JwtDecoder jwtDecoder(SecurityMetersService metersService) {
         NimbusJwtDecoder jwtDecoder = NimbusJwtDecoder.withSecretKey(getSecretKey()).macAlgorithm(JWT_ALGORITHM).build();
+        if (jwtProperties.isValidateOrigin()) {
+            // Layered on top of the default validators (expiry, not-before) rather than replacing them — passing a
+            // bare validator to setJwtValidator would silently drop the expiry check, which is a far worse hole than
+            // the one being closed. Held by
+            // TokenOriginValidationEnabledIT.expiryIsStillCheckedWithTheValidatorAttached, not by this comment.
+            jwtDecoder.setJwtValidator(
+                new DelegatingOAuth2TokenValidator<>(
+                    JwtValidators.createDefault(),
+                    new TokenOriginValidator(jwtProperties.getTrustedIssuers(), jwtProperties.getAudience())
+                )
+            );
+            log.info(
+                "JWT origin validation is ON: issuers {} audience '{}'",
+                jwtProperties.getTrustedIssuers(),
+                jwtProperties.getAudience()
+            );
+        } else {
+            log.info(
+                "JWT origin validation is OFF. A token minted by any product sharing this signing key is accepted, " +
+                "so an own-scoped read resolves on the sub claim alone. " +
+                "Enable with application.security.jwt.validate-origin=true once every issuer emits iss/aud."
+            );
+        }
         return token -> {
             try {
                 return jwtDecoder.decode(token);
             } catch (Exception e) {
-                if (e.getMessage().contains("Invalid signature")) {
+                if (isUntrustedOrigin(e.getMessage())) {
+                    // Not "Unknown": a token that verified, had not expired, and was minted for another product.
+                    // It is the expected shape of a request during a validate-origin cutover and the only thing that
+                    // makes that cutover observable, so it gets its own counter and a message that says which.
+                    metersService.trackTokenUntrustedOrigin();
+                    log.warn("Rejected a token minted for another Health Connect product: {}", e.getMessage());
+                } else if (e.getMessage().contains("Invalid signature")) {
                     metersService.trackTokenInvalidSignature();
                 } else if (e.getMessage().contains("Jwt expired at")) {
                     metersService.trackTokenExpired();
@@ -67,6 +109,22 @@ public class SecurityJwtConfiguration {
         JwtAuthenticationConverter jwtAuthenticationConverter = new JwtAuthenticationConverter();
         jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverter);
         return jwtAuthenticationConverter;
+    }
+
+    /**
+     * Whether a decode failure came from {@link TokenOriginValidator} rather than from signature, expiry or a
+     * malformed token.
+     *
+     * <p>Matching on the message is what every other branch here does — Spring surfaces a validator failure as a
+     * {@code JwtValidationException} whose message is the wrapped {@code OAuth2Error} description and nothing else,
+     * so there is no type to switch on. The two descriptions are constants on the validator so this is not a copy.</p>
+     */
+    private boolean isUntrustedOrigin(String message) {
+        return (
+            message != null &&
+            (message.contains(TokenOriginValidator.UNTRUSTED_ISSUER_DESCRIPTION) ||
+                message.contains(TokenOriginValidator.UNTRUSTED_AUDIENCE_DESCRIPTION))
+        );
     }
 
     private SecretKey getSecretKey() {
