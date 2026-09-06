@@ -1,5 +1,6 @@
 package net.jojoaddison.config;
 
+import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -13,6 +14,7 @@ public class ApplicationProperties {
 
     private final Kafka kafka = new Kafka();
     private final Notifications notifications = new Notifications();
+    private final Security security = new Security();
 
     // jhipster-needle-application-properties-property
 
@@ -22,6 +24,10 @@ public class ApplicationProperties {
 
     public Notifications getNotifications() {
         return notifications;
+    }
+
+    public Security getSecurity() {
+        return security;
     }
 
     // jhipster-needle-application-properties-property-getter
@@ -192,6 +198,73 @@ public class ApplicationProperties {
                 public boolean isConfigured() {
                     return !keyPath.isBlank() && !keyId.isBlank() && !teamId.isBlank() && !bundleId.isBlank();
                 }
+            }
+        }
+    }
+
+    /**
+     * Security settings this application owns, as distinct from the ones JHipsterProperties owns.
+     *
+     * <p>They live here rather than under {@code jhipster.security.*} because JHipsterProperties
+     * binds with {@code ignoreUnknownFields = false}: an extra key under its prefix is not ignored,
+     * it fails context startup with an unbound-property error. This class has the same strictness,
+     * which is why the nested types below exist rather than the properties being read with a bare
+     * {@code @Value}.
+     */
+    public static class Security {
+
+        private final Jwt jwt = new Jwt();
+
+        public Jwt getJwt() {
+            return jwt;
+        }
+
+        public static class Jwt {
+
+            /**
+             * Whether to reject tokens minted for a different Health Connect product.
+             *
+             * <p>Off by default, and that default is load-bearing — see {@link TokenOriginValidator}.
+             * Turning it on rejects every token that lacks {@code iss}/{@code aud}, which is every
+             * token in flight at the moment it is switched on, and every token a sibling product
+             * issues until it emits its own.
+             */
+            private boolean validateOrigin = false;
+
+            /**
+             * Issuers whose tokens this service accepts, once {@link #validateOrigin} is on.
+             *
+             * <p>The literal rather than a constant shared with the gateway: this repo does not
+             * depend on that one, and the estate's convention is {@code hc-<product>-gateway}.
+             * {@code TokenProvider.ISSUER} there is the other end of the same string.
+             */
+            private List<String> trustedIssuers = List.of("hc-professional-gateway");
+
+            /** The audience a token must name to be accepted here — {@code TokenProvider.AUDIENCE}. */
+            private String audience = "hc-professional";
+
+            public boolean isValidateOrigin() {
+                return validateOrigin;
+            }
+
+            public void setValidateOrigin(boolean validateOrigin) {
+                this.validateOrigin = validateOrigin;
+            }
+
+            public List<String> getTrustedIssuers() {
+                return trustedIssuers;
+            }
+
+            public void setTrustedIssuers(List<String> trustedIssuers) {
+                this.trustedIssuers = trustedIssuers;
+            }
+
+            public String getAudience() {
+                return audience;
+            }
+
+            public void setAudience(String audience) {
+                this.audience = audience;
             }
         }
     }
