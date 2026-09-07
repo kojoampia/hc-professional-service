@@ -217,13 +217,93 @@ class PatientDirectoryServiceUnitTest {
     }
 
     @Test
-    void patientserviceBeingUnreachableEmptiesTheDirectoryRatherThanFailing() {
-        // The client answers empty on failure by design, so this is what a sibling outage looks
-        // like from here: a bare directory, not a 500 on a page the clinician could partly use.
+    void aPatientStackWithNoProfilesEmptiesTheDirectoryRatherThanFailing() {
+        // A collection that is genuinely empty, which is a legitimate answer and stays one: the
+        // clinician has a task against a patient the sibling holds no profile for.
         when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task("patient-mine")));
         when(patientService.profiles()).thenReturn(List.of());
 
         assertThat(service.directory()).isEmpty();
+    }
+
+    // --- An outage is not a caseload decision (backlog.md item 24) ----------------------------
+
+    private static PatientServiceUnavailableException outage() {
+        return new PatientServiceUnavailableException("/api/clinical-cases", "connection refused");
+    }
+
+    /**
+     * The defect item 24 is named for: a clinician standing next to their own patient was told the
+     * patient was not in their caseload, because the caseload could not be read.
+     *
+     * <p>{@code record} returns {@code Optional.empty()} for "no such patient, or not yours", and
+     * {@code PatientResource} turns that into a 404. A read that never happened must not reach that
+     * answer — the union it is computed from is half patientservice's, and half of an entitlement set
+     * is an entitlement set that says no to real patients.
+     */
+    @Test
+    void anOutageIsNOTanEmptyRecord() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task("patient-mine")));
+        when(patientService.clinicalCases()).thenThrow(outage());
+
+        assertThatThrownBy(() -> service.record("patient-mine")).isInstanceOf(PatientServiceUnavailableException.class);
+    }
+
+    /** The same, one layer down: the profile read fails after the entitlement check has passed. */
+    @Test
+    void anOutageReadingTheProfilesIsNOTanEmptyRecordEither() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task("patient-mine")));
+        when(patientService.profiles()).thenThrow(new PatientServiceUnavailableException("/api/profiles", "connection refused"));
+
+        assertThatThrownBy(() -> service.record("patient-mine")).isInstanceOf(PatientServiceUnavailableException.class);
+    }
+
+    /**
+     * A genuinely unknown patient is still {@code Optional.empty()} — the 404 half of the pair.
+     *
+     * <p>Asserted beside the outage cases on purpose: a fix that raised on both would be no better
+     * than the empty list that answered both, and would hand any clinician a probe for real patient
+     * ids into the bargain.
+     */
+    @Test
+    void aPatientTrulyOutsideTheCaseloadIsStillAnEmptyRecord() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task("patient-mine")));
+        when(patientService.clinicalCases()).thenReturn(List.of());
+
+        assertThat(service.record("patient-someone-else")).isEmpty();
+    }
+
+    @Test
+    void anOutageIsNOTaPatientNotInCaseloadOnTheCaseDetail() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task(MINE)));
+        when(patientService.clinicalCases()).thenThrow(outage());
+
+        assertThatThrownBy(() -> service.caseDetail(MINE, "c1"))
+            .isInstanceOf(PatientServiceUnavailableException.class)
+            .isNotInstanceOf(PatientDirectoryService.PatientNotInCaseloadException.class);
+    }
+
+    @Test
+    void anOutageIsNOTaPatientNotInCaseloadOnAnEdit() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task(MINE)));
+        when(patientService.clinicalCases()).thenThrow(outage());
+
+        assertThatThrownBy(() -> service.updateCase(MINE, "c1", new PatientDirectoryService.CaseUpdate("x", null, null, null)))
+            .isInstanceOf(PatientServiceUnavailableException.class)
+            .isNotInstanceOf(PatientDirectoryService.PatientNotInCaseloadException.class);
+        verify(patientService, org.mockito.Mockito.never()).patchClinicalCase(any(), any());
+    }
+
+    @Test
+    void anOutageIsNOTanEmptyCaseQueueOrAZeroSummary() {
+        // The two aggregate screens. An empty queue reads as "you have no cases today" and a zero
+        // summary as "you have no patients" — both plausible, both wrong, and neither recoverable by
+        // the clinician looking at it.
+        when(patientService.clinicalCases()).thenThrow(outage());
+        when(patientService.profiles()).thenThrow(new PatientServiceUnavailableException("/api/profiles", "connection refused"));
+
+        assertThatThrownBy(() -> service.myCases(PageRequest.of(0, 20), null)).isInstanceOf(PatientServiceUnavailableException.class);
+        assertThatThrownBy(() -> service.summary()).isInstanceOf(PatientServiceUnavailableException.class);
     }
 
     @Test

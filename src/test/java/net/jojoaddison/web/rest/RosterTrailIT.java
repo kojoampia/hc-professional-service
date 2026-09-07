@@ -21,6 +21,7 @@ import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.service.DutyRosterService;
 import net.jojoaddison.service.PatientServiceClient;
+import net.jojoaddison.service.PatientServiceUnavailableException;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ActivityLog;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -250,13 +251,50 @@ class RosterTrailIT {
 
     @Test
     @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
-    void answersAnEmptyTrailWhenThePatientStackIsUnreachable() throws Exception {
-        // PatientServiceClient degrades to empty by contract. The authorization half is local, so it
-        // still works — the clinician is told nothing happened rather than being locked out, and the
-        // visit's own time and address, which is what they need at the door, come from this service.
+    void answersAnEmptyTrailWhenTheCustomerGENUINELYhasNoActivity() throws Exception {
+        // A read that worked and found nothing. This is the rendered empty state — "nothing happened
+        // this week" — and it must stay a 200, or the outage case below proves nothing.
         when(patientServiceClient.activityLogs()).thenReturn(List.of());
 
         restMockMvc.perform(get(trail(MINE))).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+    }
+
+    /**
+     * An unreachable patient stack is a <b>503</b>, not a quiet week (backlog.md item 24).
+     *
+     * <p>It answered 200 with an empty array until then, because {@code PatientServiceClient} returned
+     * an empty list for every failure and this endpoint could not tell that from the case above. The
+     * two look identical on screen and mean opposite things: every row of a trail comes from the
+     * sibling, so an outage rendered as an empty trail is this service asserting that nothing has
+     * happened to a patient lately — which it is in no position to know.
+     *
+     * <p>Cheap to raise here, which is why this caller decides differently from
+     * {@code DutyRosterService}: the trail is its own endpoint behind a popup, so a 503 costs the
+     * panel and not the round. The visit, its times and its address come from this service and still
+     * render.
+     */
+    @Test
+    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    void answersA503WhenTheTrailCouldNotBeREADratherThanAQuietWeek() throws Exception {
+        when(patientServiceClient.activityLogs()).thenThrow(
+            new PatientServiceUnavailableException("/api/activity-logs", "connection refused")
+        );
+
+        restMockMvc.perform(get(trail(MINE))).andExpect(status().isServiceUnavailable());
+    }
+
+    /**
+     * And the local authorization half still runs first: a customer who is not on the caller's roster
+     * is refused before anything is read across the wire, outage or no outage.
+     */
+    @Test
+    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    void anOutageDoesNotTurnAREFUSALintoA503() throws Exception {
+        when(patientServiceClient.activityLogs()).thenThrow(
+            new PatientServiceUnavailableException("/api/activity-logs", "connection refused")
+        );
+
+        restMockMvc.perform(get(trail(THEIRS))).andExpect(status().isForbidden());
     }
 
     @Test

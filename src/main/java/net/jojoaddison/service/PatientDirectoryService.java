@@ -58,6 +58,20 @@ import org.springframework.stereotype.Service;
  *
  * <p>Ages, and therefore {@code isChild}, are computed from the birth date on each read rather than
  * stored. A stored flag is wrong the day after it is written.
+ *
+ * <p><strong>An outage in patientservice is a 503 here, never a caseload decision</strong> (backlog
+ * item 24). Every entitlement answer this service gives is computed from a collection it reads across
+ * the wire, so while {@link PatientServiceClient} degraded an unreadable collection to an empty list,
+ * a clinician standing next to a patient during a sibling outage was told <em>this patient is not in
+ * your caseload</em> — and an administrator reading the same screen concluded the assignment was
+ * missing rather than that a service was down. The client now raises
+ * {@link PatientServiceUnavailableException} for a read that did not happen and answers empty only for
+ * a collection that is genuinely empty, and <b>this service lets that exception through</b>: nothing
+ * below catches it, so {@code ExceptionTranslator} turns it into a 503. That is the difference between
+ * "call the office about your caseload" and "wait five minutes", and it is why the checks in
+ * {@link #record(String)} and {@link #requireEntitlement(String)} may never be reached on a failed
+ * read. {@code DutyRosterService} answers the same signal differently and is equally right — it has
+ * stored snapshots to serve; this service has nothing to serve but the answer it could not get.
  */
 @Service
 public class PatientDirectoryService {
@@ -95,7 +109,15 @@ public class PatientDirectoryService {
         return SecurityUtils.getCurrentUserLogin().flatMap(profileRepository::findByAccountId).map(net.jojoaddison.domain.Profile::getId);
     }
 
-    /** Patient ids the clinician has worked with, from tasks here and cases in patientservice. */
+    /**
+     * Patient ids the clinician has worked with, from tasks here and cases in patientservice.
+     *
+     * <p>Half of this set comes from the sibling, so it cannot be computed at all while the sibling is
+     * unreadable. It raises rather than returning the task half alone — a partial entitlement set is
+     * an entitlement set that says no to real patients, which is item 24's defect in a smaller shape.
+     *
+     * @throws PatientServiceUnavailableException when the case collection could not be read
+     */
     public Set<String> patientIdsFor(String professionalId) {
         Stream<String> fromTasks = taskRepository.findByAttendantId(professionalId).stream().map(Task::getPatientId);
         Stream<String> fromCases = patientService
@@ -242,10 +264,18 @@ public class PatientDirectoryService {
      * <p>Empty covers both "no such patient" and "not yours" on purpose: distinguishing them tells a
      * caller whether a patient id exists, which is not something an unrelated clinician should be
      * able to probe.
+     *
+     * <p><b>It does not cover "patientservice is down", and that is backlog item 24.</b> Both
+     * {@code patientIdsFor} and {@code profilesByPatientId} below read across the wire; a read that
+     * failed raises out of this method rather than becoming an empty {@link Optional}, so the caller
+     * sees a 503 instead of being told the patient in front of them is not theirs.
+     *
+     * @throws PatientServiceUnavailableException when the sibling could not be read
      */
     public Optional<PatientRecord> record(String patientId) {
         String professionalId = callerProfileId().orElse(null);
         if (professionalId == null || !patientIdsFor(professionalId).contains(patientId)) {
+            // Reached only when the caseload was actually read. An unreadable one raised above.
             return Optional.empty();
         }
         PatientProfile profile = profilesByPatientId(Set.of(patientId)).get(patientId);
@@ -478,6 +508,8 @@ public class PatientDirectoryService {
     public CaseSummary updateCase(String patientId, String caseId, CaseUpdate changes) {
         requireEntitlement(patientId);
 
+        // "No such case" only when the case collection was read and did not contain it. An unreadable
+        // one raises out of clinicalCases() before this stream begins — item 24.
         net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase existing = patientService
             .clinicalCases()
             .stream()
@@ -516,6 +548,8 @@ public class PatientDirectoryService {
      */
     public CaseDetail caseDetail(String patientId, String caseId) {
         requireEntitlement(patientId);
+        // As in updateCase: a failed read raises rather than reaching the orElseThrow below, so a 503
+        // is never dressed up as "no such case for this clinician" (item 24).
         return patientService
             .clinicalCases()
             .stream()
@@ -562,7 +596,15 @@ public class PatientDirectoryService {
         return new PageImpl<>(all.subList(from, to), pageable, all.size());
     }
 
-    /** The caller's login, having established they may write to this patient. */
+    /**
+     * The caller's login, having established they may write to this patient.
+     *
+     * <p><b>Refusal and unavailability are two different answers</b> (backlog item 24).
+     * {@code patientIdsFor} raises {@link PatientServiceUnavailableException} when the caseload could
+     * not be read, and that propagates as a 503; {@link PatientNotInCaseloadException} below is
+     * therefore only ever a statement about a caseload this service actually saw. Catching the first
+     * and folding it into the second is exactly the defect item 24 exists to close.
+     */
     private String requireEntitlement(String patientId) {
         String professionalId = callerProfileId().orElse(null);
         if (professionalId == null || patientId == null || !patientIdsFor(professionalId).contains(patientId)) {
@@ -651,7 +693,13 @@ public class PatientDirectoryService {
         }
     }
 
-    /** Thrown when a caller writes to a patient outside their caseload. Mapped to 404 by the resource. */
+    /**
+     * Thrown when a caller writes to a patient outside their caseload. Mapped to 404 by the resource.
+     *
+     * <p>It means the caseload was read and this patient was not in it. It does <b>not</b> mean the
+     * caseload could not be read — that is {@link PatientServiceUnavailableException} and a 503. The
+     * two were the same answer until backlog item 24.
+     */
     public static class PatientNotInCaseloadException extends RuntimeException {
 
         public PatientNotInCaseloadException(String patientId) {

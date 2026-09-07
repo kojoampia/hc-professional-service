@@ -38,11 +38,12 @@ import org.springframework.web.client.RestClient;
  * this service to have applied it. A service-wide credential here would quietly turn any
  * professionalservice endpoint into a way around the sibling's access rules.
  *
- * <p><strong>Failure degrades, it does not propagate.</strong> Every method answers with an empty
- * result when patientservice is unreachable, slow or unhappy, and logs it. The dashboard then renders
- * empty panels — the same thing it does when an endpoint has not been built — rather than returning
- * 500 for a page the clinician could have partially used. The timeouts are short and explicit for the
- * same reason: this runs inside a request, so a hung sibling must not hold a worker thread open
+ * <p><strong>A failed read is reported as a failed read; what it <em>means</em> is the caller's.</strong>
+ * The single-record and write methods below answer empty or propagate as their own javadoc says. The
+ * collection reads raise {@link PatientServiceUnavailableException}, because "the collection is empty"
+ * and "the collection could not be read" are different facts and the four consumers of these lists
+ * mean genuinely different things by an empty one — see {@code getAll}. The timeouts remain short and
+ * explicit: this runs inside a request, so a hung sibling must not hold a worker thread open
  * indefinitely.
  *
  * <p><strong>The read-many methods read the whole collection, over as many requests as that takes.</strong>
@@ -56,14 +57,16 @@ import org.springframework.web.client.RestClient;
  * that, which is 500 seconds at the defaults — and {@code PatientDirectoryService.record()} makes six
  * collection reads in one MVC request. {@code read-budget-seconds} is the wall-clock deadline for a
  * whole collection and is what keeps the promise made two paragraphs up. Exhausting it is a failure,
- * so it answers empty like any other.
+ * so it raises like any other.
  *
- * <p><strong>Empty is now a much more frequent answer than it was, and callers should read it that
- * way.</strong> A single request either worked or did not; a paged read of ~1260 clinical cases is
- * seven requests at {@code PAGE_SIZE}, any one of which failing empties the whole collection. The
- * arithmetic runs the wrong way — more rows in the estate means more requests means more chances to
- * fail — which is one more reason the volume half (backlog item 23) matters, and why a caller that
- * treats empty as "no such patient" rather than "no answer" is a defect rather than a nuance.
+ * <p><strong>Failure is a much more frequent answer than it was, which is why it is now a
+ * distinguishable one.</strong> A single request either worked or did not; a paged read of ~1260
+ * clinical cases is seven requests at {@code PAGE_SIZE}, any one of which failing fails the whole
+ * collection. The arithmetic runs the wrong way — more rows in the estate means more requests means
+ * more chances to fail — which is one more reason the volume half (backlog item 23) matters, and why
+ * a caller that read empty as "no such patient" rather than "no answer" was a defect rather than a
+ * nuance. Since backlog item 24 that caller cannot make the mistake by accident: an unread collection
+ * arrives as a {@link PatientServiceUnavailableException} and an empty one as an empty list.
  *
  * <p><strong>Known limit, and it is deliberate for now.</strong> Those endpoints offer no
  * clinician-scoped filter — no {@code assignedProfessionalId}, no set of patient ids — so a caseload
@@ -101,7 +104,8 @@ public class PatientServiceClient {
      * immediately, so a sibling that ignores {@code page} costs one extra request rather than this
      * many.
      *
-     * <p><b>Reaching it fails the read rather than serving what was collected.</b> The first version
+     * <p><b>Reaching it fails the read rather than serving what was collected</b> — and since backlog
+     * item 24 "fails" means {@link PatientServiceUnavailableException} rather than an empty list. The first version
      * of this guard returned the rows it had, which is the one thing {@link #getAll}'s own contract
      * forbids — and it did it on the single path where the client <em>knows</em> the answer is
      * incomplete. It was also biased: {@code sort=id,asc} over Mongo ObjectIds is approximately
@@ -165,7 +169,12 @@ public class PatientServiceClient {
         );
     }
 
-    /** Every patient profile. The join key is {@link PatientProfile#patientId()}, not the profile id. */
+    /**
+     * Every patient profile. The join key is {@link PatientProfile#patientId()}, not the profile id.
+     *
+     * @throws PatientServiceUnavailableException if the collection could not be read. An empty list
+     *     means the sibling holds no profiles, which is a different fact — see {@link #getAll}.
+     */
     public List<PatientProfile> profiles() {
         return getAll("/api/profiles", PROFILE_LIST);
     }
@@ -185,6 +194,12 @@ public class PatientServiceClient {
      * asking".</b> {@code CustomerDayPlanService} turns it into a 403, which fails closed: an
      * unreachable patient stack refuses a day plan rather than serving somebody else's. That is the
      * one direction this may fail in.
+     *
+     * <p><b>Deliberately not changed by backlog item 24</b>, which gave the collection reads a
+     * failure signal because four callers read their empty lists four different ways. This one has a
+     * single caller and empty already fails closed there, so there is no ambiguity to resolve — and a
+     * 503 would be a worse answer than the 403, which discloses nothing about whether the address
+     * exists.
      */
     public Optional<PatientProfile> profileByEmail(String email) {
         if (!enabled || email == null || email.isBlank()) {
@@ -214,19 +229,26 @@ public class PatientServiceClient {
         }
     }
 
-    /** Every clinical case. Filter by {@code assignedProfessionalId} for a clinician's own caseload. */
+    /**
+     * Every clinical case. Filter by {@code assignedProfessionalId} for a clinician's own caseload.
+     *
+     * @throws PatientServiceUnavailableException if the collection could not be read
+     */
     public List<ClinicalCase> clinicalCases() {
         return getAll("/api/clinical-cases", CASE_LIST);
     }
 
+    /** @throws PatientServiceUnavailableException if the collection could not be read */
     public List<ActivityLog> activityLogs() {
         return getAll("/api/activity-logs", ACTIVITY_LIST);
     }
 
+    /** @throws PatientServiceUnavailableException if the collection could not be read */
     public List<Medication> medications() {
         return getAll("/api/medications", MEDICATION_LIST);
     }
 
+    /** @throws PatientServiceUnavailableException if the collection could not be read */
     public List<Report> reports() {
         return getAll("/api/reports", REPORT_LIST);
     }
@@ -297,7 +319,7 @@ public class PatientServiceClient {
     }
 
     /**
-     * A whole collection, as the calling clinician, answering empty on any failure.
+     * A whole collection, as the calling clinician, raising on any failure.
      *
      * <h3>Why this pages, and why it does not simply ask for everything</h3>
      * Every collection endpoint in patientservice takes a {@code Pageable}, so one asked without a
@@ -353,15 +375,26 @@ public class PatientServiceClient {
      * taken once at the top and checked before each further page. It bounds the loop rather than the
      * request in flight, so the true ceiling is the budget plus one page timeout.
      *
-     * <p><b>A failure mid-collection answers empty, not truncated</b> — and every stop that is not an
-     * ordinary end of collection is a failure, including the deadline and the page guard. Empty is a
-     * signal this codebase already reads: {@code DutyRosterService.refreshSnapshots} treats an empty
-     * profile list as an outage and keeps the stored snapshots rather than blanking them. Half a
-     * collection carries no such signal — it is the exact shape of the defect above, and every caller
-     * would filter it and render the remainder as a quiet week. <b>Not every caller reads it that way
-     * yet</b>: {@code PatientDirectoryService} reads empty as entitlement and tells a clinician the
-     * patient in front of them is not in their caseload. That is not new and not this method's to fix;
-     * it is backlog item 24.
+     * <p><b>A failure mid-collection raises, it does not truncate</b> — and every stop that is not an
+     * ordinary end of collection is a failure, including the deadline and the page guard. Half a
+     * collection carries no signal at all: it is the exact shape of the defect above, and every caller
+     * would filter it and render the remainder as a quiet week. <b>Nor is empty the answer any more.</b>
+     * It was, and it was right for the two callers that read it as an outage — {@code DutyRosterService}
+     * keeps its stored customer snapshots rather than blanking every name and address on a roster — but
+     * the same empty list told {@code PatientDirectoryService} that the patient a clinician was standing
+     * next to <em>was not in their caseload</em>. One value cannot carry both meanings, so this method
+     * stops choosing between them: {@link PatientServiceUnavailableException} for a read that did not
+     * happen, an empty list only for a collection that is genuinely empty, and the decision about what
+     * that means belongs to each caller. Backlog item 24.
+     *
+     * <p><b>Two non-failures that still answer empty, and they are not the same as each other.</b>
+     * {@code enabled=false} is a deployment in which patientservice is deliberately absent — the same
+     * statement {@code application.kafka.enabled=false} makes about the broker — so its collections are
+     * empty rather than unreadable, and a 503 there would be a lie about a supported configuration. A
+     * missing caller token is the opposite: it means this read <em>did not happen</em>, so it raises
+     * like any other failure. Answering empty for it was the same conflation as answering empty for an
+     * outage, and it is reachable in exactly the situation where a wrong answer is most plausible —
+     * a caller whose credential this service could not relay.
      */
     private <T extends PatientServiceRow> List<T> getAll(String path, ParameterizedTypeReference<List<T>> type) {
         if (!enabled) {
@@ -371,8 +404,8 @@ public class PatientServiceClient {
         if (token == null) {
             // No credential to relay. Reading with none would either 401 or, worse, succeed against
             // an endpoint that is open — returning data the caller was never authorised for.
-            LOG.warn("No caller token available; skipping patientservice read of {}", path);
-            return List.of();
+            LOG.warn("No caller token available; cannot read {} from patientservice", path);
+            throw new PatientServiceUnavailableException(path, "no caller token to relay");
         }
         Map<Object, T> rows = new LinkedHashMap<>();
         Instant deadline = Instant.now().plus(readBudget);
@@ -381,11 +414,11 @@ public class PatientServiceClient {
             for (int page = 0; page < MAX_PAGES; page++) {
                 if (page > 0 && !Instant.now().isBefore(deadline)) {
                     // Thrown rather than returned, so it takes the same path as any other failure and
-                    // answers empty. A slow sibling that hands back half a caseload is the shape of
-                    // the defect this whole method exists to fix.
-                    throw new IllegalStateException(
-                        "patientservice read of %s exhausted its %ds budget after %d page(s) and %d row(s)".formatted(
-                                path,
+                    // reaches the caller as an outage. A slow sibling that hands back half a caseload
+                    // is the shape of the defect this whole method exists to fix.
+                    throw new PatientServiceUnavailableException(
+                        path,
+                        "the %ds read budget was exhausted after %d page(s) and %d row(s)".formatted(
                                 readBudget.toSeconds(),
                                 page,
                                 rows.size()
@@ -430,18 +463,30 @@ public class PatientServiceClient {
             }
             LOG.error(
                 "patientservice read of {} hit the {}-page guard at {} row(s); the collection is larger than this client will read, " +
-                "so the read is failed and answered empty rather than serving the oldest {} rows as if they were the collection",
+                "so the read is failed rather than serving the oldest {} rows as if they were the collection",
                 path,
                 MAX_PAGES,
                 rows.size(),
                 rows.size()
             );
-            throw new IllegalStateException(
-                "patientservice read of %s exceeded the %d-page guard at %d row(s)".formatted(path, MAX_PAGES, rows.size())
+            throw new PatientServiceUnavailableException(
+                path,
+                "the %d-page guard was exceeded at %d row(s)".formatted(MAX_PAGES, rows.size())
             );
+        } catch (PatientServiceUnavailableException e) {
+            // Raised by this method itself — the read budget or the page guard — with a message this
+            // service wrote. Rethrown unchanged so that reason survives rather than being flattened
+            // into the generic one below.
+            throw e;
         } catch (Exception e) {
-            LOG.warn("patientservice read of {} failed after {} row(s) ({}); returning empty", path, rows.size(), e.getMessage());
-            return List.of();
+            // The throwable itself, not just its message: this is the only place the transport
+            // failure exists, and the exception raised in its place deliberately carries no cause
+            // (see PatientServiceUnavailableException — the cause's message quotes the sibling's
+            // internal base URL and would land in the problem detail).
+            LOG.warn("patientservice read of {} failed after {} row(s); the caller decides what that means", path, rows.size(), e);
+            // The class name rather than the message, for the same reason there is no cause: a
+            // RestClient message quotes the URL it called, base URL included.
+            throw new PatientServiceUnavailableException(path, e.getClass().getSimpleName());
         }
     }
 

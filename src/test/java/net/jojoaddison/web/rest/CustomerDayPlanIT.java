@@ -223,10 +223,12 @@ class CustomerDayPlanIT {
      * An unreachable patient stack means the caller cannot be resolved, and an unresolved caller is
      * refused rather than served.
      *
-     * <p>{@code PatientServiceClient} degrades to empty by contract, and every other consumer in this
-     * service reads that as "no data". Here it has to read as "no identity": serving a day plan to
-     * somebody who might not be the patient because a sibling was down is not a degradation anybody
-     * would accept. The refusal is the same one, so an outage discloses nothing either.
+     * <p>{@code profileByEmail} is a single-record read and still degrades to an empty
+     * {@code Optional} by contract — backlog item 24 changed the <em>collection</em> reads, not this
+     * one, because there is nothing here for a caller to read as entitlement. Empty has to mean "no
+     * identity": serving a day plan to somebody who might not be the patient because a sibling was
+     * down is not a degradation anybody would accept. The refusal is the same one, so an outage
+     * discloses nothing either.
      */
     @Test
     void anUnreachablePatientStackRefusesRatherThanServes() throws Exception {
