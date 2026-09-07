@@ -44,7 +44,7 @@ class ProfileStatusEventTest {
     }
 
     @Test
-    void publishesTheSevenContractedFieldsAndNoOthers() {
+    void publishesTheSevenContractedFieldsPlusTheAccountUidAndNoOthers() {
         publish();
 
         ProfessionalEvent event = capture();
@@ -56,6 +56,9 @@ class ProfileStatusEventTest {
         assertThat(event.data()).containsOnlyKeys(
             "profileId",
             "accountId",
+            // The eighth field, added by item 48. It is the gateway's own identifier for the same
+            // account, not a fact about the clinician, so it does not widen what this discloses.
+            "accountUid",
             "isComplete",
             "isVerified",
             "createdDate",
@@ -65,11 +68,48 @@ class ProfileStatusEventTest {
         assertThat(event.data())
             .containsEntry("profileId", "profile-7")
             .containsEntry("accountId", "ama.serwaa")
+            .containsEntry("accountUid", "user-42")
             .containsEntry("isComplete", true)
             .containsEntry("isVerified", false)
             .containsEntry("createdDate", CREATED)
             .containsEntry("modifiedDate", MODIFIED)
             .containsEntry("lastModifiedBy", "ama.serwaa");
+    }
+
+    /**
+     * The two identifier spaces are published side by side and are not the same string (item 48).
+     *
+     * <p>This is the assertion that stops the fork being closed the wrong way. {@code accountId} is
+     * the login every row in this database holds and every audit field repeats; {@code accountUid}
+     * is the gateway's {@code User.id}, which is what the account half keys and partitions by. If a
+     * later change ever makes one of them the other, the join it was trying to fix breaks in the
+     * opposite direction and every stored identifier is orphaned with it.
+     */
+    @Test
+    void namesBothIdentifierSpacesRatherThanChoosingBetweenThem() {
+        publish();
+
+        ProfessionalEvent event = capture();
+        assertThat(event.data().get("accountId")).isNotEqualTo(event.data().get("accountUid"));
+        assertThat(event.data().get("accountId")).isEqualTo(event.subject().login());
+    }
+
+    /**
+     * A clinician whose {@code User.id} is not known yet publishes a null {@code accountUid} — and
+     * everything else unchanged.
+     *
+     * <p>This is the ordinary case for a long while rather than an edge one: it is every profile
+     * written before 2026-09-07, and every one whose owner has not signed in since, for up to the
+     * thirty-day remember-me window. <b>Null, never a guess and never the login substituted for it</b>
+     * — a consumer must be able to tell "not known" from "known to be this".
+     */
+    @Test
+    void publishesANullAccountUidWhenTheProfileHasNotLearntOneYet() {
+        publisher.publishProfileStatus("ama.serwaa", null, "profile-7", true, false, CREATED, MODIFIED, "ama.serwaa");
+
+        ProfessionalEvent event = capture();
+        assertThat(event.data()).containsEntry("accountUid", null).containsEntry("accountId", "ama.serwaa");
+        assertThat(event.subject().login()).isEqualTo("ama.serwaa");
     }
 
     /**
@@ -90,17 +130,22 @@ class ProfileStatusEventTest {
     }
 
     /**
-     * The envelope names the same subject the payload does, so the two cannot drift — this is the
-     * identifier hc-admin joins the account half on. {@code email} and {@code login} are null: the
-     * first by the payload rule, the second because it is the same string here and one value under
-     * two names is something a consumer eventually disagrees with itself about.
+     * The envelope names the same subject the payload does, so the two cannot drift — and
+     * <b>{@code subject.login} is populated</b>, which is the join that actually works.
+     *
+     * <p>It used to be null, on the reasoning that it is the same string as {@code accountId} and one
+     * value under two names is something a consumer eventually disagrees with itself about. Item 48
+     * inverted that: the login is the ONE field this half and the account half have always agreed
+     * on, so leaving it blank hid the working join behind a field named for the broken one.
+     * {@code AccountCreated} carries the same value under the same name. {@code email} stays null by
+     * the payload rule.
      */
     @Test
-    void theSubjectCarriesTheSameAccountIdAsThePayload() {
+    void theSubjectCarriesTheLoginTheAccountHalfAlsoNames() {
         publish();
 
         ProfessionalEvent event = capture();
-        assertThat(event.subject()).isEqualTo(new ProfessionalEvent.Subject(null, null, "ama.serwaa"));
+        assertThat(event.subject()).isEqualTo(new ProfessionalEvent.Subject(null, "ama.serwaa", "ama.serwaa"));
         assertThat(event.subject().accountId()).isEqualTo(event.data().get("accountId"));
     }
 
@@ -128,7 +173,7 @@ class ProfileStatusEventTest {
      */
     @Test
     void toleratesAProfileWithNoAuditDatesYet() {
-        publisher.publishProfileStatus("ama.serwaa", "profile-7", false, false, null, null, null);
+        publisher.publishProfileStatus("ama.serwaa", "user-42", "profile-7", false, false, null, null, null);
 
         assertThat(capture().data())
             .containsEntry("createdDate", null)
@@ -147,6 +192,7 @@ class ProfileStatusEventTest {
 
         new DomainEventPublisher(streamBridge, properties).publishProfileStatus(
             "ama.serwaa",
+            "user-42",
             "profile-7",
             true,
             false,
@@ -170,7 +216,7 @@ class ProfileStatusEventTest {
     }
 
     private void publish() {
-        publisher.publishProfileStatus("ama.serwaa", "profile-7", true, false, CREATED, MODIFIED, "ama.serwaa");
+        publisher.publishProfileStatus("ama.serwaa", "user-42", "profile-7", true, false, CREATED, MODIFIED, "ama.serwaa");
     }
 
     private ProfessionalEvent capture() {

@@ -31,19 +31,52 @@ public class Profile implements Serializable {
      * outside this repository.</b> It is set from {@code OnboardingResource.currentAccountId()},
      * which returns {@code SecurityUtils.getCurrentUserLogin()} — the JWT subject, which the gateway
      * fills with {@code authentication.getName()}. The gateway meanwhile keys
-     * {@code registration.created} and its account events on {@code User.id}, a Mongo ObjectId. So
-     * the two producers on {@code hc.professional.registration} have never named one clinician the
-     * same way, and a consumer joining the account half to the profile half on {@code accountId}
+     * {@code registration.created} and its account events on {@code User.id}. So the two producers
+     * on {@code hc.professional.registration} have never named one clinician the same way under
+     * that name, and a consumer joining the account half to the profile half on {@code accountId}
      * matches nothing.
      *
-     * <p>{@code OnboardingService}'s class javadoc has flagged the substitution since WP1 — "switch
-     * to {@code User.id} once the gateway adds a uid claim". What was not written down is that it
-     * forks the correlation key on a shared topic. See backlog.md item 47 § 2b; the fix is a uid
-     * claim on the token, which is a change to authentication and not to this field.
+     * <p><b>Two things changed on 2026-09-07 (backlog.md item 48) and neither is this field.</b> The
+     * gateway's token now carries a {@code uid} claim, and {@link #accountUid} beside this holds it
+     * for publication; and {@code ProfileStatus} now fills {@code subject.login}, which is the field
+     * the two halves have always agreed on and is therefore the join that works. <b>This field
+     * remains the login and remains the only identity this service resolves a caller by</b> — see
+     * {@link #accountUid} for why rewriting it was rejected rather than deferred.
      */
     @Indexed(unique = true, sparse = true)
     @Field("account_id")
     private String accountId;
+
+    /**
+     * The gateway's {@code User.id} for the same account, when the clinician has signed in since the
+     * token started carrying it — <b>the identifier the estate's account half is keyed by</b>.
+     *
+     * <p>Added on 2026-09-07 (backlog.md item 48) beside {@link #accountId} rather than instead of
+     * it. The alternative was to migrate: rewrite every stored login in this database to a
+     * {@code User.id}. That was rejected and the reasons are worth keeping, because they do not
+     * expire. The mapping lives in the gateway's {@code hcProfessionalGateway} database, which this
+     * service cannot read. It is not total — {@code "system"}, an account since deleted, and a login
+     * arriving on a token minted by hc-admin or hc-patient (the three share a signing key and
+     * {@code TokenOriginValidator} is off) all have no {@code User.id} here — so the migrated field
+     * would hold a <em>mixture</em> of the two identifier spaces, which is strictly worse than one
+     * that consistently holds logins. And it is not two collections: {@code professional_application},
+     * {@code device_token}, {@code message}, {@code message_recipient}, {@code patient_write_receipt},
+     * {@code onboarding_event} and every {@code created_by} / {@code last_modified_by} in the
+     * database hold the same string and would all have to move with it.
+     *
+     * <p>So this is <b>additive, nullable and never a lookup key</b>. Nothing resolves a caller by
+     * it; {@link #accountId} remains the one identity this service reads and writes by. It exists to
+     * be <em>published</em>, on {@code ProfileStatus}, so a directory holding the account half has
+     * the id it already knows the clinician by.
+     *
+     * <p>Null means "not known yet", never "no account". It is filled only by
+     * {@code OnboardingService.upsertOwnProfile}, from the caller's own {@code uid} claim on their
+     * own profile, and <b>is never cleared once set</b> — a clinician whose 30-day token predates
+     * the claim would otherwise wipe it on their next save and take the join down again.
+     */
+    @Indexed(sparse = true)
+    @Field("account_uid")
+    private String accountUid;
 
     /**
      * Push notification preferences (MOB9).
@@ -198,6 +231,19 @@ public class Profile implements Serializable {
 
     public void setAccountId(String accountId) {
         this.accountId = accountId;
+    }
+
+    public String getAccountUid() {
+        return this.accountUid;
+    }
+
+    public Profile accountUid(String accountUid) {
+        this.setAccountUid(accountUid);
+        return this;
+    }
+
+    public void setAccountUid(String accountUid) {
+        this.accountUid = accountUid;
     }
 
     public String getFirstName() {

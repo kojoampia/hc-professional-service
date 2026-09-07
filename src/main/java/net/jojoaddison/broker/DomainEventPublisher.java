@@ -184,11 +184,15 @@ public class DomainEventPublisher {
      * clinician's story is one topic, so a consumer following an account subscribes once. It is also
      * the only topic from this stack hc-admin is bound to.
      *
-     * <h2>The payload is fixed, and it is seven fields</h2>
+     * <h2>The payload is the architect's seven fields, plus one identifier</h2>
      *
      * <p>{@code profileId}, {@code accountId}, {@code isComplete}, {@code isVerified},
      * {@code createdDate}, {@code modifiedDate}, {@code lastModifiedBy} — identifiers, two booleans
-     * and three timestamps. <b>No role, no licence number, no name, no email.</b> That satisfies the
+     * and three timestamps — and, since 2026-09-07, {@code accountUid}. The eighth is the second
+     * half of the identifier fork described below and nothing else: <b>an identifier this service
+     * was given, not a fact about the clinician</b>, so it changes nothing about what the payload
+     * discloses. A consumer written against the seven ignores it. <b>No role, no licence number, no
+     * name, no email.</b> That satisfies the
      * identifiers-only rule {@link DomainEventEnvelope} states outright, so no departure from it has
      * to be argued for. {@code lastModifiedBy} is an <b>account identifier and never a display
      * name</b>: {@code SpringSecurityAuditorAware} fills it from the JWT subject, the same space as
@@ -197,28 +201,46 @@ public class DomainEventPublisher {
      * <p>The name a directory displays comes from the account half and is joined on
      * {@code accountId}. Nothing here duplicates it.
      *
-     * <h2>The join does not match today, and this method cannot fix it</h2>
+     * <h2>Two identifiers, because the two producers mean different things by {@code accountId}</h2>
      *
      * <p><b>The two producers on this topic do not mean the same thing by {@code accountId}, and
-     * have not since WP3.</b> The gateway keys and publishes {@code User.id}, a Mongo ObjectId. This
-     * service has no user store and the JWT carries no uid claim, so what
-     * {@code OnboardingResource.currentAccountId()} returns — and what this class has always called
-     * {@code accountId} — is the <b>login</b>. {@code onboarding.state} has been landing under a
-     * different key from the gateway's frames about the same clinician all along.
+     * have not since WP3.</b> The gateway keys and publishes {@code User.id}. This service resolves
+     * its caller from the JWT subject, so what {@code OnboardingResource.currentAccountId()} returns
+     * — and what this class has always called {@code accountId} — is the <b>login</b>.
+     * {@code onboarding.state} has been landing under a different key from the gateway's frames
+     * about the same clinician all along.
      *
-     * <p>What is published here is therefore the value this service actually holds, named honestly,
-     * rather than a null that would hide the problem or a guess that would look right. <b>A consumer
-     * joining the halves on {@code accountId} will match nothing until the token carries a uid
-     * claim</b> — a change to authentication rather than to this method — and can join on the
-     * gateway's {@code subject.login} in the meantime, which both halves do agree on. Recorded in
-     * backlog.md item 47 § 2b.
+     * <p><b>Item 48 did not resolve that by moving either side onto the other's identifier.</b> The
+     * stored value here is still the login, because every identifier in this database is one and
+     * they cannot all be rewritten — {@code Profile.accountUid} states the reasoning in full. What
+     * changed is that the frame now names <b>both</b> identifiers, so a consumer can join on either:
+     *
+     * <ul>
+     *   <li>{@code subject.login} and {@code data.accountId} — the login. <b>Always populated, and
+     *       the join that works today</b>, since {@code AccountCreated} carries the same value under
+     *       {@code subject.login}. This is the correlation key until the {@code uid} claim has been
+     *       live longer than a remember-me token.</li>
+     *   <li>{@code data.accountUid} — the gateway's {@code User.id}, which is what the account half
+     *       keys and partitions by. <b>Null until that clinician has saved their own profile with a
+     *       token carrying the claim</b>, which is every profile written before 2026-09-07 and any
+     *       whose owner has not signed in since. Absent means "not known"; it never means "no
+     *       account", and it is never guessed.</li>
+     * </ul>
+     *
+     * <p>Nothing is nulled and nothing is synthesised: both identifiers are published exactly as
+     * this service holds them, and the one that is unknown says so. Recorded in backlog.md items 47
+     * § 2b and 48.
      *
      * <p>One consequence is not softened: the halves are <b>not co-partitioned</b>, so nothing
      * orders this against the account events. It is a snapshot rather than a delta for exactly that
      * reason — applying it in any order, or twice, yields the same state.
      *
-     * @param accountId this service's account identifier for the clinician. See the warning above
-     *                  and on {@code Profile.accountId}.
+     * @param accountId this service's account identifier for the clinician — the login. Always
+     *                  present, and the field the two halves agree on. See {@code Profile.accountId}.
+     * @param accountUid the gateway's {@code User.id} for the same clinician, or null when it is not
+     *                   known. <b>Must come off the profile row, never off the calling token</b>:
+     *                   three of the four paths in here are an administrator acting on somebody
+     *                   else's profile. See {@code Profile.accountUid}.
      * @param isComplete the profile's completeness, by {@code OnboardingService}'s single definition
      *                   — the same one the transition to {@code ACTIVE} is gated on, not a second
      *                   derivation of it.
@@ -228,6 +250,7 @@ public class DomainEventPublisher {
      */
     public void publishProfileStatus(
         String accountId,
+        String accountUid,
         String profileId,
         boolean isComplete,
         boolean isVerified,
@@ -238,6 +261,7 @@ public class DomainEventPublisher {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("profileId", profileId);
         data.put("accountId", accountId);
+        data.put("accountUid", accountUid);
         data.put("isComplete", isComplete);
         data.put("isVerified", isVerified);
         data.put("createdDate", createdDate);
@@ -250,10 +274,15 @@ public class DomainEventPublisher {
             Instant.now(),
             SOURCE,
             // Email null from this service — the payload rule. The subject repeats the accountId the
-            // data carries, so the envelope names its own subject like every other frame on the
-            // topic; login is left off because it is the same string here and a second copy of one
-            // value under two names is what a consumer would eventually disagree with itself about.
-            new ProfessionalEvent.Subject(null, null, accountId),
+            // data carries, so the envelope names its own subject like every other frame on the topic.
+            //
+            // `login` used to be left off here, on the reasoning that it is the same string as
+            // accountId and a second copy of one value under two names is something a consumer
+            // eventually disagrees with itself about. That inverted on 2026-09-07 (item 48): it is
+            // the ONE field the account half and this half have always agreed on, so leaving it
+            // blank hid the only working join behind a field named for the broken one. The two
+            // copies are deliberate, and their being equal here is the fact being published.
+            new ProfessionalEvent.Subject(null, accountId, accountId),
             data
         );
         publishShared(ONBOARDING_STATE_BINDING, ProfessionalEventType.PROFILE_STATUS, accountId, event, "profile " + profileId);

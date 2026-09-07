@@ -77,7 +77,7 @@ class ProfileStatusPublicationUnitTest {
 
         service.upsertOwnProfile("ama.serwaa", new Profile().firstName("Ama"));
 
-        verify(events).publishProfileStatus("ama.serwaa", "profile-7", false, false, CREATED, MODIFIED, "ama.serwaa");
+        verify(events).publishProfileStatus("ama.serwaa", "user-42", "profile-7", false, false, CREATED, MODIFIED, "ama.serwaa");
         // and NOT entity.created, which is a creation event and this was not one
         verify(events, org.mockito.Mockito.never()).publishEntityCreated(anyString(), anyString(), anyString(), anyString());
     }
@@ -100,7 +100,16 @@ class ProfileStatusPublicationUnitTest {
         service.verifyDocument("doc-1", "admin");
 
         // isVerified true: the one live document on the profile is now VERIFIED
-        verify(events).publishProfileStatus(eq("ama.serwaa"), eq("profile-7"), eq(false), eq(true), any(), any(), anyString());
+        verify(events).publishProfileStatus(
+            eq("ama.serwaa"),
+            eq("user-42"),
+            eq("profile-7"),
+            eq(false),
+            eq(true),
+            any(),
+            any(),
+            anyString()
+        );
     }
 
     /** The mirror of the above: a rejection takes {@code isVerified} back to false and must say so. */
@@ -117,7 +126,16 @@ class ProfileStatusPublicationUnitTest {
 
         service.rejectDocument("doc-1", "illegible", "admin");
 
-        verify(events).publishProfileStatus(eq("ama.serwaa"), eq("profile-7"), eq(false), eq(false), any(), any(), anyString());
+        verify(events).publishProfileStatus(
+            eq("ama.serwaa"),
+            eq("user-42"),
+            eq("profile-7"),
+            eq(false),
+            eq(false),
+            any(),
+            any(),
+            anyString()
+        );
     }
 
     /**
@@ -132,7 +150,7 @@ class ProfileStatusPublicationUnitTest {
         when(profileRepository.save(any(Profile.class))).thenReturn(stored);
         doThrow(new IllegalStateException("broker down"))
             .when(events)
-            .publishProfileStatus(anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), any());
+            .publishProfileStatus(anyString(), any(), anyString(), anyBoolean(), anyBoolean(), any(), any(), any());
 
         assertThat(service.upsertOwnProfile("ama.serwaa", new Profile().firstName("Ama"))).isSameAs(stored);
     }
@@ -145,11 +163,20 @@ class ProfileStatusPublicationUnitTest {
     void aProfileWithNoAccountAnnouncesNothing() {
         service.publishProfileStatus(new Profile().firstName("Ama"));
 
-        verify(events, org.mockito.Mockito.never()).publishProfileStatus(any(), any(), anyBoolean(), anyBoolean(), any(), any(), any());
+        verify(events, org.mockito.Mockito.never()).publishProfileStatus(
+            any(),
+            any(),
+            any(),
+            anyBoolean(),
+            anyBoolean(),
+            any(),
+            any(),
+            any()
+        );
     }
 
     private Profile existingProfile() {
-        Profile profile = new Profile().accountId("ama.serwaa");
+        Profile profile = new Profile().accountId("ama.serwaa").accountUid("user-42");
         profile.setId("profile-7");
         profile.setCreatedDate(CREATED);
         profile.setModifiedDate(MODIFIED);
