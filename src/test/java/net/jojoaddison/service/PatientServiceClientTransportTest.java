@@ -26,8 +26,10 @@ import org.springframework.web.client.RestClient;
  *
  * <p>Every read here is a GET and every other write is a POST, so the limitation was invisible until
  * {@code patchClinicalCase} was added. That shipped with a green build: the unit tests stub the
- * service, and the integration tests have no patientservice to talk to, so
- * {@code PatientServiceClient} fails soft and returns an empty list either way. The first thing that
+ * service, and the integration tests have no patientservice to talk to, so at the time
+ * {@code PatientServiceClient} failed soft and returned an empty list either way. (Since backlog item
+ * 24 a failed collection read raises {@link PatientServiceUnavailableException} instead — which would
+ * not have caught this one, because the reads were never the broken half.) The first thing that
  * noticed was a clinician editing a case against the deployed stack and getting a 500.
  *
  * <p>So this test deliberately uses <b>the real request factory over a real socket</b>. A test that

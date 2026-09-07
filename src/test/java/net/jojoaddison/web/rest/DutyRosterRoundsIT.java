@@ -23,6 +23,7 @@ import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.service.DutyRosterService;
 import net.jojoaddison.service.PatientServiceClient;
+import net.jojoaddison.service.PatientServiceUnavailableException;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.Address;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.PatientProfile;
 import org.junit.jupiter.api.AfterEach;
@@ -139,11 +140,17 @@ class DutyRosterRoundsIT {
     @Test
     @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
     void storesTheRoundWithIdsOnlyWhenThePatientStackIsUnreachable() throws Exception {
-        // PatientServiceClient degrades to an empty list rather than throwing, so this is what an
-        // hc-patient outage looks like from here. The round must still save: an administrator being
+        // A real outage: since backlog item 24 the client raises rather than answering empty, and
+        // DutyRosterService catches it deliberately. The round must still save — an administrator
         // unable to write a roster because another stack is down is the failure worth avoiding, and
         // DR6's read-time refresh fills the snapshot on the next day-view open.
-        when(patientServiceClient.profiles()).thenReturn(List.of());
+        when(patientServiceClient.profiles()).thenThrow(
+            PatientServiceUnavailableException.read(
+                "/api/profiles",
+                PatientServiceUnavailableException.Fault.TRANSPORT,
+                "connection refused"
+            )
+        );
 
         restMockMvc
             .perform(
@@ -537,10 +544,17 @@ class DutyRosterRoundsIT {
         visit.setCustomerName("Akosua Mensah");
         visit.setCustomerAddress("GA-123-4567, 5 Ankobra River Street, Osu, Greater Accra");
         store(TOMORROW, ShiftType.DAY, "Ward 3", visit);
-        // An outage and "every customer was deleted" are indistinguishable from here, because the
-        // client degrades to an empty list. Of the two readings, blanking every address on the roster
-        // is far worse than serving one that may be a day old.
-        when(patientServiceClient.profiles()).thenReturn(List.of());
+        // The behaviour backlog item 24 had to preserve, asserted through the endpoint. The client
+        // now says which of "unreachable" and "no customers" this is, and this service treats them
+        // the same on purpose: blanking every address on the roster is far worse than serving one
+        // that may be a day old.
+        when(patientServiceClient.profiles()).thenThrow(
+            PatientServiceUnavailableException.read(
+                "/api/profiles",
+                PatientServiceUnavailableException.Fault.TRANSPORT,
+                "connection refused"
+            )
+        );
 
         restMockMvc
             .perform(get("/api/duty-roster/day/" + TOMORROW))

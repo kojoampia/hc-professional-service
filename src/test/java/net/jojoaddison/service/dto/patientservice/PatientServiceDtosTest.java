@@ -11,17 +11,27 @@ import org.junit.jupiter.api.Test;
 /**
  * These DTOs must deserialize what patientservice actually sends.
  *
- * <p><b>Why this test exists.</b> {@code PatientServiceClient} catches every exception and answers
- * with an empty list — deliberately, so a sibling outage degrades the dashboard instead of erroring
- * it. The cost of that design is that a <em>mapping</em> fault is indistinguishable from an empty
- * collection: a DTO that cannot parse the sibling's JSON produces exactly the same silence as a
- * patient with no activity. Nothing logs at ERROR, nothing fails a build, and the screen renders a
- * plausible empty list.
+ * <p><b>Why this test exists.</b> {@code PatientServiceClient} <em>used to</em> catch every exception
+ * and answer with an empty list — deliberately, so a sibling outage degraded the dashboard instead of
+ * erroring it. The cost of that design was that a <em>mapping</em> fault was indistinguishable from an
+ * empty collection: a DTO that could not parse the sibling's JSON produced exactly the same silence as
+ * a patient with no activity. Nothing logged at ERROR, nothing failed a build, and the screen rendered
+ * a plausible empty list.
+ *
+ * <p><b>That stopped being the trade on 2026-09-07 (backlog item 24), and this test matters more
+ * rather than less for it.</b> A read that did not happen now raises
+ * {@code PatientServiceUnavailableException} — a 503 — and a mapping fault is classified
+ * {@code Fault.SCHEMA} and logged at ERROR, precisely because it is the one fault there that does
+ * <em>not</em> clear on its own: every later read of that collection fails identically until a DTO
+ * here or the sibling's schema changes. So the silence is gone, and what replaced it is worse to
+ * discover in production than an outage is — one malformed row now 503s the directory, the dashboard,
+ * the patient record and the case queue, persistently, and waiting is the wrong remedy for all four.
  *
  * <p>So the shapes are pinned here, against JSON copied from the sibling's own domain classes
  * ({@code hc-patient/api/.../domain/ActivityLog.java} and {@code Report.java}) rather than from this
  * service's assumptions about them. If patientservice renames a field or changes a date type, this
- * fails loudly instead of a clinician's record quietly emptying.
+ * fails in a build here rather than as a 503 on every clinician surface computed from that
+ * collection.
  */
 class PatientServiceDtosTest {
 

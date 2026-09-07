@@ -329,12 +329,14 @@ public class DutyRosterService {
      * path. It is a cache rather than a query only because {@code /api/profiles} still takes no filter
      * — when it learns to, this becomes a query and the whole shape gets cheaper.
      *
-     * <p><b>An empty profile list is treated as an outage, not as "every customer was deleted".</b>
-     * {@link PatientServiceClient} degrades to an empty list when the sibling stack is unreachable, so
-     * the two are indistinguishable from here — and of the two readings, blanking every address on the
-     * roster is far worse than keeping one that may be a day old. Nothing is cleared on a miss for the
-     * same reason: a customer absent from the collection may be new, or the collection may have been
-     * truncated by a failure this client is designed to swallow. **Only the 90-day purge clears a
+     * <p><b>Neither an outage nor an empty collection clears a snapshot, and that is this service's own
+     * decision.</b> The two used to be indistinguishable here — {@link PatientServiceClient} answered
+     * an empty list for both — and since backlog item 24 they are not: an unreadable collection raises
+     * {@link PatientServiceUnavailableException}, which {@link #patientProfilesByPatientId} catches
+     * <em>on purpose</em>. The reading is the same either way because blanking every name and address
+     * on a roster is far worse than keeping one that may be a day old, and a clinician holding a
+     * slightly old address can still knock on the door. Nothing is cleared on a per-customer miss for
+     * the same reason: that customer may be new over there. **Only the 90-day purge clears a
      * snapshot**, and it does so deliberately.
      */
     public int refreshSnapshots(List<DutyRoster> rounds) {
@@ -342,14 +344,9 @@ public class DutyRosterService {
         if (visits.isEmpty()) {
             return 0;
         }
-        Map<String, PatientProfile> byPatientId = new LinkedHashMap<>();
-        for (PatientProfile profile : patientServiceClient.profiles()) {
-            if (profile.patientId() != null) {
-                byPatientId.putIfAbsent(profile.patientId(), profile);
-            }
-        }
+        Map<String, PatientProfile> byPatientId = patientProfilesByPatientId();
         if (byPatientId.isEmpty()) {
-            log.debug("Patient profiles unavailable; serving {} round(s) from their stored snapshots", rounds.size());
+            log.debug("No patient profiles to refresh from; serving {} round(s) from their stored snapshots", rounds.size());
             return 0;
         }
 
@@ -555,10 +552,12 @@ public class DutyRosterService {
     /**
      * Copy name, address and phone from the patient stack onto each visit.
      *
-     * <p><b>Failure is silent and the round still saves.</b> {@link PatientServiceClient} degrades to
-     * an empty list when the sibling is unreachable, and a round stored with customer ids and no
-     * snapshot is far better than a roster an administrator could not write because another stack was
-     * down. DR6's read-time refresh fills the gap on the next day-view open.
+     * <p><b>Failure is silent and the round still saves.</b> An unreachable sibling raises out of
+     * {@link PatientServiceClient} and {@link #patientProfilesByPatientId} swallows it here, because a
+     * round stored with customer ids and no snapshot is far better than a roster an administrator
+     * could not write because another stack was down. DR6's read-time refresh fills the gap on the
+     * next day-view open. This is the write-path half of the same decision {@link #refreshSnapshots}
+     * makes on the read path.
      *
      * <p>One call for the whole round, not one per visit: {@code /api/profiles} takes no filter — the
      * limit MOB-P2-PRE describes — so this fetches the collection once and indexes it in memory.
@@ -568,12 +567,7 @@ public class DutyRosterService {
         if (round.getVisits().isEmpty()) {
             return;
         }
-        Map<String, PatientProfile> byPatientId = new LinkedHashMap<>();
-        for (PatientProfile profile : patientServiceClient.profiles()) {
-            if (profile.patientId() != null) {
-                byPatientId.putIfAbsent(profile.patientId(), profile);
-            }
-        }
+        Map<String, PatientProfile> byPatientId = patientProfilesByPatientId();
         if (byPatientId.isEmpty()) {
             log.warn("No patient profiles available; storing round {} with customer ids and no snapshot", round.getName());
             return;
@@ -589,6 +583,37 @@ public class DutyRosterService {
             visit.setCustomerAddress(profile.formattedAddress());
             visit.setCustomerPhone(blankToNull(profile.contactPhone()));
         }
+    }
+
+    /**
+     * Patient profiles indexed by their {@code patientId}, or an empty map if they could not be read.
+     *
+     * <p><b>This is where this service answers backlog item 24's question for itself.</b> The client
+     * now distinguishes "there are no profiles" from "the profiles could not be read"; the duty roster
+     * deliberately treats the two the same, and the whole of that decision is the {@code catch} below.
+     * Neither outcome may clear a customer snapshot, because a roster whose every name and address has
+     * been blanked is a worse artefact than one carrying a day-old address — the clinician can still
+     * knock on the door. {@code PatientDirectoryService} reads the same signal and answers 503, which
+     * is the point of moving the decision out of the client: the two callers are both right.
+     *
+     * <p>Not a per-visit lookup: {@code /api/profiles} takes no filter, so one paged read is indexed
+     * in memory for the whole round.
+     */
+    private Map<String, PatientProfile> patientProfilesByPatientId() {
+        List<PatientProfile> profiles;
+        try {
+            profiles = patientServiceClient.profiles();
+        } catch (PatientServiceUnavailableException e) {
+            log.debug("Patient profiles unavailable ({}); keeping the stored customer snapshots", e.getMessage());
+            return Map.of();
+        }
+        Map<String, PatientProfile> byPatientId = new LinkedHashMap<>();
+        for (PatientProfile profile : profiles) {
+            if (profile.patientId() != null) {
+                byPatientId.putIfAbsent(profile.patientId(), profile);
+            }
+        }
+        return byPatientId;
     }
 
     /**

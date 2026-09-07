@@ -1,6 +1,7 @@
 package net.jojoaddison.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -46,7 +47,14 @@ import org.springframework.web.client.RestClient;
  *
  * <p><b>The second half of the subject is the cost of the first.</b> Paging turned one bounded request
  * into many, so the two ways a read can stop without ending — the wall-clock budget and the page guard
- * — are asserted here as well, and both must answer empty rather than serve what they collected.
+ * — are asserted here as well, and both must fail rather than serve what they collected.
+ *
+ * <p><b>"Fail" means {@link PatientServiceUnavailableException} since backlog item 24</b>, and the
+ * distinction these cases now assert is the whole of that item: an unread collection and an empty one
+ * were the same value, so the same empty list told {@code DutyRosterService} that a stack was down and
+ * {@code PatientDirectoryService} that a patient was not in a clinician's caseload. Each case below
+ * therefore has a partner asserting that a genuinely empty collection is still an empty list — a
+ * failure signal nobody can tell from a legitimate answer is no better than none.
  *
  * <p>It is a sibling of {@link PatientServiceClientTransportTest} and shares its shape deliberately —
  * a real {@link HttpServer} on a real socket, the client's real request factory, no Spring context and
@@ -175,6 +183,32 @@ class PatientServiceClientPagingTest {
         return clientForThisServer(READ_BUDGET_SECONDS);
     }
 
+    /**
+     * A deployment with no sibling answers empty, and that is not the conflation item 24 removed.
+     *
+     * <p>The item's method is that every branch of the empty-or-failed question gets a paired
+     * assertion, and this was the one branch that had none: every other construction in this class
+     * passes {@code true}, so a later simplification that raised unconditionally would break the
+     * supported no-sibling configuration with a green build. `enabled=false` is the same statement
+     * {@code application.kafka.enabled=false} makes about the broker — the collection is genuinely
+     * empty because there is nothing to read, not because a read failed.
+     *
+     * <p>Asserted with no HTTP server behind it at all: the point is that the client must not call.
+     */
+    @Test
+    void aDeploymentWithNoSiblingAnswersEmptyRatherThanRaising() {
+        PatientServiceClient disabled = new PatientServiceClient(
+            RestClient.builder(),
+            "http://127.0.0.1:1",
+            false,
+            PAGE_TIMEOUT_SECONDS,
+            READ_BUDGET_SECONDS
+        );
+
+        assertThat(disabled.profiles()).isEmpty();
+        assertThat(disabled.clinicalCases()).isEmpty();
+    }
+
     private PatientServiceClient clientForThisServer(int readBudgetSeconds) {
         return new PatientServiceClient(
             RestClient.builder(),
@@ -290,7 +324,11 @@ class PatientServiceClientPagingTest {
             return Response.ok(jsonRows(IntStream.range(offset, offset + PatientServiceClient.PAGE_SIZE)));
         });
 
-        assertThat(clientForThisServer().medications()).isEmpty();
+        PatientServiceClient client = clientForThisServer();
+        assertThatThrownBy(client::medications)
+            .isInstanceOf(PatientServiceUnavailableException.class)
+            .hasMessageContaining("/api/medications")
+            .hasMessageContaining("page guard");
         // It stopped at the guard rather than earlier or later; the read is bounded, it just refuses to
         // report the part of the collection it managed to see.
         assertThat(queriesSeen).hasSize(PatientServiceClient.MAX_PAGES);
@@ -325,11 +363,14 @@ class PatientServiceClientPagingTest {
             return Response.ok(jsonRows(IntStream.range(offset, offset + PatientServiceClient.PAGE_SIZE)));
         });
 
+        PatientServiceClient client = clientForThisServer(1);
         long startedAt = System.nanoTime();
-        List<?> reports = clientForThisServer(1).reports();
+        assertThatThrownBy(client::reports)
+            .as("an exhausted budget is a failure, and a failure is not an empty collection")
+            .isInstanceOf(PatientServiceUnavailableException.class)
+            .hasMessageContaining("budget");
         Duration elapsed = Duration.ofNanos(System.nanoTime() - startedAt);
 
-        assertThat(reports).as("an exhausted budget is a failure, and failures answer empty").isEmpty();
         assertThat(queriesSeen)
             .as("it gave up on the budget, not on the page guard")
             .hasSizeGreaterThan(1)
@@ -341,15 +382,14 @@ class PatientServiceClientPagingTest {
     }
 
     /**
-     * A page that fails mid-collection answers empty, not truncated.
+     * A page that fails mid-collection raises; it neither truncates nor answers empty.
      *
-     * <p>Empty is a signal this codebase already reads: {@code DutyRosterService.refreshSnapshots}
-     * treats an empty profile list as an outage and keeps the stored snapshots rather than blanking
-     * them. A half-collection carries no such signal — it is the shape of this very defect, and every
-     * caller would filter it and render a short list as a quiet week.
+     * <p>Truncating is the shape of item 22's very defect — every caller would filter a short list and
+     * render it as a quiet week. Answering empty was item 22's fix and item 24's defect: it is a
+     * perfectly ordinary value that four callers already had four readings of.
      */
     @Test
-    void aFailedPageAnswersEmptyRatherThanTruncated() {
+    void aFailedPageRaisesRatherThanTruncatingOrEmptying() {
         serve(
             exchange ->
                 queriesSeen.size() == 1
@@ -357,8 +397,45 @@ class PatientServiceClientPagingTest {
                     : new Response(500, "{}")
         );
 
-        assertThat(clientForThisServer().reports()).isEmpty();
+        PatientServiceClient client = clientForThisServer();
+        assertThatThrownBy(client::reports).isInstanceOf(PatientServiceUnavailableException.class).hasMessageContaining("/api/reports");
         assertThat(statusesSent).containsExactly(200, 500);
+    }
+
+    /**
+     * The other half of every case above: a collection that is genuinely empty is an empty list.
+     *
+     * <p>Without this the item-24 change could be satisfied by raising on everything, which would
+     * merely move the conflation rather than remove it — {@code DutyRosterService} would then treat a
+     * patient stack holding no profiles as an outage, and {@code PatientDirectoryService} would answer
+     * 503 to a clinician whose caseload is legitimately empty on their first day.
+     */
+    @Test
+    void anEmptyCollectionIsAnEmptyListAndNotAFailure() {
+        sibling(0);
+
+        assertThat(clientForThisServer().profiles()).isEmpty();
+        assertThat(statusesSent).containsExactly(200);
+    }
+
+    /**
+     * No credential to relay is a failed read, not an empty collection.
+     *
+     * <p>It answered empty until item 24, in precisely the situation where a wrong answer is most
+     * plausible: this service could not relay the caller's token, so it knows nothing about their
+     * caseload and must not report that as knowing it is empty. Nothing reaches the socket either —
+     * reading with no credential would 401, or worse succeed against an endpoint that is open.
+     */
+    @Test
+    void aReadWithNoCallerTokenRaisesWithoutCallingTheSibling() {
+        sibling(COLLECTION_SIZE);
+        SecurityContextHolder.clearContext();
+
+        PatientServiceClient client = clientForThisServer();
+        assertThatThrownBy(client::clinicalCases)
+            .isInstanceOf(PatientServiceUnavailableException.class)
+            .hasMessageContaining("no caller token");
+        assertThat(queriesSeen).isEmpty();
     }
 
     /**

@@ -89,10 +89,21 @@ public class RosterTrailService {
      * an authorization failure behind a plausible blank panel — the same class of mistake as a
      * `listCases` scope that selects everything when it does not know who is asking.
      *
-     * <p>An unreachable patient stack <em>does</em> yield an empty list, silently.
-     * {@link PatientServiceClient} degrades by contract, and the day view treats a blank trail the way
-     * the dashboard treats an unreachable {@code adminservice}: the visit, its times and its address
-     * are what the clinician actually needs at the door, and they come from this service.
+     * <p><b>An unreachable patient stack is a 503 and not a quiet week</b> (backlog item 24). It used
+     * to yield an empty list, because {@link PatientServiceClient} answered empty on every failure and
+     * this method could not tell that from a customer who genuinely had no activity — "wrong but
+     * harmless-looking", as the item puts it. It is not harmless. Every row of a trail comes from the
+     * sibling, so an outage renders the panel a clinician uses to ask <em>what has happened to this
+     * person lately</em> as the statement that nothing has. That is a clinical claim this service is in
+     * no position to make. Raising instead is cheap here in a way it would not be elsewhere: the trail
+     * is its own endpoint behind a popup, so a 503 costs the panel and not the round — the visit, its
+     * times and its address still render, and they come from this service.
+     *
+     * <p>Deliberately <em>not</em> the same answer {@link DutyRosterService} gives to the same signal.
+     * That one has stored snapshots to fall back on and keeps them; this one has nothing to show but
+     * what it could not read.
+     *
+     * @throws PatientServiceUnavailableException when the activity collection could not be read
      */
     public List<ActivityLogEntry> trailFor(String customerId, LocalDate today) {
         if (customerId == null || customerId.isBlank()) {
@@ -110,6 +121,8 @@ public class RosterTrailService {
         // trail is for. createdDate is only the filing date, and a note typed up a week late would
         // otherwise fall inside a window its visit fell outside of.
         Instant cutoff = Instant.now().minus(Duration.ofDays(TRAIL_DAYS));
+        // Uncaught on purpose: PatientServiceUnavailableException becomes a 503 through
+        // ExceptionTranslator. See this method's javadoc, and backlog.md item 24.
         return patientServiceClient
             .activityLogs()
             .stream()

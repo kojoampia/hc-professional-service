@@ -41,6 +41,13 @@ import tech.jhipster.web.util.PaginationUtil;
  * patient the caller already has, and they do it by relaying the caller's own token to
  * patientservice — this service adds the entitlement check its sibling cannot make, and stores
  * nothing of the record but an idempotency receipt.
+ *
+ * <p><b>Every {@code catch} below names one exception, and that is deliberate</b> (backlog item 24).
+ * The directory is computed from collections read across the wire, so
+ * {@link net.jojoaddison.service.PatientServiceUnavailableException} passes through these handlers
+ * untouched and {@code ExceptionTranslator} answers 503. Widening any of them — to
+ * {@code RuntimeException}, or to a bare {@code catch (Exception)} — would put the outage back behind
+ * a 404 saying the patient is not this clinician's, which is the defect that item exists to close.
  */
 @RestController
 @RequestMapping("/api/patients")

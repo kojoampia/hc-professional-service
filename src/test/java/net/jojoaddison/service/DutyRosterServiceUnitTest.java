@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDate;
@@ -232,6 +234,79 @@ class DutyRosterServiceUnitTest {
         when(dutyRosterRepository.findRoundsAround(anyString(), any(), any())).thenReturn(List.of(existing));
 
         assertThatCode(() -> service.validateRound(existing)).doesNotThrowAnyException();
+    }
+
+    // ------------------------------------------------- the sibling being unreadable (item 24)
+
+    /**
+     * The behaviour backlog item 24 must not regress: an unreadable patient stack leaves every stored
+     * customer snapshot exactly as it was.
+     *
+     * <p>This service reads the same signal {@code PatientDirectoryService} answers 503 to, and
+     * deliberately answers it differently — which is the whole point of moving the decision out of
+     * {@code PatientServiceClient}. Blanking every name and address on a roster would be a far worse
+     * defect than the one item 24 fixes: a clinician holding a day-old address can still knock on the
+     * door, and one holding no address cannot.
+     */
+    @Test
+    void anUnreadablePatientStackLeavesTheStoredSnapshotsAlone() {
+        when(patientServiceClient.profiles()).thenThrow(
+            PatientServiceUnavailableException.read(
+                "/api/profiles",
+                PatientServiceUnavailableException.Fault.TRANSPORT,
+                "connection refused"
+            )
+        );
+        DutyRoster stored = round(ShiftType.DAY, visit("c-1", "09:00", "10:00"));
+        stored.getVisits().get(0).setCustomerName("Ama Mensah");
+        stored.getVisits().get(0).setCustomerAddress("12 Ring Road, Accra");
+
+        assertThat(service.refreshSnapshots(List.of(stored))).isZero();
+
+        assertThat(stored.getVisits().get(0).getCustomerName()).isEqualTo("Ama Mensah");
+        assertThat(stored.getVisits().get(0).getCustomerAddress()).isEqualTo("12 Ring Road, Accra");
+        // Not written back either: an outage must not turn a read into a pointless write.
+        verify(dutyRosterRepository, never()).save(any());
+    }
+
+    /**
+     * And a round still saves while the sibling is unreadable, with ids and no snapshot.
+     *
+     * <p>The write-path half of the same decision. An administrator must be able to write tomorrow's
+     * roster while another stack is down; DR6's read-time refresh fills the names in later.
+     */
+    @Test
+    void aRoundStillSavesWhileThePatientStackIsUnreadable() {
+        when(patientServiceClient.profiles()).thenThrow(
+            PatientServiceUnavailableException.read(
+                "/api/profiles",
+                PatientServiceUnavailableException.Fault.TRANSPORT,
+                "connection refused"
+            )
+        );
+        when(dutyRosterRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        DutyRoster saved = service.assign(round(ShiftType.DAY, visit("c-1", "09:00", "10:00")));
+
+        assertThat(saved.getVisits().get(0).getCustomerId()).isEqualTo("c-1");
+        assertThat(saved.getVisits().get(0).getCustomerName()).isNull();
+        verify(dutyRosterRepository).save(any());
+    }
+
+    /**
+     * A patient stack holding no profiles is not an outage, and this service does the same thing
+     * anyway — which is a decision rather than an accident, so it is worth an assertion of its own.
+     * The customer may simply be new over there; only the 90-day purge clears a snapshot.
+     */
+    @Test
+    void anEmptyProfileCollectionAlsoLeavesTheStoredSnapshotsAlone() {
+        when(patientServiceClient.profiles()).thenReturn(List.of());
+        DutyRoster stored = round(ShiftType.DAY, visit("c-1", "09:00", "10:00"));
+        stored.getVisits().get(0).setCustomerName("Ama Mensah");
+
+        assertThat(service.refreshSnapshots(List.of(stored))).isZero();
+
+        assertThat(stored.getVisits().get(0).getCustomerName()).isEqualTo("Ama Mensah");
     }
 
     @Test
