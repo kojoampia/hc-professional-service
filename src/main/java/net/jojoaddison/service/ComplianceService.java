@@ -74,19 +74,20 @@ public class ComplianceService {
      * audit events.
      * <p>
      * A professional who has since <b>renewed</b> is skipped entirely — not suspended, no
-     * {@code compliance.alert}, no {@code license-expired} audit event. Renewing adds a document and
-     * nothing retires the lapsed one, so the expired row stays in the collection for ever; without
-     * this guard the nightly sweep found it and undid the administrator's reinstatement at 04:00,
-     * every night, blaming a licence that was valid (backlog.md item 17). The guard asks
+     * {@code compliance.alert}, no {@code license-expired} audit event. Renewing was a pure insert
+     * that retired nothing, so the lapsed row stayed in the collection for ever; without this guard
+     * the nightly sweep found it and undid the administrator's reinstatement at 04:00, every night,
+     * blaming a licence that was valid (backlog.md item 17). The guard asks
      * {@link OnboardingService#hasCurrentVerifiedLicense} — the same predicate reactivation is
      * granted on — because the defect was precisely that the two questions had separate answers.
      * <p>
      * <b>Item 20 added a second, independent defence and did not replace this one.</b> A renewal
-     * uploaded through {@code /api/onboarding/documents} now marks the row it replaces, and the query
-     * below skips marked rows, so the loop never reaches the guard for that professional. The guard
-     * still has to be here: it is what protects the profiles whose lapsed rows were written before
-     * that marking existed, and rows renewed by any other path. Either defence alone closes the
-     * lockout; the test that proves the guard still works
+     * uploaded through {@code /api/onboarding/documents} marks the row the clinician names as
+     * replaced, and the query below skips marked rows, so the loop never reaches the guard for that
+     * professional. The guard still has to be here, and it covers strictly more: the profiles whose
+     * lapsed rows predate the marker, rows renewed by any other path, and — since a clinician who
+     * does not name the row they are replacing has still renewed — every upload that marks nothing.
+     * Either defence alone closes the lockout; the test that proves the guard still works
      * ({@code ComplianceFlowIT.expiredLicenseSweepRestrictsAndReactivationNeedsANewLicense}) renews
      * through the repository rather than the upload endpoint precisely so that the marker is absent
      * and the guard is the only thing that can be answering.
@@ -104,8 +105,10 @@ public class ComplianceService {
                 continue;
             }
             if (onboardingService.hasCurrentVerifiedLicense(license.getProfileId())) {
+                // "Skipped", not "superseded": the row reaching this branch is one the marker did not
+                // catch, so borrowing the field's name for it would read as the opposite of the truth.
                 log.debug(
-                    "Compliance sweep: profile {} has a current license; superseded {} ignored",
+                    "Compliance sweep: profile {} holds a current license; lapsed {} skipped",
                     license.getProfileId(),
                     license.getId()
                 );

@@ -1,14 +1,17 @@
 package net.jojoaddison.service;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import net.jojoaddison.domain.PersonalDocument;
-import net.jojoaddison.domain.enumeration.DocumentType;
+import net.jojoaddison.domain.enumeration.VerificationStatus;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Service Implementation for managing {@link net.jojoaddison.domain.PersonalDocument}.
@@ -36,7 +39,8 @@ public class PersonalDocumentService {
     }
 
     /**
-     * Save a freshly uploaded document and <b>archive</b> the ones it replaces (backlog.md item 20).
+     * Save a freshly uploaded document and <b>archive the one row the clinician says it replaces</b>
+     * (backlog.md item 20).
      *
      * <p>Renewing a credential used to be a pure insert, so a profile accumulated one row per renewal
      * for ever and the two admin surfaces that read those rows —
@@ -51,56 +55,118 @@ public class PersonalDocumentService {
      * reviewer's {@code verificationStatus} verdict, which is why superseding is its own field pair
      * rather than a fourth {@code VerificationStatus} value that would have overwritten it.
      *
-     * <p>Newest wins, always: this is called from the upload path, where the clinician is asserting
-     * that the file they are sending now is their current credential.
+     * <p><b>Nothing is archived unless the caller names the row.</b> This method used to retire every
+     * live row of the same type — "newest wins, always" — which reads as a renewal and is not one:
+     * <em>the server cannot tell a renewal from a second credential.</em> An ACLS certificate archived
+     * a BSc Nursing certificate, and a midwifery registration archived a nursing registration that
+     * expired two years later; the archived row then left
+     * {@code requireAllMandatoryDocumentsVerified} and the review screen disabled both verify and
+     * reject on it, so a genuine second credential could never be given a verdict and never appear on
+     * the watchlist. Only the clinician knows which of the documents they hold this one replaces, so
+     * only the clinician gets to say. An upload that names nothing simply adds a row, which is what
+     * every upload did before item 20 and destroys no information.
      *
      * @param personalDocument the new document, unsaved.
+     * @param supersedesDocumentId the caller's own live document this one replaces, or {@code null} to
+     *     add without replacing anything.
      * @return the persisted new document.
      */
-    public PersonalDocument saveSuperseding(PersonalDocument personalDocument) {
-        PersonalDocument saved = personalDocumentRepository.save(personalDocument);
-        List<PersonalDocument> replaced = personalDocumentRepository
-            .findByProfileId(saved.getProfileId())
-            .stream()
-            .filter(existing -> supersedes(saved, existing))
-            .map(existing -> existing.supersededAt(Instant.now()).supersededByDocumentId(saved.getId()))
-            .toList();
-        if (!replaced.isEmpty()) {
-            personalDocumentRepository.saveAll(replaced);
-            log.debug("Document {} superseded {} earlier {} document(s)", saved.getId(), replaced.size(), saved.getType());
+    public PersonalDocument saveSuperseding(PersonalDocument personalDocument, String supersedesDocumentId) {
+        if (supersedesDocumentId == null || supersedesDocumentId.isBlank()) {
+            return personalDocumentRepository.save(personalDocument);
         }
+        // Validated before the insert, so a refused replacement does not leave a new row behind that
+        // the clinician did not get told about.
+        PersonalDocument replaced = requireReplaceable(personalDocument, supersedesDocumentId);
+        PersonalDocument saved = personalDocumentRepository.save(personalDocument);
+        personalDocumentRepository.save(replaced.supersededAt(Instant.now()).supersededByDocumentId(saved.getId()));
+        log.debug("Document {} superseded {} ({})", saved.getId(), replaced.getId(), saved.getType());
         return saved;
     }
 
     /**
-     * Whether {@code replacement} retires {@code existing}: the same credential, on the same profile,
-     * still live, and not the replacement itself.
+     * The named row, or a refusal explaining why it cannot be retired by this upload.
      *
-     * <p>Same <em>type</em> and nothing looser. A PASSPORT does not retire a GHANACARD even though
-     * both satisfy the identity requirement — they are two documents a clinician legitimately holds
-     * at once, and archiving one because the other arrived would hide a credential nobody replaced.
+     * <p>Structural checks first — the caller's own profile, still live, the same {@code type} — and
+     * then the one that is about credentialing rather than about identifiers: <b>a replacement never
+     * retires a document that is better than itself.</b> Precisely, the existing row is kept live when
+     * either of these holds:
      *
-     * <p>{@code OTHER} additionally has to match on {@code otherLabel}, because that type is the
-     * free-form catch-all: a police clearance and an indemnity certificate are both {@code OTHER} and
-     * neither supersedes the other. The comparison is trimmed and case-insensitive, so "Police
-     * clearance" renews "police clearance"; a label that has genuinely been reworded simply leaves the
-     * old row live, which is the safe direction to be wrong in.
+     * <ol>
+     *   <li>both carry an expiry date and the existing one's is <em>later</em> — a credential is not
+     *       renewed backwards; or
+     *   <li>the existing row is VERIFIED and unexpired while the replacement has already expired.
+     * </ol>
+     *
+     * <p>The second is not implied by the first: a certificate may carry no expiry at all, and an
+     * undated VERIFIED row is a current credential that an expired one must not retire.
+     *
+     * <p>Without this, a clinician who uploads a scan of last year's card — or types {@code 2026} for
+     * {@code 2036} in a bare date field — archived the valid licence that was the only thing keeping
+     * them out of the nightly sweep, and item 17's guard could no longer save them because
+     * {@code isCurrentVerifiedLicense} screens archived rows. Measured on this branch before the fix:
+     * the sweep returned {@code {"expiredLicenses":1,"applicationsSuspended":1}} and an ACTIVE
+     * clinician who had done nothing wrong was SUSPENDED, recoverable only by re-upload, reviewer
+     * verification and admin reactivation. {@code DocumentSupersedeIT}'s
+     * {@code aBackdatedUploadDoesNotRetireAValidLicenceNorSuspendTheClinician} is that scenario.
+     *
+     * <p>It refuses rather than silently skipping because the caller <em>asked</em> for this row to be
+     * replaced; doing the upload and quietly not the replacement would tell the clinician they had
+     * renewed when they had not. The file is not lost — the message names both dates, which is the
+     * information needed to correct the typo and send it again.
      */
-    private static boolean supersedes(PersonalDocument replacement, PersonalDocument existing) {
-        if (existing.getId().equals(replacement.getId()) || existing.getSupersededAt() != null) {
-            return false;
+    private PersonalDocument requireReplaceable(PersonalDocument replacement, String supersedesDocumentId) {
+        PersonalDocument existing = personalDocumentRepository
+            .findById(supersedesDocumentId)
+            .filter(candidate -> candidate.getProfileId() != null && candidate.getProfileId().equals(replacement.getProfileId()))
+            // 404 rather than 403: a caller must not be able to discover that somebody else's document
+            // id exists by offering to replace it.
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such document to replace"));
+        if (existing.getSupersededAt() != null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "That document has already been replaced");
         }
         if (existing.getType() != replacement.getType()) {
-            return false;
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "A " + replacement.getType() + " cannot replace a " + existing.getType()
+            );
         }
-        return replacement.getType() != DocumentType.OTHER || sameLabel(replacement.getOtherLabel(), existing.getOtherLabel());
+        if (isBetterThan(existing, replacement)) {
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "The document you are replacing is still current (" +
+                describeCurrency(existing) +
+                "); check the expiry date on the one you are uploading (" +
+                describeCurrency(replacement) +
+                ")"
+            );
+        }
+        return existing;
     }
 
-    private static boolean sameLabel(String left, String right) {
-        if (left == null || right == null) {
-            return left == null && right == null;
+    /** See {@link #requireReplaceable} — the two-clause "do not renew backwards" predicate. */
+    private static boolean isBetterThan(PersonalDocument existing, PersonalDocument replacement) {
+        if (
+            existing.getExpiryDate() != null &&
+            replacement.getExpiryDate() != null &&
+            existing.getExpiryDate().isAfter(replacement.getExpiryDate())
+        ) {
+            return true;
         }
-        return left.trim().equalsIgnoreCase(right.trim());
+        return isVerifiedAndUnexpired(existing) && hasExpired(replacement);
+    }
+
+    private static boolean isVerifiedAndUnexpired(PersonalDocument document) {
+        return document.getVerificationStatus() == VerificationStatus.VERIFIED && !hasExpired(document);
+    }
+
+    /** An absent expiry date is not an expired one — most types carry none at all. */
+    private static boolean hasExpired(PersonalDocument document) {
+        return document.getExpiryDate() != null && document.getExpiryDate().isBefore(LocalDate.now());
+    }
+
+    private static String describeCurrency(PersonalDocument document) {
+        return document.getExpiryDate() == null ? "no expiry date" : "expires " + document.getExpiryDate();
     }
 
     /**
@@ -119,6 +185,12 @@ public class PersonalDocumentService {
 
     /**
      * Update a personalDocument.
+     *
+     * <p>A whole-document replace, so a {@code PUT} that omits {@code supersededAt} un-archives the row
+     * — exactly as it already clears {@code type}, {@code expiryDate} and the reviewer's
+     * {@code verificationStatus}. That is the generated CRUD surface behaving as generated and it is
+     * not fixed here, but {@code supersededAt} is now what stands between a row and the compliance
+     * watchlist, so the blast radius grew: backlog.md item 46.
      *
      * @param personalDocument the entity to save.
      * @return the persisted entity.

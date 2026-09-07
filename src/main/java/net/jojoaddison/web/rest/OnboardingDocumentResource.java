@@ -78,7 +78,8 @@ public class OnboardingDocumentResource {
         @RequestParam("file") MultipartFile file,
         @RequestParam("type") DocumentType type,
         @RequestParam(value = "otherLabel", required = false) String otherLabel,
-        @RequestParam(value = "expiryDate", required = false) String expiryDate
+        @RequestParam(value = "expiryDate", required = false) String expiryDate,
+        @RequestParam(value = "supersedesDocumentId", required = false) String supersedesDocumentId
     ) throws IOException {
         Profile profile = ownProfile();
         byte[] bytes = file.getBytes();
@@ -96,12 +97,14 @@ public class OnboardingDocumentResource {
             .createdDate(LocalDate.now());
         document.setData(bytes);
         document.setDataContentType(file.getContentType());
-        // Archives any earlier document of the same credential rather than piling up beside it
-        // (backlog.md item 20). Superseding is applied on this path and not on the generated
+        // Archives the row the clinician says this one replaces, rather than piling up beside it
+        // (backlog.md item 20). `supersedesDocumentId` is optional and names one of the caller's own
+        // live documents: an upload that names nothing simply adds. The server does not infer the
+        // replacement, because it cannot — a second certificate and a renewed one are the same
+        // request. Superseding is applied on this path and not on the generated
         // /api/personal-documents CRUD surface: this is where a clinician renews, whereas that one is
-        // an admin data-maintenance surface where implicitly retiring a row the caller did not name
-        // would be a surprise.
-        PersonalDocument saved = personalDocumentService.saveSuperseding(document);
+        // an admin data-maintenance surface.
+        PersonalDocument saved = personalDocumentService.saveSuperseding(document, supersedesDocumentId);
         log.debug("Onboarding document {} ({} bytes) uploaded for profile {}", saved.getId(), bytes.length, profile.getId());
         domainEventPublisher.publishEntityCreated(
             "PersonalDocument",
