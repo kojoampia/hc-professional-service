@@ -229,7 +229,11 @@ class PatientDirectoryServiceUnitTest {
     // --- An outage is not a caseload decision (backlog.md item 24) ----------------------------
 
     private static PatientServiceUnavailableException outage() {
-        return new PatientServiceUnavailableException("/api/clinical-cases", "connection refused");
+        return PatientServiceUnavailableException.read(
+            "/api/clinical-cases",
+            PatientServiceUnavailableException.Fault.TRANSPORT,
+            "connection refused"
+        );
     }
 
     /**
@@ -253,7 +257,13 @@ class PatientDirectoryServiceUnitTest {
     @Test
     void anOutageReadingTheProfilesIsNOTanEmptyRecordEither() {
         when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task("patient-mine")));
-        when(patientService.profiles()).thenThrow(new PatientServiceUnavailableException("/api/profiles", "connection refused"));
+        when(patientService.profiles()).thenThrow(
+            PatientServiceUnavailableException.read(
+                "/api/profiles",
+                PatientServiceUnavailableException.Fault.TRANSPORT,
+                "connection refused"
+            )
+        );
 
         assertThatThrownBy(() -> service.record("patient-mine")).isInstanceOf(PatientServiceUnavailableException.class);
     }
@@ -300,7 +310,13 @@ class PatientDirectoryServiceUnitTest {
         // summary as "you have no patients" — both plausible, both wrong, and neither recoverable by
         // the clinician looking at it.
         when(patientService.clinicalCases()).thenThrow(outage());
-        when(patientService.profiles()).thenThrow(new PatientServiceUnavailableException("/api/profiles", "connection refused"));
+        when(patientService.profiles()).thenThrow(
+            PatientServiceUnavailableException.read(
+                "/api/profiles",
+                PatientServiceUnavailableException.Fault.TRANSPORT,
+                "connection refused"
+            )
+        );
 
         assertThatThrownBy(() -> service.myCases(PageRequest.of(0, 20), null)).isInstanceOf(PatientServiceUnavailableException.class);
         assertThatThrownBy(() -> service.summary()).isInstanceOf(PatientServiceUnavailableException.class);

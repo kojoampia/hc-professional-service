@@ -20,10 +20,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Reads the patient-owned half of the clinician's world from patientservice.
@@ -277,30 +282,42 @@ public class PatientServiceClient {
      * is what that endpoint consumes.
      */
     public ClinicalCase patchClinicalCase(String id, Map<String, Object> body) {
+        String path = "/api/clinical-cases/" + id;
         if (!enabled) {
             throw new IllegalStateException("patientservice is disabled; cannot update a case");
         }
         String token = SecurityUtils.getCurrentUserJWT()
             .orElseThrow(() -> new IllegalStateException("No caller token available; refusing to update a case"));
-        return restClient
-            .patch()
-            .uri("/api/clinical-cases/{id}", id)
-            .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
-            .contentType(MediaType.valueOf("application/merge-patch+json"))
-            .body(body)
-            .retrieve()
-            .body(ClinicalCase.class);
+        try {
+            return restClient
+                .patch()
+                .uri("/api/clinical-cases/{id}", id)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .contentType(MediaType.valueOf("application/merge-patch+json"))
+                .body(body)
+                .retrieve()
+                .body(ClinicalCase.class);
+        } catch (RestClientException e) {
+            // Scrubbed, not propagated: the raw message quotes the base URL. See failedWrite.
+            throw failedWrite(path, e);
+        }
     }
 
     /**
      * One POST, as the calling clinician.
      *
-     * <p><b>Writes do not fail soft, and that is the whole point of a separate method.</b> The reads
-     * above answer empty when patientservice is unreachable, because a degraded dashboard beats a
-     * 500 on a page the clinician could partly use. Applying that to a write would be the opposite
-     * of kind: the clinician would be told their note was filed, and it would not exist. A failure
-     * here propagates so the caller sees a 5xx and — on a phone — the offline queue keeps the entry
-     * and retries it.
+     * <p><b>Writes do not fail soft, and that is the whole point of a separate method.</b> A read
+     * that did not happen raises {@link PatientServiceUnavailableException} and each caller decides
+     * what to do about it — {@code DutyRosterService} keeps its stored snapshots, the rest let the
+     * 503 travel. There is no such choice to offer here: telling a clinician their note was filed
+     * when it does not exist is the one outcome a write must never produce. So a failure propagates,
+     * the caller sees a 5xx (or the sibling's own 4xx, if it refused rather than failed) and — on a
+     * phone — the offline queue keeps the entry and retries it.
+     *
+     * <p>This paragraph said "the reads above answer empty when patientservice is unreachable,
+     * because a degraded dashboard beats a 500" until 2026-09-07. That stopped being true when item
+     * 24 landed, thirty lines below a class javadoc that already said so — a comment that describes
+     * behaviour the file no longer has is a defect, and this one was in the file that change edited.
      */
     private <T> T post(String path, Map<String, Object> body, Class<T> type) {
         if (!enabled) {
@@ -308,14 +325,18 @@ public class PatientServiceClient {
         }
         String token = SecurityUtils.getCurrentUserJWT()
             .orElseThrow(() -> new IllegalStateException("No caller token available; refusing to write " + path));
-        return restClient
-            .post()
-            .uri(path)
-            .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
-            .contentType(MediaType.APPLICATION_JSON)
-            .body(body)
-            .retrieve()
-            .body(type);
+        try {
+            return restClient
+                .post()
+                .uri(path)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .retrieve()
+                .body(type);
+        } catch (RestClientException e) {
+            throw failedWrite(path, e);
+        }
     }
 
     /**
@@ -405,7 +426,7 @@ public class PatientServiceClient {
             // No credential to relay. Reading with none would either 401 or, worse, succeed against
             // an endpoint that is open — returning data the caller was never authorised for.
             LOG.warn("No caller token available; cannot read {} from patientservice", path);
-            throw new PatientServiceUnavailableException(path, "no caller token to relay");
+            throw PatientServiceUnavailableException.read(path, PatientServiceUnavailableException.Fault.NO_TOKEN, null);
         }
         Map<Object, T> rows = new LinkedHashMap<>();
         Instant deadline = Instant.now().plus(readBudget);
@@ -416,13 +437,10 @@ public class PatientServiceClient {
                     // Thrown rather than returned, so it takes the same path as any other failure and
                     // reaches the caller as an outage. A slow sibling that hands back half a caseload
                     // is the shape of the defect this whole method exists to fix.
-                    throw new PatientServiceUnavailableException(
+                    throw PatientServiceUnavailableException.read(
                         path,
-                        "the %ds read budget was exhausted after %d page(s) and %d row(s)".formatted(
-                                readBudget.toSeconds(),
-                                page,
-                                rows.size()
-                            )
+                        PatientServiceUnavailableException.Fault.BUDGET_EXHAUSTED,
+                        "%ds, after %d page(s) and %d row(s)".formatted(readBudget.toSeconds(), page, rows.size())
                     );
                 }
                 List<T> batch = getPage(path, type, token, page);
@@ -469,9 +487,10 @@ public class PatientServiceClient {
                 rows.size(),
                 rows.size()
             );
-            throw new PatientServiceUnavailableException(
+            throw PatientServiceUnavailableException.read(
                 path,
-                "the %d-page guard was exceeded at %d row(s)".formatted(MAX_PAGES, rows.size())
+                PatientServiceUnavailableException.Fault.PAGE_GUARD,
+                "%d pages, at %d row(s)".formatted(MAX_PAGES, rows.size())
             );
         } catch (PatientServiceUnavailableException e) {
             // Raised by this method itself — the read budget or the page guard — with a message this
@@ -479,15 +498,100 @@ public class PatientServiceClient {
             // into the generic one below.
             throw e;
         } catch (Exception e) {
-            // The throwable itself, not just its message: this is the only place the transport
-            // failure exists, and the exception raised in its place deliberately carries no cause
-            // (see PatientServiceUnavailableException — the cause's message quotes the sibling's
-            // internal base URL and would land in the problem detail).
-            LOG.warn("patientservice read of {} failed after {} row(s); the caller decides what that means", path, rows.size(), e);
-            // The class name rather than the message, for the same reason there is no cause: a
-            // RestClient message quotes the URL it called, base URL included.
-            throw new PatientServiceUnavailableException(path, e.getClass().getSimpleName());
+            throw failedRead(path, rows.size(), e);
         }
+    }
+
+    /**
+     * The end of a read that did not happen: logged with its throwable, raised without it.
+     *
+     * <p><b>The catch above stays broad, and this method is why that is now safe to say out loud.</b>
+     * A call that failed for a reason nobody anticipated is still a call that failed, and answering
+     * empty for it is the conflation item 24 removed — so narrowing the catch to the transport
+     * exceptions would put an unanticipated failure back on the "empty collection" path. What breadth
+     * costs is that a <b>schema</b> fault arrives here too: one row whose {@code loggedAt} the sibling
+     * has changed the type of fails Jackson, and every clinician surface computed from that collection
+     * then answers 503 <em>persistently</em>, where a transport outage clears itself. That drift has
+     * happened once already ({@code PatientServiceDtos.ActivityLog}, corrected 2026-08-22).
+     *
+     * <p><b>Both are still 503</b> — an empty record is a worse answer to a clinician than an error,
+     * whichever the cause — but they are told apart, because the remedies are opposites: waiting is
+     * right for one and useless for the other. {@link PatientServiceUnavailableException.Fault} names
+     * which, in the message and so in the problem detail, and the log level follows it: ERROR for a
+     * fault that will not clear on its own, WARN for one that may.
+     *
+     * <p>The throwable is logged rather than carried, and the detail is the failure's class name
+     * rather than its message, for the same single reason: a {@code RestClient} message quotes the URL
+     * it called, internal base URL included, and {@code ExceptionTranslator} prefers a cause's message
+     * over the exception's own when it builds the problem detail.
+     */
+    private PatientServiceUnavailableException failedRead(String path, int rowsSeen, Exception failure) {
+        PatientServiceUnavailableException.Fault fault = PatientServiceUnavailableException.Fault.of(failure);
+        if (fault.clearsOnRetry()) {
+            LOG.warn(
+                "patientservice read of {} failed after {} row(s) [{}]; the caller decides what that means",
+                path,
+                rowsSeen,
+                fault,
+                failure
+            );
+        } else {
+            LOG.error(
+                "patientservice read of {} failed after {} row(s) [{}: {}]. This does NOT clear itself: every read of this " +
+                "collection will fail the same way until a DTO in PatientServiceDtos or the sibling's schema changes. " +
+                "Retrying, restarting and waiting are all the wrong remedy",
+                path,
+                rowsSeen,
+                fault,
+                fault.description(),
+                failure
+            );
+        }
+        return PatientServiceUnavailableException.read(path, fault, failure.getClass().getSimpleName());
+    }
+
+    /**
+     * The end of a write that did not happen. Same no-cause rule as {@link #failedRead}, and the same
+     * reason for it — this one just took three weeks longer to apply.
+     *
+     * <p><b>The leak was here, not on the reads</b> (found by the review of item 24, 2026-09-07).
+     * Both writes propagated the raw {@code RestClientException}, whose message is
+     * {@code I/O error on POST request for "http://hc-patient-service:8081/api/reports": hc-patient-service:
+     * Name or service not known}. {@code ExceptionTranslator} takes the <em>cause's</em> message in
+     * preference to the exception's own and, in {@code prod}, scrubs it only if
+     * {@code containsPackageName} matches — which looks for {@code org. java. net. com. io. de.} and
+     * finds none of them in a hostname. So the sibling's internal name reached a public 500 body,
+     * reachable whenever the reads succeed and the write does not: a partial outage, a POST timing out
+     * under load, DNS flapping between the six reads and the write.
+     *
+     * <p><b>A refusal is passed through with its status, and that is the one asymmetry with the
+     * reads.</b> A 4xx means the sibling <em>answered</em> — it read the request and would not have
+     * it — and reporting that as 503 would be a second conflation of exactly item 24's kind, one
+     * layer out: {@code mobile/}'s offline queue classifies 4xx as {@code rejected} and 5xx as
+     * {@code retry} ({@code queued-write.model.ts}), so a permanently malformed entry reported as 503
+     * would be retried for ever. The status travels; the body does not, because a
+     * {@code ResponseStatusException} built with a reason and no cause cannot carry one.
+     *
+     * <p><b>401 is the exception to that exception.</b> It does not mean the caller is unauthenticated
+     * here — this service already authenticated them — it means the token this service relayed was not
+     * accepted over there, which in practice is the shared signing key having drifted between the
+     * stacks (see {@code docs/CLAUDE.md} § the JWT secret). Passing it through would sign a clinician
+     * out of a portal that is working, so it is reported as what it is: the sibling being unusable.
+     */
+    private RuntimeException failedWrite(String path, RestClientException failure) {
+        PatientServiceUnavailableException.Fault fault = PatientServiceUnavailableException.Fault.of(failure);
+        if (fault.clearsOnRetry()) {
+            LOG.warn("patientservice write to {} failed [{}]", path, fault, failure);
+        } else {
+            LOG.error("patientservice write to {} failed [{}: {}]; this does NOT clear itself", path, fault, fault.description(), failure);
+        }
+        if (failure instanceof RestClientResponseException answered && answered.getStatusCode().is4xxClientError()) {
+            HttpStatusCode status = answered.getStatusCode();
+            if (!HttpStatus.UNAUTHORIZED.isSameCodeAs(status)) {
+                return new ResponseStatusException(status, "patientservice refused the write to " + path);
+            }
+        }
+        return PatientServiceUnavailableException.write(path, fault, failure.getClass().getSimpleName());
     }
 
     /**

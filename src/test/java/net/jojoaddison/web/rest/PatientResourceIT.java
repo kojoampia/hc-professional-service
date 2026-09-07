@@ -184,7 +184,11 @@ class PatientResourceIT {
     // --- An outage is a 503, not a caseload decision (backlog.md item 24) ---------------------
 
     private static PatientServiceUnavailableException outage() {
-        return new PatientServiceUnavailableException("/api/clinical-cases", "connection refused");
+        return PatientServiceUnavailableException.read(
+            "/api/clinical-cases",
+            PatientServiceUnavailableException.Fault.TRANSPORT,
+            "connection refused"
+        );
     }
 
     /**

@@ -277,7 +277,11 @@ class RosterTrailIT {
     @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
     void answersA503WhenTheTrailCouldNotBeREADratherThanAQuietWeek() throws Exception {
         when(patientServiceClient.activityLogs()).thenThrow(
-            new PatientServiceUnavailableException("/api/activity-logs", "connection refused")
+            PatientServiceUnavailableException.read(
+                "/api/activity-logs",
+                PatientServiceUnavailableException.Fault.TRANSPORT,
+                "connection refused"
+            )
         );
 
         restMockMvc.perform(get(trail(MINE))).andExpect(status().isServiceUnavailable());
@@ -291,7 +295,11 @@ class RosterTrailIT {
     @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
     void anOutageDoesNotTurnAREFUSALintoA503() throws Exception {
         when(patientServiceClient.activityLogs()).thenThrow(
-            new PatientServiceUnavailableException("/api/activity-logs", "connection refused")
+            PatientServiceUnavailableException.read(
+                "/api/activity-logs",
+                PatientServiceUnavailableException.Fault.TRANSPORT,
+                "connection refused"
+            )
         );
 
         restMockMvc.perform(get(trail(THEIRS))).andExpect(status().isForbidden());

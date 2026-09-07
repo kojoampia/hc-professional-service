@@ -144,7 +144,13 @@ class DutyRosterRoundsIT {
         // DutyRosterService catches it deliberately. The round must still save — an administrator
         // unable to write a roster because another stack is down is the failure worth avoiding, and
         // DR6's read-time refresh fills the snapshot on the next day-view open.
-        when(patientServiceClient.profiles()).thenThrow(new PatientServiceUnavailableException("/api/profiles", "connection refused"));
+        when(patientServiceClient.profiles()).thenThrow(
+            PatientServiceUnavailableException.read(
+                "/api/profiles",
+                PatientServiceUnavailableException.Fault.TRANSPORT,
+                "connection refused"
+            )
+        );
 
         restMockMvc
             .perform(
@@ -542,7 +548,13 @@ class DutyRosterRoundsIT {
         // now says which of "unreachable" and "no customers" this is, and this service treats them
         // the same on purpose: blanking every address on the roster is far worse than serving one
         // that may be a day old.
-        when(patientServiceClient.profiles()).thenThrow(new PatientServiceUnavailableException("/api/profiles", "connection refused"));
+        when(patientServiceClient.profiles()).thenThrow(
+            PatientServiceUnavailableException.read(
+                "/api/profiles",
+                PatientServiceUnavailableException.Fault.TRANSPORT,
+                "connection refused"
+            )
+        );
 
         restMockMvc
             .perform(get("/api/duty-roster/day/" + TOMORROW))

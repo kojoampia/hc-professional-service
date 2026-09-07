@@ -183,6 +183,32 @@ class PatientServiceClientPagingTest {
         return clientForThisServer(READ_BUDGET_SECONDS);
     }
 
+    /**
+     * A deployment with no sibling answers empty, and that is not the conflation item 24 removed.
+     *
+     * <p>The item's method is that every branch of the empty-or-failed question gets a paired
+     * assertion, and this was the one branch that had none: every other construction in this class
+     * passes {@code true}, so a later simplification that raised unconditionally would break the
+     * supported no-sibling configuration with a green build. `enabled=false` is the same statement
+     * {@code application.kafka.enabled=false} makes about the broker — the collection is genuinely
+     * empty because there is nothing to read, not because a read failed.
+     *
+     * <p>Asserted with no HTTP server behind it at all: the point is that the client must not call.
+     */
+    @Test
+    void aDeploymentWithNoSiblingAnswersEmptyRatherThanRaising() {
+        PatientServiceClient disabled = new PatientServiceClient(
+            RestClient.builder(),
+            "http://127.0.0.1:1",
+            false,
+            PAGE_TIMEOUT_SECONDS,
+            READ_BUDGET_SECONDS
+        );
+
+        assertThat(disabled.profiles()).isEmpty();
+        assertThat(disabled.clinicalCases()).isEmpty();
+    }
+
     private PatientServiceClient clientForThisServer(int readBudgetSeconds) {
         return new PatientServiceClient(
             RestClient.builder(),

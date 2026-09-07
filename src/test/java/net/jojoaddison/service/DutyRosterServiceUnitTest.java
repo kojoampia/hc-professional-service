@@ -250,7 +250,13 @@ class DutyRosterServiceUnitTest {
      */
     @Test
     void anUnreadablePatientStackLeavesTheStoredSnapshotsAlone() {
-        when(patientServiceClient.profiles()).thenThrow(new PatientServiceUnavailableException("/api/profiles", "connection refused"));
+        when(patientServiceClient.profiles()).thenThrow(
+            PatientServiceUnavailableException.read(
+                "/api/profiles",
+                PatientServiceUnavailableException.Fault.TRANSPORT,
+                "connection refused"
+            )
+        );
         DutyRoster stored = round(ShiftType.DAY, visit("c-1", "09:00", "10:00"));
         stored.getVisits().get(0).setCustomerName("Ama Mensah");
         stored.getVisits().get(0).setCustomerAddress("12 Ring Road, Accra");
@@ -271,7 +277,13 @@ class DutyRosterServiceUnitTest {
      */
     @Test
     void aRoundStillSavesWhileThePatientStackIsUnreadable() {
-        when(patientServiceClient.profiles()).thenThrow(new PatientServiceUnavailableException("/api/profiles", "connection refused"));
+        when(patientServiceClient.profiles()).thenThrow(
+            PatientServiceUnavailableException.read(
+                "/api/profiles",
+                PatientServiceUnavailableException.Fault.TRANSPORT,
+                "connection refused"
+            )
+        );
         when(dutyRosterRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         DutyRoster saved = service.assign(round(ShiftType.DAY, visit("c-1", "09:00", "10:00")));
