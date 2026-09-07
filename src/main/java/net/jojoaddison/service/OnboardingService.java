@@ -165,6 +165,16 @@ public class OnboardingService {
      * which the WP1 mutation matrix blocks from POST /api/profiles — their
      * profile is written through the onboarding surface instead. accountId is
      * always forced to the caller; an existing profile keeps its id.
+     *
+     * <p><b>This is the write that publishes the second half of a clinician's arrival</b>
+     * ({@code ProfileUpdated}, backlog.md item 47). It is hooked here rather than on
+     * {@code ProfileResource} because this is the path an applicant's profile is actually written
+     * by — that resource is the generated entity surface, which the mutation matrix keeps applicants
+     * off entirely, and a profile written there has no application beside it to take a role from.
+     *
+     * <p>It fires on an update as well as a creation, unlike the {@code entity.created} beside it: a
+     * directory on another stack needs the current snapshot, and a role or a licence can be right on
+     * the second save when it was not on the first.
      */
     public Profile upsertOwnProfile(String accountId, Profile incoming) {
         Profile profile = profileRepository.findByAccountId(accountId).orElse(null);
@@ -196,7 +206,85 @@ public class OnboardingService {
                 net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
             );
         }
+        // On an update as well as a creation, unlike entity.created above: modifiedDate,
+        // lastModifiedBy and isComplete all move on a second save, and a directory that only ever
+        // heard about the first would show the profile as it was on day one for ever.
+        publishProfileStatus(saved);
         return saved;
+    }
+
+    /**
+     * Composes and publishes {@code ProfileStatus} — the second half of a clinician's arrival, for a
+     * sibling directory that has the account half and nothing to complete it with.
+     *
+     * <p><b>Public and profile-scoped, because the state it reports changes on paths that never
+     * touch the profile row.</b> Verifying or rejecting a document moves {@code isVerified} and
+     * writes only to {@code PersonalDocument}; a save through {@code ProfileResource} moves
+     * {@code modifiedDate} without going through the onboarding surface at all. A record the far
+     * side can never refresh is the defect being fixed rather than a fix, so every one of those
+     * paths calls this.
+     *
+     * <p>The composition is here rather than in the broker because the broker layer takes primitives
+     * only: {@code TechnicalStructureTest} puts {@code ..broker..} in no layer, so a class in it may
+     * reference neither {@code ..service..} nor {@code ..domain..}, and reading a document
+     * collection is both.
+     *
+     * <p><b>Both booleans are read from the definitions that already exist</b> rather than derived
+     * again here. That is not tidiness: two derivations of one rule disagreeing has been a
+     * production defect in this file before (backlog.md item 17), and a directory on another stack
+     * showing "complete" while the {@code ACTIVE} gate refuses the same profile would be that defect
+     * with an audience.
+     *
+     * <p><b>Publishing must never break the write path.</b> The profile is saved by the time this
+     * runs, and the reads it makes are as capable of failing as the send is, so the whole of it is
+     * guarded rather than only the send — {@code DomainEventPublisher} catches its own broker
+     * failures and cannot catch a repository throwing on the way in.
+     */
+    public void publishProfileStatus(Profile profile) {
+        if (profile == null || profile.getAccountId() == null) {
+            // A profile with no account cannot be correlated with anything on the far side, so the
+            // event would be a row nobody could ever attach. ProfileResource accepts a client-built
+            // Profile, so this is reachable rather than defensive.
+            return;
+        }
+        try {
+            domainEventPublisher.publishProfileStatus(
+                profile.getAccountId(),
+                profile.getId(),
+                progressFor(profile.getAccountId()).complete(),
+                allLiveDocumentsVerified(profile.getId()),
+                profile.getCreatedDate(),
+                profile.getModifiedDate(),
+                profile.getLastModifiedBy()
+            );
+        } catch (RuntimeException e) {
+            log.error("Could not announce ProfileStatus for {} — the write it followed stands", profile.getAccountId(), e);
+        }
+    }
+
+    /** {@link #publishProfileStatus(Profile)} for a path that holds a document rather than a profile. */
+    public void publishProfileStatusFor(String profileId) {
+        profileRepository.findById(profileId).ifPresent(this::publishProfileStatus);
+    }
+
+    /**
+     * Every live document on this profile verified, and at least one present.
+     *
+     * <p>The profile-scoped form of what {@link #requireAllMandatoryDocumentsVerified} enforces, and
+     * that method now asks this rather than repeating the rule — one definition, for the reason
+     * {@link #isCurrentVerifiedLicense} gives at length. Archived rows are excluded: a superseded
+     * upload is credential history, not something still awaiting a reviewer.
+     */
+    public boolean allLiveDocumentsVerified(String profileId) {
+        if (profileId == null) {
+            return false;
+        }
+        List<PersonalDocument> live = personalDocumentRepository
+            .findByProfileId(profileId)
+            .stream()
+            .filter(PersonalDocumentService::isLive)
+            .toList();
+        return !live.isEmpty() && live.stream().allMatch(d -> d.getVerificationStatus() == VerificationStatus.VERIFIED);
     }
 
     /** Attribution is a short opaque label; cap it so the field can't be abused as free storage. */
@@ -396,7 +484,11 @@ public class OnboardingService {
     public PersonalDocument verifyDocument(String documentId, String actor) {
         PersonalDocument document = requireDocument(documentId);
         document.verificationStatus(VerificationStatus.VERIFIED).verifiedBy(actor).verifiedAt(Instant.now()).rejectionReason(null);
-        return personalDocumentRepository.save(document);
+        PersonalDocument saved = personalDocumentRepository.save(document);
+        // isVerified moves here without the Profile row being touched, so the announcement has to be
+        // made from the document path or the far side never learns the clinician was cleared.
+        publishProfileStatusFor(saved.getProfileId());
+        return saved;
     }
 
     public PersonalDocument rejectDocument(String documentId, String reason, String actor) {
@@ -405,7 +497,11 @@ public class OnboardingService {
         }
         PersonalDocument document = requireDocument(documentId);
         document.verificationStatus(VerificationStatus.REJECTED).verifiedBy(actor).verifiedAt(Instant.now()).rejectionReason(reason);
-        return personalDocumentRepository.save(document);
+        PersonalDocument saved = personalDocumentRepository.save(document);
+        // The mirror of verifyDocument: a rejection takes isVerified back to false, and a directory
+        // left showing a clinician as verified after one is the worse half of the two.
+        publishProfileStatusFor(saved.getProfileId());
+        return saved;
     }
 
     private PersonalDocument requireDocument(String documentId) {
@@ -610,10 +706,11 @@ public class OnboardingService {
      * action open to anyone that would clear it, since the row is deliberately never deleted.
      */
     private void requireAllMandatoryDocumentsVerified(ProfessionalApplication application) {
-        List<PersonalDocument> documents = liveDocumentsFor(application);
-        boolean allVerified =
-            !documents.isEmpty() && documents.stream().allMatch(d -> d.getVerificationStatus() == VerificationStatus.VERIFIED);
-        if (!allVerified) {
+        // documentsFor is still called first, for its refusal: it raises 409 "Application has no
+        // linked profile" for an application with no profileId, which is a different and more useful
+        // answer than the `false` the profile-scoped predicate would give for a null id.
+        documentsFor(application);
+        if (!allLiveDocumentsVerified(application.getProfileId())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Approval requires every uploaded document to be verified");
         }
     }

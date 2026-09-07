@@ -1,5 +1,6 @@
 package net.jojoaddison.broker;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -166,5 +167,119 @@ public class DomainEventPublisher {
             payload
         );
         publish("message.created", recipientId, envelope, "message " + messageId + " for " + recipientId);
+    }
+
+    /**
+     * The second half of a clinician's arrival: their profile exists, and this is the state of it.
+     *
+     * <p><b>Why this exists at all.</b> The gateway's {@code AccountCreated} says an account was
+     * made and can say nothing about the person's profile, because at that moment there is none. A
+     * directory on another stack cannot complete a record from the account half alone, and
+     * hc-admin's own backlog (items 33, 35, 36) records nineteen links stuck in exactly that state.
+     * This carries what registration could not. See {@link ProfessionalEventType} for the two-halves
+     * argument and backlog.md item 47.
+     *
+     * <p><b>The topic is {@code hc.professional.registration}, not the entity topic</b>, reusing
+     * {@link #ONBOARDING_STATE_BINDING} for the reason {@code onboarding.state} rides there: one
+     * clinician's story is one topic, so a consumer following an account subscribes once. It is also
+     * the only topic from this stack hc-admin is bound to.
+     *
+     * <h2>The payload is fixed, and it is seven fields</h2>
+     *
+     * <p>{@code profileId}, {@code accountId}, {@code isComplete}, {@code isVerified},
+     * {@code createdDate}, {@code modifiedDate}, {@code lastModifiedBy} — identifiers, two booleans
+     * and three timestamps. <b>No role, no licence number, no name, no email.</b> That satisfies the
+     * identifiers-only rule {@link DomainEventEnvelope} states outright, so no departure from it has
+     * to be argued for. {@code lastModifiedBy} is an <b>account identifier and never a display
+     * name</b>: {@code SpringSecurityAuditorAware} fills it from the JWT subject, the same space as
+     * {@code accountId}.
+     *
+     * <p>The name a directory displays comes from the account half and is joined on
+     * {@code accountId}. Nothing here duplicates it.
+     *
+     * <h2>The join does not match today, and this method cannot fix it</h2>
+     *
+     * <p><b>The two producers on this topic do not mean the same thing by {@code accountId}, and
+     * have not since WP3.</b> The gateway keys and publishes {@code User.id}, a Mongo ObjectId. This
+     * service has no user store and the JWT carries no uid claim, so what
+     * {@code OnboardingResource.currentAccountId()} returns — and what this class has always called
+     * {@code accountId} — is the <b>login</b>. {@code onboarding.state} has been landing under a
+     * different key from the gateway's frames about the same clinician all along.
+     *
+     * <p>What is published here is therefore the value this service actually holds, named honestly,
+     * rather than a null that would hide the problem or a guess that would look right. <b>A consumer
+     * joining the halves on {@code accountId} will match nothing until the token carries a uid
+     * claim</b> — a change to authentication rather than to this method — and can join on the
+     * gateway's {@code subject.login} in the meantime, which both halves do agree on. Recorded in
+     * backlog.md item 47 § 2b.
+     *
+     * <p>One consequence is not softened: the halves are <b>not co-partitioned</b>, so nothing
+     * orders this against the account events. It is a snapshot rather than a delta for exactly that
+     * reason — applying it in any order, or twice, yields the same state.
+     *
+     * @param accountId this service's account identifier for the clinician. See the warning above
+     *                  and on {@code Profile.accountId}.
+     * @param isComplete the profile's completeness, by {@code OnboardingService}'s single definition
+     *                   — the same one the transition to {@code ACTIVE} is gated on, not a second
+     *                   derivation of it.
+     * @param isVerified every live document on the profile verified, and at least one present, by
+     *                   the same rule the approval gate applies.
+     * @param lastModifiedBy an account identifier, never a name.
+     */
+    public void publishProfileStatus(
+        String accountId,
+        String profileId,
+        boolean isComplete,
+        boolean isVerified,
+        Instant createdDate,
+        Instant modifiedDate,
+        String lastModifiedBy
+    ) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("profileId", profileId);
+        data.put("accountId", accountId);
+        data.put("isComplete", isComplete);
+        data.put("isVerified", isVerified);
+        data.put("createdDate", createdDate);
+        data.put("modifiedDate", modifiedDate);
+        data.put("lastModifiedBy", lastModifiedBy);
+        ProfessionalEvent event = new ProfessionalEvent(
+            UUID.randomUUID().toString(),
+            ProfessionalEventType.PROFILE_STATUS,
+            ProfessionalEvent.VERSION,
+            Instant.now(),
+            SOURCE,
+            // Email null from this service — the payload rule. The subject repeats the accountId the
+            // data carries, so the envelope names its own subject like every other frame on the
+            // topic; login is left off because it is the same string here and a second copy of one
+            // value under two names is what a consumer would eventually disagree with itself about.
+            new ProfessionalEvent.Subject(null, null, accountId),
+            data
+        );
+        publishShared(ONBOARDING_STATE_BINDING, ProfessionalEventType.PROFILE_STATUS, accountId, event, "profile " + profileId);
+    }
+
+    /**
+     * {@link #publish} for the estate-shaped envelope.
+     *
+     * <p>A near-twin rather than a generalisation of the existing one, because the existing one is
+     * typed to {@link DomainEventEnvelope} and widening it to {@code Object} would remove the only
+     * thing stopping an arbitrary payload reaching these bindings. Both honour
+     * {@code application.kafka.enabled=false} the same way — returning <em>before</em> the send, so
+     * no binding is created and {@code BindingService} never enters its retry loop.
+     */
+    private void publishShared(String binding, String eventType, String key, ProfessionalEvent envelope, String subject) {
+        if (!enabled) {
+            log.debug("Skipping {} for {} — publishing disabled", eventType, subject);
+            return;
+        }
+        try {
+            streamBridge.send(
+                binding,
+                MessageBuilder.withPayload(envelope).setHeader(KafkaHeaders.KEY, key.getBytes(StandardCharsets.UTF_8)).build()
+            );
+        } catch (RuntimeException e) {
+            log.error("Failed to publish {} for {}", eventType, subject, e);
+        }
     }
 }

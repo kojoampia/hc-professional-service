@@ -1,10 +1,14 @@
 package net.jojoaddison.domain;
 
 import java.io.Serializable;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.LastModifiedBy;
+import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -20,6 +24,23 @@ public class Profile implements Serializable {
     @Id
     private String id;
 
+    /**
+     * The clinician's account, and <b>the correlation key this service publishes to the estate</b>.
+     *
+     * <p><b>It is the gateway <em>login</em>, not the gateway's {@code User.id}, and that matters
+     * outside this repository.</b> It is set from {@code OnboardingResource.currentAccountId()},
+     * which returns {@code SecurityUtils.getCurrentUserLogin()} — the JWT subject, which the gateway
+     * fills with {@code authentication.getName()}. The gateway meanwhile keys
+     * {@code registration.created} and its account events on {@code User.id}, a Mongo ObjectId. So
+     * the two producers on {@code hc.professional.registration} have never named one clinician the
+     * same way, and a consumer joining the account half to the profile half on {@code accountId}
+     * matches nothing.
+     *
+     * <p>{@code OnboardingService}'s class javadoc has flagged the substitution since WP1 — "switch
+     * to {@code User.id} once the gateway adds a uid claim". What was not written down is that it
+     * forks the correlation key on a shared topic. See backlog.md item 47 § 2b; the fix is a uid
+     * claim on the token, which is a change to authentication and not to this field.
+     */
     @Indexed(unique = true, sparse = true)
     @Field("account_id")
     private String accountId;
@@ -90,7 +111,68 @@ public class Profile implements Serializable {
     @Field("team_ids")
     private List<String> teamIds = new ArrayList<>();
 
+    /**
+     * When this profile first existed, and when it last changed, and who changed it.
+     *
+     * <h2>Audited rather than hand-set, deliberately</h2>
+     *
+     * <p>{@code PersonalDocument} carries the same three as plain {@code @Field}s written by hand at
+     * each call site. That is not copied here, because these three are <b>published</b> — hc-admin's
+     * professional directory renders {@code createdDate}, {@code modifiedDate} and
+     * {@code lastModifiedBy} straight onto its dashboard (backlog.md item 47 § 2b), so a write path
+     * that forgot to stamp them would not fail anything here and would show a stale date over there.
+     * {@code @EnableMongoAuditing} is already on in {@code DatabaseConfiguration}, so every path that
+     * saves a {@code Profile} — {@code ProfileService}, {@code OnboardingService.upsertOwnProfile},
+     * the repository directly — stamps them without knowing it has to.
+     *
+     * <p><b>Null on every profile written before this field existed</b>, and that is left alone
+     * rather than backfilled: Mongo has no migration framework here, and inventing a creation date
+     * is worse than admitting there is none. The next save of such a profile sets
+     * {@code modifiedDate} and leaves {@code createdDate} null, which reads correctly as "changed
+     * recently, first seen we do not know when".
+     */
+    @CreatedDate
+    @Field("created_date")
+    private Instant createdDate;
+
+    @LastModifiedDate
+    @Field("modified_date")
+    private Instant modifiedDate;
+
+    /**
+     * <b>An account identifier, never a display name.</b> {@code SpringSecurityAuditorAware} fills it
+     * from the JWT subject, which is what this service calls an {@code accountId} everywhere else —
+     * the same identifier space as {@link #accountId}. See the warning on that field.
+     */
+    @LastModifiedBy
+    @Field("last_modified_by")
+    private String lastModifiedBy;
+
     // jhipster-needle-entity-add-field - JHipster will add fields here
+
+    public Instant getCreatedDate() {
+        return this.createdDate;
+    }
+
+    public void setCreatedDate(Instant createdDate) {
+        this.createdDate = createdDate;
+    }
+
+    public Instant getModifiedDate() {
+        return this.modifiedDate;
+    }
+
+    public void setModifiedDate(Instant modifiedDate) {
+        this.modifiedDate = modifiedDate;
+    }
+
+    public String getLastModifiedBy() {
+        return this.lastModifiedBy;
+    }
+
+    public void setLastModifiedBy(String lastModifiedBy) {
+        this.lastModifiedBy = lastModifiedBy;
+    }
 
     public String getId() {
         return this.id;

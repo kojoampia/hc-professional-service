@@ -6,6 +6,7 @@ import java.util.Optional;
 import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.service.OnboardingService;
 import net.jojoaddison.service.ProfileService;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
 import net.jojoaddison.web.rest.util.LocationUri;
@@ -50,10 +51,25 @@ public class ProfileResource {
 
     private final DomainEventPublisher domainEventPublisher;
 
-    public ProfileResource(ProfileService profileService, ProfileRepository profileRepository, DomainEventPublisher domainEventPublisher) {
+    /**
+     * Only for {@code publishProfileStatus}, which is where the completeness and verification rules
+     * live. This resource does not otherwise touch onboarding — but every write here moves
+     * {@code modifiedDate} and {@code lastModifiedBy}, which hc-admin's directory renders, so a save
+     * that announced nothing would leave that record stale with nothing failing here. See
+     * backlog.md item 47 § 2b.
+     */
+    private final OnboardingService onboardingService;
+
+    public ProfileResource(
+        ProfileService profileService,
+        ProfileRepository profileRepository,
+        DomainEventPublisher domainEventPublisher,
+        OnboardingService onboardingService
+    ) {
         this.profileService = profileService;
         this.profileRepository = profileRepository;
         this.domainEventPublisher = domainEventPublisher;
+        this.onboardingService = onboardingService;
     }
 
     /**
@@ -75,6 +91,7 @@ public class ProfileResource {
             profile.getAccountId(),
             net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
         );
+        onboardingService.publishProfileStatus(profile);
         return ResponseEntity.created(LocationUri.of(profile.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, profile.getId()))
             .body(profile);
@@ -107,6 +124,7 @@ public class ProfileResource {
         }
 
         profile = profileService.update(profile);
+        onboardingService.publishProfileStatus(profile);
         return ResponseEntity.ok()
             .headers(HeaderUtil.createEntityUpdateAlert(applicationName, true, ENTITY_NAME, profile.getId()))
             .body(profile);
@@ -140,6 +158,7 @@ public class ProfileResource {
         }
 
         Optional<Profile> result = profileService.partialUpdate(profile);
+        result.ifPresent(onboardingService::publishProfileStatus);
 
         return ResponseUtil.wrapOrNotFound(result, HeaderUtil.createEntityUpdateAlert(applicationName, true, ENTITY_NAME, profile.getId()));
     }
