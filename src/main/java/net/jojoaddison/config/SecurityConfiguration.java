@@ -43,9 +43,11 @@ public class SecurityConfiguration {
                     .requestMatchers("/api/onboarding/**").authenticated()
                     // The estate-wide recipient directory: account id, LOGIN and role for every
                     // ACTIVE professional, unpaginated. The login is what /api/authenticate takes,
-                    // so an unauthorised read of this is the estate's valid-login list. All ten
+                    // so an unauthorised read of this is the estate's valid-login list. All nine
                     // rather than CLINICAL_MUTATION's six, because it is a read and because the
-                    // mobile recipient picker is what a carer composes from.
+                    // mobile recipient picker is what a carer composes from. Nine and not ten since
+                    // 2026-09-06: ROLE_ANGEL left CLINICAL_AND_ADMIN — an angel is a proxy for one
+                    // named patient, not a colleague in the estate directory. Backlog item 30.
                     .requestMatchers(HttpMethod.GET, "/api/messaging/recipients").hasAnyAuthority(AuthoritiesConstants.CLINICAL_AND_ADMIN)
                     // Starting a thread writes into OTHER PEOPLE'S inboxes — including a
                     // recipientRole broadcast to every nurse or doctor, with a push notification
@@ -55,8 +57,10 @@ public class SecurityConfiguration {
                     .requestMatchers(HttpMethod.POST, "/api/messaging/conversations").hasAnyAuthority(AuthoritiesConstants.CLINICAL_AND_ADMIN)
                     // Everything else under messaging is correspondence, not clinical data, and is
                     // scoped to the caller's own MessageRecipient rows. Under the POST /api/** rule
-                    // below, carer/angel/chemist/technician could receive a message and never answer
-                    // one; this is the same exception onboarding already makes.
+                    // below, carer/chemist/technician could receive a message and never answer one;
+                    // this is the same exception onboarding already makes. It is also what an angel
+                    // keeps after the item 30 narrowing — they are out of the directory above, not
+                    // out of their own inbox.
                     //
                     // THE TWO RULES ABOVE ARE THE SECOND LAYER, and they answer a different question
                     // from the gateway's. The gateway decides who reaches this service; this decides
