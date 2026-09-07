@@ -325,6 +325,7 @@ public class OnboardingService {
     }
 
     private void requireCurrentVerifiedLicense(ProfessionalApplication application) {
+        // isCurrentVerifiedLicense screens archived rows itself, so the unfiltered list is safe here.
         if (documentsFor(application).stream().noneMatch(OnboardingService::isCurrentVerifiedLicense)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, REACTIVATION_REQUIRES_LICENSE);
         }
@@ -340,9 +341,13 @@ public class OnboardingService {
      * expired one", and after a renewal <em>both were true at once</em> — a renewal adds a document
      * and nothing retires the lapsed one — so an administrator's reinstatement was undone by the
      * 04:00 sweep, with an audit trail blaming a licence that was valid.
+     *
+     * <p>An archived row is not a current licence whatever its dates say (backlog.md item 20): if a
+     * later upload replaced it, the replacement is the one to ask about.
      */
     private static boolean isCurrentVerifiedLicense(PersonalDocument document) {
         return (
+            PersonalDocumentService.isLive(document) &&
             document.getType() == DocumentType.LICENSE &&
             document.getVerificationStatus() == VerificationStatus.VERIFIED &&
             document.getExpiryDate() != null &&
@@ -373,7 +378,17 @@ public class OnboardingService {
         return applicationRepository.findByStatusOrderBySubmittedAtDesc(status);
     }
 
-    /** Reviewer access to an application's documents; bytes stripped by the resource layer. */
+    /**
+     * Reviewer access to an application's documents; bytes stripped by the resource layer.
+     *
+     * <p><b>Archived rows included, and that is the point of not deleting them</b> (backlog.md item
+     * 20): a superseded licence is evidence of what a clinician held while they were treating
+     * patients, so the credential history stays readable here for ever. Each row carries
+     * {@code supersededAt} and {@code supersededByDocumentId}, so the reviewer screen can label an
+     * archived row and keep it out of its own "every document verified" check — which is the client
+     * mirror of {@link #requireAllMandatoryDocumentsVerified}, and would otherwise let an archived
+     * row block approval from the browser after the server had stopped letting it.
+     */
     public List<PersonalDocument> documentsForApplication(String applicationId) {
         return documentsFor(getById(applicationId));
     }
@@ -498,9 +513,12 @@ public class OnboardingService {
         // Resolved from the profile, not via documentsFor(application): that throws 409 when the
         // application has no linked profile yet, which is precisely one of the incomplete states
         // this method exists to report on.
+        //
+        // Live rows only: a requirement is about what the professional holds now, and an archived row
+        // must be able neither to satisfy one nor to fail one (backlog.md item 20).
         List<PersonalDocument> documents = profile == null || profile.getId() == null
             ? List.<PersonalDocument>of()
-            : personalDocumentRepository.findByProfileId(profile.getId());
+            : personalDocumentRepository.findByProfileId(profile.getId()).stream().filter(PersonalDocumentService::isLive).toList();
 
         List<OnboardingProgressDTO.Requirement> requirements = List.of(
             new OnboardingProgressDTO.Requirement(REQ_CONSENT, application != null && application.getConsentAcceptedAt() != null),
@@ -569,7 +587,7 @@ public class OnboardingService {
     }
 
     private void requireMandatoryDocuments(ProfessionalApplication application) {
-        List<PersonalDocument> documents = documentsFor(application);
+        List<PersonalDocument> documents = liveDocumentsFor(application);
         boolean hasCertificate = documents.stream().anyMatch(d -> d.getType() == DocumentType.CERTIFICATE);
         boolean hasLicenseWithExpiry = documents.stream().anyMatch(d -> d.getType() == DocumentType.LICENSE && d.getExpiryDate() != null);
         boolean hasIdentity = documents.stream().anyMatch(d -> IDENTITY_TYPES.contains(d.getType()));
@@ -582,8 +600,17 @@ public class OnboardingService {
         }
     }
 
+    /**
+     * Approval requires every document the applicant currently offers to be verified.
+     *
+     * <p><b>Currently</b> is load-bearing (backlog.md item 20). Against the unfiltered list an
+     * archived row could fail approval for ever: a document rejected by a reviewer, re-uploaded, and
+     * verified would leave the original REJECTED row in the collection, and {@code allMatch} would
+     * refuse the application on the strength of a document that had already been replaced — with no
+     * action open to anyone that would clear it, since the row is deliberately never deleted.
+     */
     private void requireAllMandatoryDocumentsVerified(ProfessionalApplication application) {
-        List<PersonalDocument> documents = documentsFor(application);
+        List<PersonalDocument> documents = liveDocumentsFor(application);
         boolean allVerified =
             !documents.isEmpty() && documents.stream().allMatch(d -> d.getVerificationStatus() == VerificationStatus.VERIFIED);
         if (!allVerified) {
@@ -591,11 +618,17 @@ public class OnboardingService {
         }
     }
 
+    /** Every document on the application's profile, archived rows included — the reviewer's history view. */
     private List<PersonalDocument> documentsFor(ProfessionalApplication application) {
         String profileId = application.getProfileId();
         if (profileId == null) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Application has no linked profile");
         }
         return personalDocumentRepository.findByProfileId(profileId);
+    }
+
+    /** What the professional holds now — the form every gate reads. See {@link PersonalDocumentService#isLive}. */
+    private List<PersonalDocument> liveDocumentsFor(ProfessionalApplication application) {
+        return documentsFor(application).stream().filter(PersonalDocumentService::isLive).toList();
     }
 }

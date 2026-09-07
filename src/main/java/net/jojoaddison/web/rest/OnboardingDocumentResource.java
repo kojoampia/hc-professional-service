@@ -17,6 +17,7 @@ import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.security.AuthoritiesConstants;
 import net.jojoaddison.security.SecurityUtils;
 import net.jojoaddison.service.OnboardingService;
+import net.jojoaddison.service.PersonalDocumentService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -56,17 +57,20 @@ public class OnboardingDocumentResource {
     private final DomainEventPublisher domainEventPublisher;
 
     private final OnboardingService onboardingService;
+    private final PersonalDocumentService personalDocumentService;
 
     public OnboardingDocumentResource(
         PersonalDocumentRepository personalDocumentRepository,
         ProfileRepository profileRepository,
         DomainEventPublisher domainEventPublisher,
-        OnboardingService onboardingService
+        OnboardingService onboardingService,
+        PersonalDocumentService personalDocumentService
     ) {
         this.personalDocumentRepository = personalDocumentRepository;
         this.profileRepository = profileRepository;
         this.domainEventPublisher = domainEventPublisher;
         this.onboardingService = onboardingService;
+        this.personalDocumentService = personalDocumentService;
     }
 
     @PostMapping
@@ -92,7 +96,12 @@ public class OnboardingDocumentResource {
             .createdDate(LocalDate.now());
         document.setData(bytes);
         document.setDataContentType(file.getContentType());
-        PersonalDocument saved = personalDocumentRepository.save(document);
+        // Archives any earlier document of the same credential rather than piling up beside it
+        // (backlog.md item 20). Superseding is applied on this path and not on the generated
+        // /api/personal-documents CRUD surface: this is where a clinician renews, whereas that one is
+        // an admin data-maintenance surface where implicitly retiring a row the caller did not name
+        // would be a surprise.
+        PersonalDocument saved = personalDocumentService.saveSuperseding(document);
         log.debug("Onboarding document {} ({} bytes) uploaded for profile {}", saved.getId(), bytes.length, profile.getId());
         domainEventPublisher.publishEntityCreated(
             "PersonalDocument",
@@ -105,6 +114,11 @@ public class OnboardingDocumentResource {
         return ResponseEntity.status(HttpStatus.CREATED).body(saved);
     }
 
+    /**
+     * Every document this account has uploaded, archived ones included — a clinician's credential
+     * history is theirs to read, and hiding a superseded row would make a renewal look like a
+     * deletion. {@code supersededAt} is on the wire so the client can label it.
+     */
     @GetMapping
     public java.util.List<PersonalDocument> listOwnDocuments() {
         return personalDocumentRepository

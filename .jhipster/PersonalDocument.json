@@ -69,6 +69,14 @@
     {
       "fieldName": "rejectionReason",
       "fieldType": "String"
+    },
+    {
+      "fieldName": "supersededAt",
+      "fieldType": "Instant"
+    },
+    {
+      "fieldName": "supersededByDocumentId",
+      "fieldType": "String"
     }
   ],
   "microserviceName": "professionalService",

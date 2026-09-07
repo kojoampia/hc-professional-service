@@ -71,6 +71,35 @@ public class PersonalDocument implements Serializable {
     @Field("rejection_reason")
     private String rejectionReason;
 
+    /**
+     * When a later upload of the same credential replaced this row; {@code null} while it is the
+     * current one (backlog.md item 20).
+     *
+     * <p>Superseding is a <b>marker, never a delete</b>. A lapsed licence is evidence of what a
+     * clinician held while they were treating patients, so the row — with its bytes, its checksum and
+     * the reviewer's verdict — stays readable from the reviewer surface for ever. What changes is that
+     * the compliance readers stop counting it: {@code ComplianceService.expiringLicenses} used to join
+     * every LICENSE past its expiry to its application, so a clinician who renewed last year sat on
+     * the watchlist permanently and {@code metrics().expiringLicenses30d} only ever grew.
+     *
+     * <p><b>Absent means current.</b> There is no migration framework here (no Liquibase, no Mongock),
+     * so every row written before this field existed has no {@code superseded_at} at all — and
+     * MongoDB's equality-to-null matches a missing field, so the {@code SupersededAtIsNull} queries
+     * treat those rows as live, which is what they are.
+     */
+    @Field("superseded_at")
+    private Instant supersededAt;
+
+    /**
+     * The id of the document that replaced this one — the credential-history link, so a reviewer
+     * reading an archived licence can see which upload retired it.
+     *
+     * <p>Named for what it holds rather than {@code supersededBy}: {@link #verifiedBy} two fields up
+     * carries an actor's login, and a document id under a parallel name would read as one.
+     */
+    @Field("superseded_by_document_id")
+    private String supersededByDocumentId;
+
     // jhipster-needle-entity-add-field - JHipster will add fields here
 
     public String getId() {
@@ -292,6 +321,32 @@ public class PersonalDocument implements Serializable {
 
     public void setRejectionReason(String rejectionReason) {
         this.rejectionReason = rejectionReason;
+    }
+
+    public Instant getSupersededAt() {
+        return this.supersededAt;
+    }
+
+    public PersonalDocument supersededAt(Instant supersededAt) {
+        this.setSupersededAt(supersededAt);
+        return this;
+    }
+
+    public void setSupersededAt(Instant supersededAt) {
+        this.supersededAt = supersededAt;
+    }
+
+    public String getSupersededByDocumentId() {
+        return this.supersededByDocumentId;
+    }
+
+    public PersonalDocument supersededByDocumentId(String supersededByDocumentId) {
+        this.setSupersededByDocumentId(supersededByDocumentId);
+        return this;
+    }
+
+    public void setSupersededByDocumentId(String supersededByDocumentId) {
+        this.supersededByDocumentId = supersededByDocumentId;
     }
 
     // jhipster-needle-entity-add-getters-setters - JHipster will add getters and setters here
