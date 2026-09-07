@@ -74,15 +74,29 @@ public class ComplianceService {
      * audit events.
      * <p>
      * A professional who has since <b>renewed</b> is skipped entirely — not suspended, no
-     * {@code compliance.alert}, no {@code license-expired} audit event. Renewing adds a document and
-     * nothing retires the lapsed one, so the expired row stays in the collection for ever; without
-     * this guard the nightly sweep found it and undid the administrator's reinstatement at 04:00,
-     * every night, blaming a licence that was valid (backlog.md item 17). The guard asks
+     * {@code compliance.alert}, no {@code license-expired} audit event. Renewing was a pure insert
+     * that retired nothing, so the lapsed row stayed in the collection for ever; without this guard
+     * the nightly sweep found it and undid the administrator's reinstatement at 04:00, every night,
+     * blaming a licence that was valid (backlog.md item 17). The guard asks
      * {@link OnboardingService#hasCurrentVerifiedLicense} — the same predicate reactivation is
      * granted on — because the defect was precisely that the two questions had separate answers.
+     * <p>
+     * <b>Item 20 added a second, independent defence and did not replace this one.</b> A renewal
+     * uploaded through {@code /api/onboarding/documents} marks the row the clinician names as
+     * replaced, and the query below skips marked rows, so the loop never reaches the guard for that
+     * professional. The guard still has to be here, and it covers strictly more: the profiles whose
+     * lapsed rows predate the marker, rows renewed by any other path, and — since a clinician who
+     * does not name the row they are replacing has still renewed — every upload that marks nothing.
+     * Either defence alone closes the lockout; the test that proves the guard still works
+     * ({@code ComplianceFlowIT.expiredLicenseSweepRestrictsAndReactivationNeedsANewLicense}) renews
+     * through the repository rather than the upload endpoint precisely so that the marker is absent
+     * and the guard is the only thing that can be answering.
      */
     public SweepResult sweepExpiredLicenses(String actor) {
-        List<PersonalDocument> expired = personalDocumentRepository.findByTypeAndExpiryDateLessThan(DocumentType.LICENSE, LocalDate.now());
+        List<PersonalDocument> expired = personalDocumentRepository.findByTypeAndExpiryDateLessThanAndSupersededAtIsNull(
+            DocumentType.LICENSE,
+            LocalDate.now()
+        );
         int suspended = 0;
         int renewed = 0;
         for (PersonalDocument license : expired) {
@@ -91,8 +105,10 @@ public class ComplianceService {
                 continue;
             }
             if (onboardingService.hasCurrentVerifiedLicense(license.getProfileId())) {
+                // "Skipped", not "superseded": the row reaching this branch is one the marker did not
+                // catch, so borrowing the field's name for it would read as the opposite of the truth.
                 log.debug(
-                    "Compliance sweep: profile {} has a current license; superseded {} ignored",
+                    "Compliance sweep: profile {} holds a current license; lapsed {} skipped",
                     license.getProfileId(),
                     license.getId()
                 );
@@ -117,12 +133,21 @@ public class ComplianceService {
         return new SweepResult(expired.size(), suspended);
     }
 
-    /** Licenses already lapsed or lapsing within the window, joined to their application for the ops view. */
+    /**
+     * Licenses already lapsed or lapsing within the window, joined to their application for the ops
+     * view.
+     *
+     * <p>Already-expired rows are included deliberately — a watchlist that dropped a licence the day
+     * it lapsed would hide exactly the professionals ops most needs to chase. <b>Superseded rows are
+     * not</b> (backlog.md item 20): before the marker existed this joined every LICENSE a profile had
+     * ever held, so a clinician who renewed last year stayed on the list for ever and there was no
+     * action that would clear them off it.
+     */
     public List<ExpiringLicense> expiringLicenses(int days) {
         LocalDate today = LocalDate.now();
         // "LessThan" is exclusive -> everything with expiryDate <= today+days, including already-expired
         return personalDocumentRepository
-            .findByTypeAndExpiryDateLessThan(DocumentType.LICENSE, today.plusDays(Math.max(0, days) + 1L))
+            .findByTypeAndExpiryDateLessThanAndSupersededAtIsNull(DocumentType.LICENSE, today.plusDays(Math.max(0, days) + 1L))
             .stream()
             .map(license -> {
                 ProfessionalApplication application = applicationRepository.findByProfileId(license.getProfileId()).orElse(null);
@@ -150,6 +175,9 @@ public class ComplianceService {
             String source = application.getSource() == null || application.getSource().isBlank() ? DIRECT_SOURCE : application.getSource();
             bySource.merge(source, 1L, Long::sum);
         }
+        // Through expiringLicenses rather than a second query of its own, so the headline number and
+        // the list an operator opens from it can never disagree about what counts — including about
+        // superseded rows, which neither counts (backlog.md item 20).
         long expiringSoon = expiringLicenses(30).size();
         return new OnboardingMetrics(byStatus, bySource, expiringSoon);
     }

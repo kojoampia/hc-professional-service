@@ -164,6 +164,13 @@ class ComplianceFlowIT {
         // A new verified, unexpired license unlocks reactivation. This is the line that was red from
         // 2026-08-20 — see setUp(): 409 was the right answer to an incomplete profile, not a defect
         // in the reactivation path.
+        //
+        // Saved straight to the repository rather than posted to /api/onboarding/documents, and that
+        // choice is now load-bearing (backlog.md item 20). The upload path marks the row a renewal
+        // replaces, and the sweep skips marked rows — so renewing through it here would make every
+        // assertion below pass because the lapsed row had vanished from the query, while the sweep
+        // guard this class exists to protect went untested. Two defences, and this class tests the
+        // guard: DocumentSupersedeIT tests the marker.
         personalDocumentRepository.save(
             CompleteOnboardingFixture.document(
                 profile,
@@ -184,6 +191,14 @@ class ComplianceFlowIT {
         // entry naming a licence that was valid. The count is asserted rather than the status alone
         // because a re-suspension followed by a re-activation would leave the status right and the
         // audit trail wrong.
+        //
+        // `expiredLicenses` = 1 is what pins *which* defence is answering. The sweep query skips
+        // superseded rows, so had this renewal marked the lapsed one the count would be 0 and
+        // `applicationsSuspended` = 0 would prove nothing about the guard. It is 1: the row is still
+        // there, still un-superseded, still selected — and the guard is what spares the professional.
+        assertThat(personalDocumentRepository.findById(expiredLicense.getId()).orElseThrow().getSupersededAt())
+            .as("the lapsed row must stay un-superseded, or this test stops exercising the item 17 guard")
+            .isNull();
         restMockMvc
             .perform(post("/api/onboarding/compliance/sweep"))
             .andExpect(status().isOk())
