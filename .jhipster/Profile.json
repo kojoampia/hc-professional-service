@@ -72,6 +72,18 @@
     {
       "fieldName": "teamIds",
       "fieldType": "String"
+    },
+    {
+      "fieldName": "createdDate",
+      "fieldType": "Instant"
+    },
+    {
+      "fieldName": "modifiedDate",
+      "fieldType": "Instant"
+    },
+    {
+      "fieldName": "lastModifiedBy",
+      "fieldType": "String"
     }
   ],
   "microserviceName": "professionalMS",
