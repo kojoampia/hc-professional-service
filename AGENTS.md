@@ -65,6 +65,8 @@ This service only **validates** JWTs; it issues none.
 
 Two rules: **publishing must never break the write path** (failures are logged, not propagated — keep the try/catch), and payloads carry **identifiers only, no PII**. The gateway publishes `registration.created` to a separate topic. `DomainEventsKafkaIT` asserts both the envelope and the topic.
 
+**`ProfileStatus` is the exception to "the handler publishes", and it must stay one.** It rides `hc.professional.registration` in the `ProfessionalEvent` envelope and is announced by `service/ProfileStatusAnnouncer`, a Mongo `AbstractMongoEventListener` that fires on any save of `Profile`, `PersonalDocument` or `ProfessionalApplication` — the three documents whose state the frame reports. **Do not add a `publishProfileStatus` call to a new resource or service.** It was called from a table of four handlers until 2026-09-08, and `../docs/backlog.md` item 49 is what the table missed: a clinician renewing their own licence took `isVerified` to false and told nobody, because a list of call sites cannot fail when a fifth is written. `ProfileStatusAnnouncementFilter` (`web/filter/`) makes the flush one frame per request; `ProfileStatusOnEveryWriteIT` proves a bare repository save announces, which is the property the listener exists for. The announcer's javadoc lists what it does not cover — query-based updates, profile deletion, `entity.created`.
+
 ## Commands
 
 ```bash
