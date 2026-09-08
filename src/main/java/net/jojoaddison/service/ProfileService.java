@@ -58,6 +58,10 @@ public class ProfileService {
         profileRepository
             .findById(profile.getId())
             .ifPresent(stored -> {
+                // accountId first, and for a harder reason than the other two: it is the ownership
+                // check. READ_ONLY stops a client *sending* one; this stops a PUT that omits it from
+                // clearing the field and detaching the clinician from their own documents.
+                profile.setAccountId(stored.getAccountId());
                 profile.setAccountUid(stored.getAccountUid());
                 profile.setCreatedDate(stored.getCreatedDate());
             });

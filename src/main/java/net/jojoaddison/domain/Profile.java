@@ -43,7 +43,17 @@ public class Profile implements Serializable {
      * the two halves have always agreed on and is therefore the join that works. <b>This field
      * remains the login and remains the only identity this service resolves a caller by</b> — see
      * {@link #accountUid} for why rewriting it was rejected rather than deferred.
+     *
+     * <p><b>READ_ONLY over HTTP, and that is a security control rather than a modelling preference.</b>
+     * This field is the ownership check — {@code findByAccountId(login)} is what decides whose identity
+     * documents, roster, absences and patient directory a caller may read
+     * ({@code OnboardingDocumentResource:173}, {@code DutyRosterResource:388}, {@code AbsenceService:287},
+     * {@code PatientDirectoryService:109}, {@code RosterTrailService:139}). It was writable from the
+     * request body until 2026-09-08 while {@code PUT /api/profiles/{id}} is a whole-document replace
+     * open to all six {@code CLINICAL_MUTATION} roles, so any nurse could point another clinician's
+     * profile at their own login in two writes and inherit it. Found by the item 53 review.
      */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     @Indexed(unique = true, sparse = true)
     @Field("account_id")
     private String accountId;

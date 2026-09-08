@@ -484,4 +484,73 @@ class ProfileResourceIT {
         List<Profile> profileList = profileRepository.findAll();
         assertThat(profileList).hasSize(databaseSizeBeforeDelete - 1);
     }
+
+    /**
+     * The account-takeover this resource allowed until 2026-09-08, written as the attack rather than as
+     * a field assertion so that it stays honest.
+     *
+     * <p>{@code Profile.accountId} is the ownership check: {@code findByAccountId(login)} decides whose
+     * identity and licence documents, roster, absences and patient directory a caller may read. This
+     * class already runs as {@code ROLE_DOCTOR} — one of the six {@code CLINICAL_MUTATION} roles that
+     * {@code PUT /api/**} admits — so the attacker here needs no privilege the test did not already
+     * have. Sent as raw JSON because a hostile client is not obliged to use our serialiser, and
+     * {@code READ_ONLY} only stops Jackson on the way in.
+     *
+     * <p>Two writes, because the unique sparse index on {@code account_id} blocks a straight collision:
+     * park the attacker's own key, then claim the victim's. If either assertion below fails, a nurse can
+     * download another clinician's passport.
+     */
+    @Test
+    void aClinicianCannotClaimAnotherProfileByRewritingItsAccountId() throws Exception {
+        Profile victim = new Profile().firstName("Ama").lastName("Serwaa").accountId("ama.serwaa");
+        profileRepository.save(victim);
+        Profile attacker = new Profile().firstName("Mal").lastName("Ory").accountId("mallory");
+        profileRepository.save(attacker);
+
+        // 1. park the attacker's own key, so the unique index cannot be what refuses step 2
+        restProfileMockMvc
+            .perform(
+                put(ENTITY_API_URL_ID, attacker.getId())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"id\":\"" + attacker.getId() + "\",\"firstName\":\"Mal\",\"accountId\":\"parked\"}")
+            )
+            .andExpect(status().isOk());
+        assertThat(profileRepository.findById(attacker.getId()).orElseThrow().getAccountId()).isEqualTo("mallory");
+
+        // 2. claim the victim's
+        restProfileMockMvc
+            .perform(
+                put(ENTITY_API_URL_ID, victim.getId())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"id\":\"" + victim.getId() + "\",\"firstName\":\"Ama\",\"accountId\":\"mallory\"}")
+            )
+            .andExpect(status().isOk());
+
+        // The victim still owns their profile, and the attacker's login still resolves to their own.
+        assertThat(profileRepository.findById(victim.getId()).orElseThrow().getAccountId()).isEqualTo("ama.serwaa");
+        assertThat(profileRepository.findByAccountId("ama.serwaa").orElseThrow().getId()).isEqualTo(victim.getId());
+        assertThat(profileRepository.findByAccountId("mallory").orElseThrow().getId()).isEqualTo(attacker.getId());
+    }
+
+    /**
+     * The other half of the same field: a PUT that simply omits {@code accountId} must not clear it and
+     * detach the clinician from their own documents. READ_ONLY guarantees every PUT omits it.
+     */
+    @Test
+    void aPutThatOmitsAccountIdDoesNotClearIt() throws Exception {
+        Profile stored = new Profile().firstName("Ama").lastName("Serwaa").accountId("ama.serwaa");
+        profileRepository.save(stored);
+
+        restProfileMockMvc
+            .perform(
+                put(ENTITY_API_URL_ID, stored.getId())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"id\":\"" + stored.getId() + "\",\"firstName\":\"Ama Updated\"}")
+            )
+            .andExpect(status().isOk());
+
+        Profile after = profileRepository.findById(stored.getId()).orElseThrow();
+        assertThat(after.getFirstName()).isEqualTo("Ama Updated");
+        assertThat(after.getAccountId()).isEqualTo("ama.serwaa");
+    }
 }
