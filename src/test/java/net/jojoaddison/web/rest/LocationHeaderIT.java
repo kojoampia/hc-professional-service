@@ -13,8 +13,10 @@ import java.util.List;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.repository.AbsenceRepository;
+import net.jojoaddison.repository.CategoryRepository;
 import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.repository.TeamRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -102,11 +104,23 @@ class LocationHeaderIT {
     @Autowired
     private DutyRosterRepository dutyRosterRepository;
 
+    @Autowired
+    private CategoryRepository categoryRepository;
+
+    @Autowired
+    private TeamRepository teamRepository;
+
+    /**
+     * Categories and teams are cleaned up here rather than by their own {@code DELETE}, which item 57
+     * removed — see {@link #NO_DELETE}. Profiles were already in this list for the same reason.
+     */
     @AfterEach
     void cleanup() {
         absenceRepository.deleteAll();
         dutyRosterRepository.deleteAll();
         profileRepository.deleteAll();
+        categoryRepository.deleteAll();
+        teamRepository.deleteAll();
     }
 
     /** A request carrying exactly what Spring Cloud Gateway and the edge nginx put on the wire. */
@@ -190,20 +204,31 @@ class LocationHeaderIT {
     }
 
     /**
-     * Housekeeping, and one assertion that is not housekeeping.
+     * The three collections whose generated {@code DELETE} was removed because it orphaned the rows
+     * pointing at it — {@code /api/profiles} by backlog item 56, the other two by item 57.
      *
-     * <p>Eight of the nine paths clean up through their own {@code DELETE}, and asserting 2xx keeps
-     * that honest. <b>{@code /api/profiles} has no {@code DELETE} — backlog item 56</b>, where it was
-     * removed because it orphaned six collections that reference a profile by id and announced
-     * nothing to hc-admin, which {@code ProfileStatus}'s seven contracted fields cannot express.
+     * <p>A profile delete orphaned six collections and could announce nothing, since none of
+     * {@code ProfileStatus}'s seven contracted fields can say "gone". A category delete left every
+     * {@code Profile.specialtyCategoryId} naming a discipline that resolves to nothing; a team delete
+     * left {@code Profile.teamIds} and {@code Task.teamId} pointing at the same nothing.
+     */
+    private static final List<String> NO_DELETE = List.of("/api/profiles", "/api/categories", "/api/teams");
+
+    /**
+     * Housekeeping, and three assertions that are not housekeeping.
      *
-     * <p>So the profile case asserts <b>405</b> rather than skipping the call: a regeneration that
-     * quietly restores that mapping fails here as well as in {@code ProfileResourceIT}. The row itself
-     * needs no cleaning up — {@code @AfterEach} already calls {@code profileRepository.deleteAll()},
-     * which is why this delete was redundant for profiles even before the endpoint went.
+     * <p>Six of the nine paths clean up through their own {@code DELETE}, and asserting 2xx keeps that
+     * honest. The three in {@link #NO_DELETE} assert <b>405</b> rather than skipping the call: a
+     * regeneration that quietly restores one of those mappings fails here as well as in that
+     * resource's own IT, which is two independent guards on the same fact.
+     *
+     * <p>405 rather than 404 because the path pattern still matches GET/PUT/PATCH — Spring rejects
+     * the method, not the route. Their rows are cleaned up by {@code @AfterEach} instead, which is
+     * where the two repositories added for item 57 come in; for profiles that was already true, and
+     * is why the delete was redundant there even before the endpoint went.
      */
     private void removeCreatedRow(String path, String id) throws Exception {
-        if ("/api/profiles".equals(path)) {
+        if (NO_DELETE.contains(path)) {
             restMockMvc.perform(delete(path + "/" + id)).andExpect(status().isMethodNotAllowed());
             return;
         }
@@ -273,6 +298,6 @@ class LocationHeaderIT {
         assertThat(created.location()).isEqualTo("https://" + EXTERNAL_HOST + GATEWAY_PREFIX + "/api/teams/" + created.id());
         followable("/api/teams", created.id());
 
-        restMockMvc.perform(delete("/api/teams/" + created.id())).andExpect(status().is2xxSuccessful());
+        removeCreatedRow("/api/teams", created.id());
     }
 }

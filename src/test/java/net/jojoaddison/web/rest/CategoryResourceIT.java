@@ -374,20 +374,26 @@ class CategoryResourceIT {
         assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
+    /**
+     * There is no DELETE on this resource, and this asserts the absence rather than trusting it —
+     * backlog item 57. {@code Profile.specialtyCategoryId} is a lone id with no name beside it, so
+     * deleting a category left every profile naming a discipline that resolves to nothing, and the
+     * generated {@code deleteById} cascaded nowhere.
+     *
+     * <p>Asserted as 405 rather than 404: the path pattern still matches GET/PUT/PATCH, so Spring
+     * rejects the method rather than the route. A regeneration that quietly restores the mapping
+     * turns this red.
+     */
     @Test
-    void deleteCategory() throws Exception {
-        // Initialize the database
+    void thereIsNoDeleteOnThisResource() throws Exception {
         categoryRepository.save(category);
+        long before = getRepositoryCount();
 
-        long databaseSizeBeforeDelete = getRepositoryCount();
-
-        // Delete the category
         restCategoryMockMvc
             .perform(delete(ENTITY_API_URL_ID, category.getId()).accept(MediaType.APPLICATION_JSON))
-            .andExpect(status().isNoContent());
+            .andExpect(status().isMethodNotAllowed());
 
-        // Validate the database contains one less item
-        assertDecrementedRepositoryCount(databaseSizeBeforeDelete);
+        assertSameRepositoryCount(before);
     }
 
     protected long getRepositoryCount() {
