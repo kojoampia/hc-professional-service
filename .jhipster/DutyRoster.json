@@ -15,7 +15,7 @@
       "fieldName": "duty",
       "fieldType": "DutyRole",
       "fieldValidateRules": ["required"],
-      "fieldValues": "DOCTOR,NURSE,PARAMEDIC,PHARMACIST,THERAPIST,CARER,ANGEL,CHEMIST,TECHNICIAN,OTHER"
+      "fieldValues": "DOCTOR,NURSE,PARAMEDIC,PHARMACIST,THERAPIST,CARER,CHEMIST,TECHNICIAN,OTHER"
     },
     {
       "fieldName": "professionalId",

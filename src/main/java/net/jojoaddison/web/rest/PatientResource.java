@@ -108,7 +108,7 @@ public class PatientResource {
      *
      * <p><b>Left outside the hoisted prefixes on purpose.</b> {@code /api/patients/**} is not listed
      * above the {@code POST /api/**} rule in {@link net.jojoaddison.config.SecurityConfiguration},
-     * so this requires {@code CLINICAL_MUTATION} — carer, angel, chemist and technician read a record
+     * so this requires {@code CLINICAL_MUTATION} — carer, chemist and technician read a record
      * and cannot file into one. The four prefixes that <em>are</em> hoisted (onboarding, messaging,
      * notifications, absences) were each hoisted to escape that rule, and will look like precedent
      * to the next person. They are not: filing a clinical observation is exactly what the rule is for.

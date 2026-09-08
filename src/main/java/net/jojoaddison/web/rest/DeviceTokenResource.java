@@ -18,7 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
  *
  * <p><b>Security note.</b> {@code /api/notifications/**} is declared {@code authenticated()} in
  * {@link net.jojoaddison.config.SecurityConfiguration} <em>before</em> the
- * {@code POST /api/**} rule that requires {@code CLINICAL_MUTATION}. Without that, a carer, angel,
+ * {@code POST /api/**} rule that requires {@code CLINICAL_MUTATION}. Without that, a carer,
  * chemist or technician would get a 403 registering a device — silently, forever, with no error
  * they could act on. Registering for notifications is not a clinical mutation.
  */

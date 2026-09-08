@@ -109,7 +109,7 @@ class NotificationPreferenceResourceIT {
      * The security trap, again.
      *
      * <p>{@code PUT /api/**} requires {@code CLINICAL_MUTATION}. Anywhere but under
-     * {@code /api/notifications/**} a carer, angel, chemist or technician — every read-only role —
+     * {@code /api/notifications/**} a carer, chemist or technician — every read-only role —
      * would get a silent 403 turning their own notifications off, and would have no way to act on it.
      */
     @Test

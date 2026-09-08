@@ -24,7 +24,7 @@ import org.springframework.web.server.ResponseStatusException;
  * <p><b>Why this lives under {@code /api/messaging/**} rather than the generic entity paths.</b> The
  * mutation matrix in {@code SecurityConfiguration} restricts {@code POST /api/**} to
  * {@code CLINICAL_MUTATION} — admin, doctor, nurse, paramedic, pharmacist, therapist — which would
- * leave carer, angel, chemist and technician able to receive a message but never answer one.
+ * leave carer, chemist and technician able to receive a message but never answer one.
  * Messaging is correspondence, not clinical data, so this surface sits above the matrix, the same
  * exception {@code /api/onboarding/**} already makes for applicants who hold only ROLE_USER. If that
  * is not wanted, move these paths back under the matrix and read-only roles become read-only

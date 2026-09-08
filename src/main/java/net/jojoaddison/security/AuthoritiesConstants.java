@@ -23,14 +23,6 @@ public final class AuthoritiesConstants {
 
     public static final String CARER = "ROLE_CARER";
 
-    /**
-     * A patient's nominated care angel — a proxy for one named person rather than a clinical
-     * discipline. Deliberately outside {@link #CLINICAL_AND_ADMIN} since 2026-09-06; see the note
-     * there and docs/backlog.md item 30. It stays in {@link #CLINICAL_MUTATION}'s complement for the
-     * reason it always was: an angel writes no clinical data.
-     */
-    public static final String ANGEL = "ROLE_ANGEL";
-
     public static final String CHEMIST = "ROLE_CHEMIST";
 
     public static final String TECHNICIAN = "ROLE_TECHNICIAN";
@@ -40,8 +32,8 @@ public final class AuthoritiesConstants {
     /**
      * Clinical roles allowed to mutate professional-domain data (onboarding
      * workflow §Authorities): admin/doctor plus the clinical-mutation group.
-     * Carer, Angel, Chemist, and Technician are read-only in v1 — keep this
-     * aligned with web's CLINICAL_MUTATION_ROLES in authority-role.ts.
+     * Carer, Chemist, and Technician are read-only in v1 — keep this aligned
+     * with web's CLINICAL_MUTATION_ROLES in authority-role.ts.
      */
     public static final String[] CLINICAL_MUTATION = { ADMIN, DOCTOR, NURSE, PARAMEDIC, PHARMACIST, THERAPIST };
 
@@ -55,16 +47,21 @@ public final class AuthoritiesConstants {
      * colleague who can receive a message and never open one, which is the exact failure
      * {@code MessagingResource}'s hoist above the mutation matrix exists to prevent.
      *
-     * <p><b>{@link #ANGEL} is deliberately absent, and it used to be here.</b> The estate decided on
-     * 2026-09-06 (docs/backlog.md item 30) that an angel is not a clinical discipline: their
-     * authority is an {@code ACTIVE CareDelegation} over one named patient, held in hc-patient and
-     * re-read per request, not a standing capability. The gateway carries the operative half of that
-     * change — {@code ROLE_ANGEL} no longer opens {@code /services/**} — and this array narrows with
-     * it rather than staying one name wider than the rule that admits callers to this service at
-     * all. The practical effect here is that an angel is not in the estate recipient directory and
-     * cannot start a conversation. They keep everything the {@code .authenticated()} rules below
-     * cover — onboarding, the own-scoped inbox, notifications, absences — which is what a role-less
-     * applicant keeps too, and is why this is a narrowing rather than a lock-out.
+     * <p><b>There is no {@code ANGEL} constant to leave out of this array any more.</b>
+     * {@code ROLE_ANGEL} left it on 2026-09-06 (docs/backlog.md item 30 — an angel's authority is an
+     * {@code ACTIVE CareDelegation} over one named patient, held in hc-patient and re-read per
+     * request, not a standing capability) and left this subsystem entirely on 2026-09-08 (item 44):
+     * <b>an angel supports a patient and has no role whatsoever here.</b> hc-patient owns the
+     * authority and the whole surface for it — the delegation read, the acting-as picker, the
+     * invitations screen — and this service now names neither the authority nor the concept.
+     *
+     * <p><b>A token bearing it still arrives, and still grants nothing.</b> The three gateways share
+     * one signing key and this service validates no issuer, so an hc-patient token is accepted here as
+     * readily as one of ours; so is a token for an account granted the authority before it was removed,
+     * since nothing revokes what is already written to a user document. Anything gated on this array
+     * refuses such a caller for the same reason it refuses {@code ROLE_USER}: the list is positive.
+     * They keep everything the {@code .authenticated()} rules below cover — onboarding, the own-scoped
+     * inbox, notifications, absences — which is exactly what a role-less applicant keeps.
      *
      * <p><b>{@code ROLE_USER} is deliberately absent.</b> An applicant holds it and nothing else, and
      * so does a caller from either sibling stack: the three gateways share one signing key, this
@@ -72,8 +69,9 @@ public final class AuthoritiesConstants {
      * {@code ROLE_PATIENT}. Anything gated on this array is therefore closed to a token this stack
      * did not mint, which is what makes it the second layer behind the gateway's
      * {@code CLINICAL_AND_ADMIN} rule rather than a copy of it. The two arrays hold the same nine
-     * names and are deliberately not shared: the gateway decides who reaches this service, this
-     * service decides who may act, and one of them may narrow without the other.
+     * names — the administrator and the eight disciplines — and are deliberately not shared: the
+     * gateway decides who reaches this service, this service decides who may act, and one of them may
+     * narrow without the other.
      */
     public static final String[] CLINICAL_AND_ADMIN = {
         ADMIN,

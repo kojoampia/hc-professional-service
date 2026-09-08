@@ -2,6 +2,11 @@ package net.jojoaddison.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -15,7 +20,10 @@ import org.junit.jupiter.api.Test;
  *
  * <p>Its sibling is {@code hc-patient}'s {@code AuthoritiesConstantsUnitTest}, and the pair is the
  * only thing holding the two repositories' spelling of "any clinician" together — they share no
- * artefact and cannot. The gateway carries a third copy for {@code /services/**}.
+ * artefact and cannot. The gateway carries a third copy for {@code /services/**}. <b>The three no
+ * longer say the same thing about {@code ROLE_ANGEL}, and must not.</b> hc-patient keeps the authority
+ * and asserts it is outside its clinical sets; this stack removed it entirely on 2026-09-08 and
+ * asserts it is nowhere at all — see {@link #noPrivilegeSetInThisClassNamesTheCareAngelAuthority}.
  */
 class AuthoritiesConstantsUnitTest {
 
@@ -38,33 +46,20 @@ class AuthoritiesConstantsUnitTest {
     }
 
     @Test
-    void theCareAngelAuthorityIsNotAmongThem() {
-        // THE ESTATE DECIDED ON 2026-09-06 THAT AN ANGEL IS NOT A CLINICAL DISCIPLINE (backlog
-        // item 30). A discipline is a standing capability; an angel's authority is an ACTIVE
-        // CareDelegation over ONE named patient, held in hc-patient and re-read per request so that
-        // a revocation takes effect on the next call rather than when a rememberMe token expires.
-        // A role check can carry none of that -- not the patient, not the dates, not the
-        // revocability -- so admitting ROLE_ANGEL to a clinical set silently converts a scoped grant
-        // into an unscoped one.
-        //
-        // The operative half of the change is the gateway's: ROLE_ANGEL no longer opens
-        // /services/**. This array narrows with it so that this service does not name one authority
-        // more than the rule admitting callers to it at all.
-        //
-        // Adding it back would LOOK like closing a gap, because ROLE_ANGEL is still a real seeded
-        // authority and still one of the nine values web/ and mobile/ enumerate. It is not a gap.
-        assertThat(AuthoritiesConstants.CLINICAL_AND_ADMIN).doesNotContain(AuthoritiesConstants.ANGEL);
-    }
-
-    @Test
-    void theCareAngelAuthorityWasNeverInTheMutationMatrixEither() {
-        // Unchanged by item 30 and asserted so the two narrowings are not confused for one. Carer,
-        // chemist and technician are read-only in v1 -- a rule about clinical WRITES -- and an angel
-        // was outside CLINICAL_MUTATION on those grounds long before it left the read set on
-        // different ones. ClinicalAuthorityMatrixIT proves the refusal through a real POST.
-        assertThat(AuthoritiesConstants.CLINICAL_MUTATION)
-            .containsExactlyInAnyOrder("ROLE_ADMIN", "ROLE_DOCTOR", "ROLE_NURSE", "ROLE_PARAMEDIC", "ROLE_PHARMACIST", "ROLE_THERAPIST")
-            .doesNotContain(AuthoritiesConstants.ANGEL);
+    void theMutationMatrixIsTheAdministratorDoctorAndFourDisciplines() {
+        // Unchanged by item 30 and by item 44, and written down so neither narrowing is mistaken for
+        // a change to this one. Carer, chemist and technician are read-only in v1 -- a rule about
+        // clinical WRITES -- and an angel was outside CLINICAL_MUTATION on those grounds long before
+        // it left the read set on different ones and the stack on a third.
+        // ClinicalAuthorityMatrixIT proves the refusals through real POSTs.
+        assertThat(AuthoritiesConstants.CLINICAL_MUTATION).containsExactlyInAnyOrder(
+            "ROLE_ADMIN",
+            "ROLE_DOCTOR",
+            "ROLE_NURSE",
+            "ROLE_PARAMEDIC",
+            "ROLE_PHARMACIST",
+            "ROLE_THERAPIST"
+        );
     }
 
     @Test
@@ -77,14 +72,58 @@ class AuthoritiesConstantsUnitTest {
         assertThat(AuthoritiesConstants.CLINICAL_MUTATION).doesNotContain(AuthoritiesConstants.USER, AuthoritiesConstants.PATIENT);
     }
 
+    /**
+     * The care angel does not exist in this subsystem — not as a constant, and not inside either
+     * authority array.
+     *
+     * <p><b>This replaces three named tests and is deliberately wider than any of them.</b> Until
+     * 2026-09-08 there was a {@code theCareAngelAuthorityIsNotAmongThem} naming
+     * {@code CLINICAL_AND_ADMIN}, a {@code doesNotContain} clause on the mutation matrix, and a
+     * {@code theCareAngelAuthorityStillExists} asserting the constant. Item 44 removed the authority
+     * from this stack entirely — an angel supports one named patient, and hc-patient owns the concept —
+     * so the last is false and the other two would have gone with the constant they referenced, taking
+     * the guard away with them. That is the risk worth naming: those tests existed to stop somebody
+     * putting {@code ROLE_ANGEL} back into a privilege set, and deleting the constant is precisely the
+     * change that makes putting it back feel like closing a gap.
+     *
+     * <p><b>It reads the class rather than a list of field names.</b> A guard that names its own
+     * coverage stops covering things — the reason {@code JhipsterEnumFieldValuesTest} derives its
+     * expectations and hc-admin had eight endpoints go unpaginated behind a test asserting a literal
+     * list of paths. A third privilege array added next year is checked on the day it is written, with
+     * nobody having edited this file. The literal is spelled out because there is no longer a constant
+     * to reference, which is the point.
+     *
+     * <p>What it cannot see is a bare {@code "ROLE_ANGEL"} written straight into a matcher in
+     * {@code SecurityConfiguration} or a {@code @PreAuthorize}. {@code ClinicalAuthorityMatrixIT}
+     * covers that from the other side, by sending real requests with a {@code ROLE_ANGEL} token.
+     */
     @Test
-    void theCareAngelAuthorityStillExists() {
-        // The narrowing is a scope change, not a retirement. ROLE_ANGEL is still seeded by the
-        // gateway's InitialSetupMigration, still assignable, still carried in a token, and still one
-        // of the nine values web/ and mobile/ enumerate -- an angel signs in and keeps everything the
-        // .authenticated() rules cover: onboarding, their own inbox, notifications, absences.
-        // Deleting the constant would be a different and much larger change; this asserts it was not
-        // made by accident while removing the name from an array two lines away.
-        assertThat(AuthoritiesConstants.ANGEL).isEqualTo("ROLE_ANGEL");
+    void noPrivilegeSetInThisClassNamesTheCareAngelAuthority() {
+        List<String> offenders = new ArrayList<>();
+
+        for (Field field : AuthoritiesConstants.class.getDeclaredFields()) {
+            if (!Modifier.isStatic(field.getModifiers())) {
+                continue;
+            }
+            Object value;
+            try {
+                value = field.get(null);
+            } catch (IllegalAccessException e) {
+                throw new AssertionError("could not read " + field.getName(), e);
+            }
+            if (value instanceof String authority && "ROLE_ANGEL".equals(authority)) {
+                offenders.add(field.getName() + " declares ROLE_ANGEL");
+            } else if (value instanceof String[] set && Arrays.asList(set).contains("ROLE_ANGEL")) {
+                offenders.add(field.getName() + " contains ROLE_ANGEL");
+            }
+        }
+
+        assertThat(offenders)
+            .as(
+                "ROLE_ANGEL is hc-patient's authority and has no meaning in this subsystem (docs/backlog.md item 44). " +
+                "A token carrying it may still arrive over the shared signing key, or be held by an account created " +
+                "before the removal; it must go on granting nothing"
+            )
+            .isEmpty();
     }
 }
