@@ -163,7 +163,6 @@ class AccountUidCutoverUnitTest {
 
         ArgumentCaptor<String> uid = ArgumentCaptor.forClass(String.class);
         org.mockito.Mockito.verify(events).publishProfileStatus(
-            org.mockito.Mockito.eq(LOGIN),
             uid.capture(),
             org.mockito.Mockito.any(),
             org.mockito.Mockito.anyBoolean(),

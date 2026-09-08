@@ -1,5 +1,6 @@
 package net.jojoaddison.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.io.Serializable;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -73,7 +74,19 @@ public class Profile implements Serializable {
      * {@code OnboardingService.upsertOwnProfile}, from the caller's own {@code uid} claim on their
      * own profile, and <b>is never cleared once set</b> — a clinician whose 30-day token predates
      * the claim would otherwise wipe it on their next save and take the join down again.
+     *
+     * <p><b>READ-ONLY over HTTP, and that is not decoration.</b> This field asserts to another stack
+     * which gateway account a clinician is, so a value a caller can choose is a value a caller can
+     * forge. Without {@code READ_ONLY} any holder of {@code CLINICAL_MUTATION} — six roles — could
+     * {@code PUT /api/profiles/&#123;someone-else&#125;} with their own {@code uid} in the body, and
+     * this service would publish it to {@code hc.professional.registration} as that clinician's
+     * account identifier; hc-admin keys {@code DirectoryLink.external_key} on exactly that value and
+     * would link the wrong account. The service goes to lengths to stop an administrator's uid
+     * reaching a clinician's row through the <em>token</em> — see
+     * {@code OnboardingService.upsertOwnProfile} — and this closes the same door on the request body.
+     * Found by the review of backlog item 48.
      */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     @Indexed(sparse = true)
     @Field("account_uid")
     private String accountUid;

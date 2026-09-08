@@ -268,11 +268,11 @@ public class OnboardingService {
         }
         try {
             domainEventPublisher.publishProfileStatus(
-                profile.getAccountId(),
                 // Off the profile row, never off the caller: three of the four paths into here are
                 // an administrator acting on somebody else's profile, so the calling token's uid
-                // would name the wrong person. Null until that clinician has saved their own
-                // profile with a uid-bearing token — see Profile.accountUid.
+                // would name the wrong person. Null until that clinician has saved their own profile
+                // with a uid-bearing token, and an unjoinable frame when it is — see Profile.accountUid
+                // and backlog item 50, which makes Profile.accountId hold this value outright.
                 profile.getAccountUid(),
                 profile.getId(),
                 progressFor(profile.getAccountId()).complete(),

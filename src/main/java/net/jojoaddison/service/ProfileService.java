@@ -42,6 +42,25 @@ public class ProfileService {
      */
     public Profile update(Profile profile) {
         log.debug("Request to update Profile : {}", profile);
+        // A whole-document replace, so anything the request body omits is dropped. Two fields must
+        // survive that, and both are invisible to the caller by design (backlog item 48's review):
+        //
+        //   accountUid — READ_ONLY over HTTP, so a client CANNOT send it and every PUT would
+        //                otherwise clear it. Profile.accountUid says it "is never cleared once set";
+        //                without this line that was true of upsertOwnProfile and false here, and the
+        //                published ProfileStatus would flip a known uid to null — exactly what
+        //                aPreClaimTokenDoesNotClearAUidTheProfileAlreadyLearnt exists to prevent.
+        //   createdDate — @CreatedDate is not re-applied to an entity that already has an id, so a
+        //                 replace persists whatever the body carried, which is normally nothing.
+        //
+        // Read from the stored row rather than trusted from the body: the body is the caller's, the
+        // row is the service's.
+        profileRepository
+            .findById(profile.getId())
+            .ifPresent(stored -> {
+                profile.setAccountUid(stored.getAccountUid());
+                profile.setCreatedDate(stored.getCreatedDate());
+            });
         return profileRepository.save(profile);
     }
 
