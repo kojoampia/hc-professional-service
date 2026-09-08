@@ -163,17 +163,27 @@ public class TeamResource {
         Optional<Team> team = teamRepository.findById(id);
         return ResponseUtil.wrapOrNotFound(team);
     }
-
-    /**
-     * {@code DELETE  /teams/:id} : delete the "id" team.
+    /*
+     * There is deliberately no DELETE here — backlog item 57, the same defect as the one on
+     * CategoryResource and on ProfileResource before it (item 56).
      *
-     * @param id the id of the team to delete.
-     * @return the {@link ResponseEntity} with status {@code 204 (NO_CONTENT)}.
+     * Two collections point at a team by id and neither was cascaded: Profile.teamIds, written by
+     * OnboardingService.assignOrganization on the ordinary admin path, and Task.teamId. The
+     * generated delete was a bare deleteById, so removing a team left a clinician assigned to one
+     * that no longer exists and a task filed against the same nothing.
+     *
+     * A team also points back — Team.members holds profile ids — which is why this document is on
+     * both sides of item 56's enumeration and worth reading carefully before adding a cascade to
+     * either end.
+     *
+     * Nothing called it. Not web/, whose review screen types teamIds in as a comma-separated string
+     * and offers no team screen, not mobile/, not deploy/, not quality/'s seed-data.py, which reads
+     * /api/teams and deletes only tasks, shifts, cases, patients and addresses, and not the sibling
+     * stacks — hc-admin's and hc-patient's team clients are bound to their own services, and each of
+     * those has its own /api/teams. It was reachable all the same by all six CLINICAL_MUTATION
+     * roles: on the quality stack a ROLE_DOCTOR token deleted a team with 204 and left it 404.
+     *
+     * If a team ever needs disbanding it comes back deliberately, with the two pointers cleared in
+     * the same operation and the members told — none of which a generated deleteById was doing.
      */
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteTeam(@PathVariable("id") String id) {
-        log.debug("REST request to delete Team : {}", id);
-        teamRepository.deleteById(id);
-        return ResponseEntity.noContent().headers(HeaderUtil.createEntityDeletionAlert(applicationName, true, ENTITY_NAME, id)).build();
-    }
 }

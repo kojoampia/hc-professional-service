@@ -177,17 +177,29 @@ public class CategoryResource {
         Optional<Category> category = categoryRepository.findById(id);
         return ResponseUtil.wrapOrNotFound(category);
     }
-
-    /**
-     * {@code DELETE  /categories/:id} : delete the "id" category.
+    /*
+     * There is deliberately no DELETE here — backlog item 57, which is item 56 in a second place.
      *
-     * @param id the id of the category to delete.
-     * @return the {@link ResponseEntity} with status {@code 204 (NO_CONTENT)}.
+     * A category is only ever pointed at. Profile.specialtyCategoryId is a lone String holding a
+     * category id, and it is the whole of what this service knows about a clinician's discipline —
+     * there is no name beside it and no second field to fall back on. The generated delete was a
+     * bare deleteById with no cascade, so removing a category left every profile naming a discipline
+     * that resolves to nothing, and neither the profile nor the caller was told.
+     *
+     * Unlike a profile delete there is no announcement gap to weigh against it: specialtyCategoryId
+     * is in no ProfileStatus field and in no isComplete requirement, so hc-admin never hears about a
+     * category either way. The whole defect is the dangling pointer.
+     *
+     * Nothing called it. Not web/ — its review screen types specialtyCategoryId in as free text and
+     * has no catalogue screen at all — not mobile/, not deploy/, not quality/'s seed-data.py, which
+     * reads /api/categories and never deletes, and not the sibling stacks: hc-admin's category
+     * client is bound to its own adminservice, and the only thing it calls over here is
+     * POST /api/duty-roster. It was reachable all the same, and by more than an administrator:
+     * DELETE /api/** admits all six CLINICAL_MUTATION roles, and on the quality stack a ROLE_DOCTOR
+     * token deleted a category with 204 and left it 404.
+     *
+     * If a category ever needs retiring, it comes back as a deliberate change: the cheap answer is
+     * an archived flag rather than a delete, because a profile that still points at a retired
+     * category is a fact worth rendering, and a profile that points at nothing is not.
      */
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteCategory(@PathVariable("id") String id) {
-        log.debug("REST request to delete Category : {}", id);
-        categoryRepository.deleteById(id);
-        return ResponseEntity.noContent().headers(HeaderUtil.createEntityDeletionAlert(applicationName, true, ENTITY_NAME, id)).build();
-    }
 }

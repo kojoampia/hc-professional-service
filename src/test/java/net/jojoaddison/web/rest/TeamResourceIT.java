@@ -352,20 +352,26 @@ class TeamResourceIT {
         assertSameRepositoryCount(databaseSizeBeforeUpdate);
     }
 
+    /**
+     * There is no DELETE on this resource, and this asserts the absence rather than trusting it —
+     * backlog item 57. {@code Profile.teamIds} and {@code Task.teamId} both point at a team by id
+     * and the generated {@code deleteById} cascaded to neither, so disbanding a team left a
+     * clinician assigned to one that no longer existed.
+     *
+     * <p>Asserted as 405 rather than 404: the path pattern still matches GET/PUT/PATCH, so Spring
+     * rejects the method rather than the route. A regeneration that quietly restores the mapping
+     * turns this red.
+     */
     @Test
-    void deleteTeam() throws Exception {
-        // Initialize the database
+    void thereIsNoDeleteOnThisResource() throws Exception {
         teamRepository.save(team);
+        long before = getRepositoryCount();
 
-        long databaseSizeBeforeDelete = getRepositoryCount();
-
-        // Delete the team
         restTeamMockMvc
             .perform(delete(ENTITY_API_URL_ID, team.getId()).accept(MediaType.APPLICATION_JSON))
-            .andExpect(status().isNoContent());
+            .andExpect(status().isMethodNotAllowed());
 
-        // Validate the database contains one less item
-        assertDecrementedRepositoryCount(databaseSizeBeforeDelete);
+        assertSameRepositoryCount(before);
     }
 
     protected long getRepositoryCount() {
