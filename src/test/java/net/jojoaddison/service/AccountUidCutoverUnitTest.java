@@ -148,18 +148,23 @@ class AccountUidCutoverUnitTest {
     /**
      * What the profile holds is what is announced — for the profile, never for the caller.
      *
-     * <p>Three of the four paths that publish {@code ProfileStatus} are an administrator acting on
+     * <p>Most of the writes that publish {@code ProfileStatus} are an administrator acting on
      * somebody else's profile, so reading the uid off the calling token instead of the row would
      * attribute the admin's account to the clinician. Asserted here on the one path where the two
      * are the same person, so that a later change to read it from the token fails rather than
      * passes by coincidence.
+     *
+     * <p>The composition is invoked directly rather than through {@code upsertOwnProfile}: since
+     * backlog.md item 49 it is {@code ProfileStatusAnnouncer} that decides an announcement is due,
+     * off the persisted document, and no service method calls it. What is under test here is
+     * unchanged by that — which of two identifiers the frame carries.
      */
     @Test
     void theAnnouncementCarriesTheProfilesUidAndNotTheCallers() {
         authenticateWith(SecurityUtils.MINTING_ISSUER, UID);
         when(profileRepository.findByAccountId(LOGIN)).thenReturn(Optional.empty());
 
-        service.upsertOwnProfile(LOGIN, new Profile().firstName("Ama"));
+        service.publishProfileStatus(service.upsertOwnProfile(LOGIN, new Profile().firstName("Ama")));
 
         ArgumentCaptor<String> uid = ArgumentCaptor.forClass(String.class);
         org.mockito.Mockito.verify(events).publishProfileStatus(

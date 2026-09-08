@@ -174,15 +174,11 @@ public class OnboardingService {
      * profile is written through the onboarding surface instead. accountId is
      * always forced to the caller; an existing profile keeps its id.
      *
-     * <p><b>This is the write that publishes the second half of a clinician's arrival</b>
-     * ({@code ProfileUpdated}, backlog.md item 47). It is hooked here rather than on
-     * {@code ProfileResource} because this is the path an applicant's profile is actually written
-     * by — that resource is the generated entity surface, which the mutation matrix keeps applicants
-     * off entirely, and a profile written there has no application beside it to take a role from.
-     *
-     * <p>It fires on an update as well as a creation, unlike the {@code entity.created} beside it: a
-     * directory on another stack needs the current snapshot, and a role or a licence can be right on
-     * the second save when it was not on the first.
+     * <p><b>This is the write that carries the second half of a clinician's arrival</b>
+     * ({@code ProfileStatus}, backlog.md item 47). It no longer announces it: the save does, through
+     * {@link ProfileStatusAnnouncer}, which listens for the persisted document rather than being
+     * called from a table of paths. This method was one of the four entries on that table and item 49
+     * is what the table missed — see the announcer's javadoc.
      */
     public Profile upsertOwnProfile(String accountId, Profile incoming) {
         Profile profile = profileRepository.findByAccountId(accountId).orElse(null);
@@ -225,10 +221,6 @@ public class OnboardingService {
                 net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
             );
         }
-        // On an update as well as a creation, unlike entity.created above: modifiedDate,
-        // lastModifiedBy and isComplete all move on a second save, and a directory that only ever
-        // heard about the first would show the profile as it was on day one for ever.
-        publishProfileStatus(saved);
         return saved;
     }
 
@@ -236,12 +228,13 @@ public class OnboardingService {
      * Composes and publishes {@code ProfileStatus} — the second half of a clinician's arrival, for a
      * sibling directory that has the account half and nothing to complete it with.
      *
-     * <p><b>Public and profile-scoped, because the state it reports changes on paths that never
-     * touch the profile row.</b> Verifying or rejecting a document moves {@code isVerified} and
-     * writes only to {@code PersonalDocument}; a save through {@code ProfileResource} moves
-     * {@code modifiedDate} without going through the onboarding surface at all. A record the far
-     * side can never refresh is the defect being fixed rather than a fix, so every one of those
-     * paths calls this.
+     * <p><b>This composes the frame; it does not decide when one is due.</b> Its only caller is
+     * {@link ProfileStatusAnnouncer}, which listens for the persisted document. It was called from a
+     * table of four paths until 2026-09-08, and the two paths that were not on the table — a
+     * clinician renewing their own licence, and the whole {@code PersonalDocumentResource} CRUD
+     * surface — are backlog.md item 49: an upload adds a {@code PENDING} row, so it takes
+     * {@code isVerified} to false and said nothing. A list of call sites cannot fail when a fifth one
+     * is written, so there is no longer a list.
      *
      * <p>The composition is here rather than in the broker because the broker layer takes primitives
      * only: {@code TechnicalStructureTest} puts {@code ..broker..} in no layer, so a class in it may
@@ -286,7 +279,11 @@ public class OnboardingService {
         }
     }
 
-    /** {@link #publishProfileStatus(Profile)} for a path that holds a document rather than a profile. */
+    /**
+     * {@link #publishProfileStatus(Profile)} for a caller that holds a profile id rather than a
+     * profile — which {@link ProfileStatusAnnouncer} always does, since a document names its profile
+     * and not the row.
+     */
     public void publishProfileStatusFor(String profileId) {
         profileRepository.findById(profileId).ifPresent(this::publishProfileStatus);
     }
@@ -508,11 +505,10 @@ public class OnboardingService {
     public PersonalDocument verifyDocument(String documentId, String actor) {
         PersonalDocument document = requireDocument(documentId);
         document.verificationStatus(VerificationStatus.VERIFIED).verifiedBy(actor).verifiedAt(Instant.now()).rejectionReason(null);
-        PersonalDocument saved = personalDocumentRepository.save(document);
-        // isVerified moves here without the Profile row being touched, so the announcement has to be
-        // made from the document path or the far side never learns the clinician was cleared.
-        publishProfileStatusFor(saved.getProfileId());
-        return saved;
+        // isVerified moves here without the Profile row being touched; the save of the document is
+        // what ProfileStatusAnnouncer listens for, so the far side learns it without this method
+        // saying so.
+        return personalDocumentRepository.save(document);
     }
 
     public PersonalDocument rejectDocument(String documentId, String reason, String actor) {
@@ -521,11 +517,11 @@ public class OnboardingService {
         }
         PersonalDocument document = requireDocument(documentId);
         document.verificationStatus(VerificationStatus.REJECTED).verifiedBy(actor).verifiedAt(Instant.now()).rejectionReason(reason);
-        PersonalDocument saved = personalDocumentRepository.save(document);
         // The mirror of verifyDocument: a rejection takes isVerified back to false, and a directory
-        // left showing a clinician as verified after one is the worse half of the two.
-        publishProfileStatusFor(saved.getProfileId());
-        return saved;
+        // left showing a clinician as verified after one is the worse half of the two. Announced by
+        // the save, like every other write that moves it — an upload does the same thing and used to
+        // announce nothing at all (backlog.md item 49).
+        return personalDocumentRepository.save(document);
     }
 
     private PersonalDocument requireDocument(String documentId) {
