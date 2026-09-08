@@ -16,7 +16,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -203,17 +202,21 @@ public class ProfileResource {
         Optional<Profile> profile = profileService.findByEmail(email);
         return ResponseUtil.wrapOrNotFound(profile);
     }
-
-    /**
-     * {@code DELETE  /profiles/:id} : delete the "id" profile.
+    /*
+     * There is deliberately no DELETE here. It was generated CRUD, no client ever called it, and it
+     * did two things wrong at once — backlog item 56.
      *
-     * @param id the id of the profile to delete.
-     * @return the {@link ResponseEntity} with status {@code 204 (NO_CONTENT)}.
+     * It orphaned five collections: DutyRoster, Absence, Report, PersonalDocument and
+     * ProfessionalApplication all carry a professionalId or profileId, and ProfileService.delete was a
+     * bare deleteById with no cascade, so a clinician's roster, absences, reports, documents and
+     * application all survived the clinician.
+     *
+     * And it announced nothing. A delete is the one change ProfileStatus cannot express — its seven
+     * fields are contracted with hc-admin and none can say "gone" — so hc-admin's directory would have
+     * gone on rendering a clinician who no longer existed. ProfileStatusAnnouncer says nothing here on
+     * purpose; republishing the last known state would assert the opposite of what happened.
+     *
+     * If a professional ever genuinely needs removing, it comes back as a deliberate change: a soft
+     * delete announces through the existing mechanism unchanged, because a soft delete is a save.
      */
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteProfile(@PathVariable("id") String id) {
-        log.debug("REST request to delete Profile : {}", id);
-        profileService.delete(id);
-        return ResponseEntity.noContent().headers(HeaderUtil.createEntityDeletionAlert(applicationName, true, ENTITY_NAME, id)).build();
-    }
 }

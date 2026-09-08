@@ -468,21 +468,27 @@ class ProfileResourceIT {
         assertThat(profileList).hasSize(databaseSizeBeforeUpdate);
     }
 
+    /**
+     * There is no DELETE on this resource, and this asserts the absence rather than trusting it —
+     * backlog item 56. The generated endpoint orphaned five collections (DutyRoster, Absence, Report,
+     * PersonalDocument, ProfessionalApplication all carry a professionalId or profileId and nothing
+     * cascaded) and announced nothing to hc-admin, because a delete is the one change ProfileStatus's
+     * seven contracted fields cannot express.
+     *
+     * <p>Asserted as 405 rather than 404: the path pattern still matches GET/PUT/PATCH, so Spring
+     * rejects the method rather than the route. A regeneration that quietly restores the mapping turns
+     * this red.
+     */
     @Test
-    void deleteProfile() throws Exception {
-        // Initialize the database
+    void thereIsNoDeleteOnThisResource() throws Exception {
         profileRepository.save(profile);
+        int before = profileRepository.findAll().size();
 
-        int databaseSizeBeforeDelete = profileRepository.findAll().size();
-
-        // Delete the profile
         restProfileMockMvc
             .perform(delete(ENTITY_API_URL_ID, profile.getId()).accept(MediaType.APPLICATION_JSON))
-            .andExpect(status().isNoContent());
+            .andExpect(status().isMethodNotAllowed());
 
-        // Validate the database contains one less item
-        List<Profile> profileList = profileRepository.findAll();
-        assertThat(profileList).hasSize(databaseSizeBeforeDelete - 1);
+        assertThat(profileRepository.findAll()).hasSize(before);
     }
 
     /**
