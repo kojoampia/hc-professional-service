@@ -28,9 +28,17 @@ import org.springframework.web.server.ResponseStatusException;
  * Onboarding application state machine (professional-onboarding-workflow.md
  * § Status model). Every transition is validated server-side and recorded as
  * an append-only {@link OnboardingEvent}; illegal transitions are rejected
- * with 409 CONFLICT. Account linkage note: the JWT exposes only the login
- * (subject), so {@code accountId} carries the gateway login for now — switch
- * to User.id once the gateway adds a uid claim.
+ * with 409 CONFLICT.
+ *
+ * <p><b>Account linkage.</b> {@code accountId} is the gateway login, taken from the JWT subject,
+ * and it stays that way. This javadoc said "switch to User.id once the gateway adds a uid claim"
+ * from WP1 until 2026-09-07; the gateway now adds the claim, and the switch was <b>deliberately not
+ * made</b>. Every identifier in this database is a login — {@code ProfessionalApplication},
+ * {@code DeviceToken}, {@code MessageRecipient}, {@code OnboardingEvent.actor}, every
+ * {@code createdBy} and {@code lastModifiedBy} — the mapping needed to rewrite them lives in a
+ * database this service cannot read, and it is not total, so the result would be a field holding
+ * both identifier spaces at once. {@code Profile.accountUid} carries the gateway id <em>beside</em>
+ * the login instead, for publication only, and is never a lookup key. See backlog.md item 48.
  */
 @Service
 public class OnboardingService {
@@ -182,6 +190,17 @@ public class OnboardingService {
         if (created) {
             profile = new Profile();
         }
+        // The one place accountUid is written, and only ever for the caller's own profile — this
+        // method already force-sets accountId to the caller, so the uid claim on the same token
+        // describes the same person. An admin saving somebody else's profile through
+        // ProfileResource must not stamp their own id onto it, which is the mistake that would look
+        // right and be wrong. Absence leaves the stored value alone rather than clearing it: a
+        // clinician still holding a 30-day token minted before the claim existed would otherwise
+        // undo the link on their next save. See Profile.accountUid and backlog.md item 48.
+        String accountUid = net.jojoaddison.security.SecurityUtils.getCurrentUserAccountUid().orElse(null);
+        if (accountUid != null) {
+            profile.accountUid(accountUid);
+        }
         profile
             .accountId(accountId)
             .firstName(incoming.getFirstName())
@@ -249,7 +268,12 @@ public class OnboardingService {
         }
         try {
             domainEventPublisher.publishProfileStatus(
-                profile.getAccountId(),
+                // Off the profile row, never off the caller: three of the four paths into here are
+                // an administrator acting on somebody else's profile, so the calling token's uid
+                // would name the wrong person. Null until that clinician has saved their own profile
+                // with a uid-bearing token, and an unjoinable frame when it is — see Profile.accountUid
+                // and backlog item 50, which makes Profile.accountId hold this value outright.
+                profile.getAccountUid(),
                 profile.getId(),
                 progressFor(profile.getAccountId()).complete(),
                 allLiveDocumentsVerified(profile.getId()),

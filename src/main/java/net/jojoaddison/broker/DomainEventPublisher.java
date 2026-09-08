@@ -184,47 +184,66 @@ public class DomainEventPublisher {
      * clinician's story is one topic, so a consumer following an account subscribes once. It is also
      * the only topic from this stack hc-admin is bound to.
      *
-     * <h2>The payload is fixed, and it is seven fields</h2>
+     * <h2>The payload is the architect's seven fields, and exactly those</h2>
      *
      * <p>{@code profileId}, {@code accountId}, {@code isComplete}, {@code isVerified},
      * {@code createdDate}, {@code modifiedDate}, {@code lastModifiedBy} — identifiers, two booleans
      * and three timestamps. <b>No role, no licence number, no name, no email.</b> That satisfies the
      * identifiers-only rule {@link DomainEventEnvelope} states outright, so no departure from it has
-     * to be argued for. {@code lastModifiedBy} is an <b>account identifier and never a display
-     * name</b>: {@code SpringSecurityAuditorAware} fills it from the JWT subject, the same space as
-     * {@code accountId}.
+     * to be argued for.
      *
-     * <p>The name a directory displays comes from the account half and is joined on
-     * {@code accountId}. Nothing here duplicates it.
+     * <h2>{@code accountId} is the gateway's {@code User.id}, which is not what this database stores</h2>
      *
-     * <h2>The join does not match today, and this method cannot fix it</h2>
+     * <p><b>This is the one place the two meanings of that name have to be held apart.</b> The
+     * specified contract names {@code accountId} and means the gateway's {@code User.id}. This
+     * service resolves its caller from the JWT subject, so what
+     * {@code OnboardingResource.currentAccountId()} returns — and what {@code Profile.accountId}
+     * stores — is the <b>login</b>. Two different values wearing one name.
      *
-     * <p><b>The two producers on this topic do not mean the same thing by {@code accountId}, and
-     * have not since WP3.</b> The gateway keys and publishes {@code User.id}, a Mongo ObjectId. This
-     * service has no user store and the JWT carries no uid claim, so what
-     * {@code OnboardingResource.currentAccountId()} returns — and what this class has always called
-     * {@code accountId} — is the <b>login</b>. {@code onboarding.state} has been landing under a
-     * different key from the gateway's frames about the same clinician all along.
+     * <p>The payload takes the specification's meaning. Until 2026-09-08 it did the opposite: it
+     * published the login under {@code accountId} and added the {@code User.id} as an eighth field
+     * called {@code accountUid}, naming the specified field after the value this database happens to
+     * hold rather than after the value the estate asked for. Renaming the payload key does <b>not</b>
+     * rename {@code Profile.accountId}, which 54 call sites key off — that is item 48's migration,
+     * and it is now required rather than declined; see below.
      *
-     * <p>What is published here is therefore the value this service actually holds, named honestly,
-     * rather than a null that would hide the problem or a guess that would look right. <b>A consumer
-     * joining the halves on {@code accountId} will match nothing until the token carries a uid
-     * claim</b> — a change to authentication rather than to this method — and can join on the
-     * gateway's {@code subject.login} in the meantime, which both halves do agree on. Recorded in
-     * backlog.md item 47 § 2b.
+     * <h2>{@code accountId} is the only join, and this half often does not have it yet</h2>
+     *
+     * <p>The estate's decision is that the account identifier correlates a professional and
+     * <b>nothing else does</b> — which is what hc-admin's {@code SiblingDomainEvent} has said all
+     * along: <i>"the correlation key: lowercased email for a patient, {@code accountId} for a
+     * professional."</i> The login used to ride in {@code subject.login} beside it and was the join
+     * that worked; it is gone, because two join keys is two answers to "is this the same clinician",
+     * and a login is editable in user management.
+     *
+     * <p><b>So a frame whose {@code accountId} is null cannot be placed by any consumer.</b> This
+     * service learns {@code User.id} only when a clinician saves their own profile with a
+     * uid-bearing token, so that is every profile written before 2026-09-07 and every one whose owner
+     * has not signed in since. Until those are backfilled this half announces status for clinicians
+     * hc-admin cannot identify — and the Kafka key is null for them too, so their frames are not even
+     * ordered against each other. Both costs are paid off by backfilling {@code User.id}, not by
+     * reintroducing a second identifier.
+     *
+     * <p>{@code lastModifiedBy} is an <b>account identifier and never a display name</b>:
+     * {@code SpringSecurityAuditorAware} fills it from the JWT subject, so today it holds a login for
+     * the same reason — item 48 again. The name a directory displays comes from the account half;
+     * nothing here duplicates it.
+     *
+     * <p>Nothing is nulled and nothing is synthesised. Recorded in backlog.md items 47 § 2b and 48.
      *
      * <p>One consequence is not softened: the halves are <b>not co-partitioned</b>, so nothing
      * orders this against the account events. It is a snapshot rather than a delta for exactly that
      * reason — applying it in any order, or twice, yields the same state.
      *
-     * @param accountId this service's account identifier for the clinician. See the warning above
-     *                  and on {@code Profile.accountId}.
-     * @param isComplete the profile's completeness, by {@code OnboardingService}'s single definition
-     *                   — the same one the transition to {@code ACTIVE} is gated on, not a second
-     *                   derivation of it.
-     * @param isVerified every live document on the profile verified, and at least one present, by
-     *                   the same rule the approval gate applies.
-     * @param lastModifiedBy an account identifier, never a name.
+     * @param accountId the gateway's {@code User.id} for this clinician, and the only value a
+     *                  consumer can correlate on. Null until the profile has learnt it, in which
+     *                  case the frame is unjoinable and says so by omitting the key.
+     * @param profileId this service's own id for the profile.
+     * @param isComplete the profile's completeness, by {@code OnboardingService}'s single definition.
+     * @param isVerified every live document verified, and at least one present.
+     * @param createdDate when the profile row was created.
+     * @param modifiedDate when it last changed.
+     * @param lastModifiedBy an account identifier, never a display name.
      */
     public void publishProfileStatus(
         String accountId,
@@ -237,7 +256,26 @@ public class DomainEventPublisher {
     ) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("profileId", profileId);
-        data.put("accountId", accountId);
+        // `accountId` IS THE GATEWAY'S User.id, which is what the specified contract names — not this
+        // service's stored Profile.accountId, which holds the login. Those are two different values
+        // wearing one name, and the payload takes the spec's meaning.
+        //
+        // This field was published as `accountUid` beside a login-valued `accountId` until 2026-09-08.
+        // That was an eighth field on a seven-field contract, and it named the specified field after
+        // the value this database happens to store rather than after the value the estate asked for.
+        // The login has not been lost: it travels in `subject.login`, which is what hc-admin actually
+        // correlates the two phases on — see backlog item 48. Renaming the payload key does NOT rename
+        // Profile.accountId, which 54 call sites key off; that is item 48's declined migration and is
+        // recorded there.
+        //
+        // OMITTED when unknown, never present-and-null. TokenProvider omits the `uid` claim when blank
+        // on the argument that a present-and-empty value is one a reader can compare against stored
+        // data and match something, while an absent one is the only unambiguous "not known". For the
+        // month after this ships it is unknown on nearly every row, so a present null would be the
+        // shape most consumers meet first.
+        if (accountId != null) {
+            data.put("accountId", accountId);
+        }
         data.put("isComplete", isComplete);
         data.put("isVerified", isVerified);
         data.put("createdDate", createdDate);
@@ -249,13 +287,31 @@ public class DomainEventPublisher {
             ProfessionalEvent.VERSION,
             Instant.now(),
             SOURCE,
-            // Email null from this service — the payload rule. The subject repeats the accountId the
-            // data carries, so the envelope names its own subject like every other frame on the
-            // topic; login is left off because it is the same string here and a second copy of one
-            // value under two names is what a consumer would eventually disagree with itself about.
-            new ProfessionalEvent.Subject(null, null, accountId),
+            // Email null from this service — the payload rule.
+            //
+            // accountId ONLY. It is the gateway's User.id and the estate's sole correlation key for a
+            // professional, which hc-admin's SiblingDomainEvent has stated all along. The login rode
+            // here until 2026-09-08 and was the join that worked; it is gone because two join keys is
+            // two answers to "is this the same clinician", and a login is editable.
+            //
+            // CONSEQUENCE, AND IT IS NOT SMALL: this service only learns User.id when a clinician
+            // saves their own profile with a uid-bearing token, so accountId is NULL — and the frame
+            // therefore unjoinable — for every profile written before 2026-09-07 and every one whose
+            // owner has not signed in since. Until those are backfilled, phase 2 announces status for
+            // clinicians hc-admin cannot place. See backlog item 48: the migration it declined is now
+            // required, not optional.
+            new ProfessionalEvent.Subject(null, accountId),
             data
         );
+        // KEYED ON accountId, the same value and the same space the gateway keys its frames on, so a
+        // clinician's account half and profile half land on one partition and stay ordered against
+        // each other. Keying on anything else would reintroduce the second identifier space this
+        // change exists to remove.
+        //
+        // It can be NULL, and a null key is round-robin: no ordering guarantee for that clinician's
+        // frames until the uid is learnt, and a partition move at the moment it is. That is a real
+        // cost and it is the same blocker as the unjoinable subject above — both are paid off by
+        // backfilling User.id rather than by choosing a different key here.
         publishShared(ONBOARDING_STATE_BINDING, ProfessionalEventType.PROFILE_STATUS, accountId, event, "profile " + profileId);
     }
 
@@ -274,10 +330,18 @@ public class DomainEventPublisher {
             return;
         }
         try {
-            streamBridge.send(
-                binding,
-                MessageBuilder.withPayload(envelope).setHeader(KafkaHeaders.KEY, key.getBytes(StandardCharsets.UTF_8)).build()
-            );
+            MessageBuilder<ProfessionalEvent> message = MessageBuilder.withPayload(envelope);
+            if (key == null) {
+                // No key rather than a null one. `key.getBytes()` NPEs, and the catch below would
+                // swallow it and log "Failed to publish" — a missing identifier reported as a broker
+                // fault, which sends you to Kafka to debug a data problem. The cost of no key is
+                // round-robin partitioning, so this clinician's frames are unordered against each
+                // other; they are also unjoinable, which is the larger problem and is item 50's.
+                log.warn("Publishing {} for {} with no partition key — no accountId yet, see backlog item 50", eventType, subject);
+            } else {
+                message.setHeader(KafkaHeaders.KEY, key.getBytes(StandardCharsets.UTF_8));
+            }
+            streamBridge.send(binding, message.build());
         } catch (RuntimeException e) {
             log.error("Failed to publish {} for {}", eventType, subject, e);
         }

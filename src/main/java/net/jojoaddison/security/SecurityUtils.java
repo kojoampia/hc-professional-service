@@ -10,6 +10,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtClaimNames;
 
 /**
  * Utility class for Spring Security.
@@ -37,7 +38,74 @@ public final class SecurityUtils {
      */
     public static final String EMAIL_KEY = "email";
 
+    /**
+     * The claim this stack's own gateway mints carrying {@code User.id} — the account identifier
+     * that survives a login being edited, and the value the gateway keys its account events on.
+     *
+     * <p>Added on 2026-09-07 ({@code backlog.md} item 48) to close the fork that made the two
+     * producers on {@code hc.professional.registration} name one clinician differently. Read here
+     * for exactly one purpose: to stamp {@code Profile.accountUid} on a clinician's own write, so
+     * that {@code ProfileStatus} can publish an identifier the account half also names.
+     *
+     * <p><b>It is not this service's notion of who is calling and must not become one.</b> Three
+     * things stand in the way of that and all three are permanent. Every stored identifier in this
+     * database — {@code Profile.accountId}, {@code DeviceToken.accountId},
+     * {@code MessageRecipient.recipientId}, {@code OnboardingEvent.actor}, every {@code createdBy}
+     * and {@code lastModifiedBy} — holds the login, so a lookup by {@code uid} would resolve to
+     * nothing. The three gateways share one signing key and {@code TokenOriginValidator} is off, so
+     * a token reaching here may have been minted by hc-admin or hc-patient, whose {@code uid} names
+     * a row in <em>their</em> user store and is meaningless against ours. And the claim is absent
+     * from every token minted before it existed, for up to the thirty-day remember-me window.
+     *
+     * @see #getCurrentUserAccountUid()
+     */
+    public static final String UID_KEY = "uid";
+
+    /**
+     * The only issuer whose {@link #UID_KEY} means anything in this database — this stack's own
+     * gateway, {@code TokenProvider.ISSUER}.
+     *
+     * <p><b>Not the same question as {@code application.security.jwt.trusted-issuers}, and
+     * deliberately not configurable with it.</b> That list decides who may authenticate here, and a
+     * deployment may well decide to trust hc-admin or hc-patient for that. It cannot make their
+     * {@code User.id} name a row in {@code hcProfessionalGateway}: the three products share a
+     * signing key, not a user store. So a {@code uid} from any other issuer is discarded rather than
+     * stored — the same answer as no claim at all, which is a state this code already has to handle.
+     *
+     * <p>Costs nothing to require: this gateway has stamped {@code iss} since 2026-09-06 and
+     * {@code uid} only since 2026-09-07, so no token exists that carries the second without the
+     * first. The literal is duplicated from {@code ApplicationProperties} for the reason recorded
+     * there — this repository has no {@code TokenProvider} to derive it from.
+     */
+    public static final String MINTING_ISSUER = "hc-professional-gateway";
+
     private SecurityUtils() {}
+
+    /**
+     * The gateway {@code User.id} on the caller's token, when there is one.
+     *
+     * <p><b>{@link Optional#empty()} is the ordinary case, not an error.</b> It means one of: a
+     * token minted before 2026-09-07 and still inside its lifetime; a token from hc-admin or
+     * hc-patient; or a machine path with no token at all. Every caller must treat absence as "not
+     * known" and carry on with the login — never synthesise a value, and never take absence as a
+     * reason to clear an id that is already stored, which would undo the cutover on every stale
+     * token that arrived during it.
+     *
+     * <p>A blank claim is empty rather than an empty string, for the reason
+     * {@link #getCurrentUserEmail()} gives: an empty string compared against stored data is a value
+     * that could match something. A claim from any issuer but {@link #MINTING_ISSUER} is empty for a
+     * stronger reason — it names a row in somebody else's user store.
+     */
+    public static Optional<String> getCurrentUserAccountUid() {
+        SecurityContext securityContext = SecurityContextHolder.getContext();
+        return Optional.ofNullable(securityContext.getAuthentication())
+            .map(Authentication::getPrincipal)
+            .filter(Jwt.class::isInstance)
+            .map(Jwt.class::cast)
+            .filter(jwt -> MINTING_ISSUER.equals(jwt.getClaimAsString(JwtClaimNames.ISS)))
+            .map(jwt -> jwt.getClaimAsString(UID_KEY))
+            .filter(uid -> !uid.isBlank());
+    }
 
     /**
      * The {@code email} claim on the caller's token, when there is one.
