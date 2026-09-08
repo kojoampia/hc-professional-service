@@ -32,7 +32,7 @@ import org.springframework.web.bind.annotation.RestController;
  * <p><b>This resource is registered in {@code SecurityConfiguration} as {@code .authenticated()}
  * rather than falling through to the {@code CLINICAL_MUTATION} matchers, and it has to be.</b> Those
  * matchers require {@code POST}/{@code PUT}/{@code DELETE} on {@code /api/**} to carry one of admin,
- * doctor, nurse, paramedic, pharmacist or therapist — so carers, care angels, chemists and
+ * doctor, nurse, paramedic, pharmacist or therapist — so carers, chemists and
  * technicians, who are read-only in v1, would have been unable to <em>ask for time off</em>. Booking
  * leave is not a clinical mutation. The real authorization is per-record and lives in
  * {@link AbsenceService}: you write your own, an administrator writes anyone's.

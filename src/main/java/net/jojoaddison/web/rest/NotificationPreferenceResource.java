@@ -24,7 +24,7 @@ import org.springframework.web.server.ResponseStatusException;
  * <p><b>It sits under {@code /api/notifications/**} for the security rule.</b> That prefix is
  * declared {@code authenticated()} in {@link net.jojoaddison.config.SecurityConfiguration}
  * <em>above</em> the {@code PUT /api/**} rule that requires {@code CLINICAL_MUTATION}. Anywhere else
- * a carer, angel, chemist or technician — every read-only role — would get a silent 403 turning
+ * a carer, chemist or technician — every read-only role — would get a silent 403 turning
  * their own notifications off, which is the same trap the device registration endpoint was moved
  * out of.
  *

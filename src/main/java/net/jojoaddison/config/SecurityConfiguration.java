@@ -47,7 +47,9 @@ public class SecurityConfiguration {
                     // rather than CLINICAL_MUTATION's six, because it is a read and because the
                     // mobile recipient picker is what a carer composes from. Nine and not ten since
                     // 2026-09-06: ROLE_ANGEL left CLINICAL_AND_ADMIN — an angel is a proxy for one
-                    // named patient, not a colleague in the estate directory. Backlog item 30.
+                    // named patient, not a colleague in the estate directory (item 30) — and left
+                    // this subsystem entirely on 2026-09-08 (item 44). A token still carrying it is
+                    // refused here because the list is positive, which is the same answer.
                     .requestMatchers(HttpMethod.GET, "/api/messaging/recipients").hasAnyAuthority(AuthoritiesConstants.CLINICAL_AND_ADMIN)
                     // Starting a thread writes into OTHER PEOPLE'S inboxes — including a
                     // recipientRole broadcast to every nurse or doctor, with a push notification
@@ -58,9 +60,7 @@ public class SecurityConfiguration {
                     // Everything else under messaging is correspondence, not clinical data, and is
                     // scoped to the caller's own MessageRecipient rows. Under the POST /api/** rule
                     // below, carer/chemist/technician could receive a message and never answer one;
-                    // this is the same exception onboarding already makes. It is also what an angel
-                    // keeps after the item 30 narrowing — they are out of the directory above, not
-                    // out of their own inbox.
+                    // this is the same exception onboarding already makes.
                     //
                     // THE TWO RULES ABOVE ARE THE SECOND LAYER, and they answer a different question
                     // from the gateway's. The gateway decides who reaches this service; this decides
@@ -75,13 +75,13 @@ public class SecurityConfiguration {
                     // application. See ClinicalAuthorityMatrixIT and docs/backlog.md item 19.
                     .requestMatchers("/api/messaging/**").authenticated()
                     // Registering a device for push is not a clinical mutation. This MUST sit
-                    // above the POST /api/** rule below: otherwise a carer, angel, chemist or
+                    // above the POST /api/** rule below: otherwise a carer, chemist or
                     // technician — every read-only role — gets a silent 403 registering a device
                     // and simply never receives notifications, with nothing to point at.
                     .requestMatchers("/api/notifications/**").authenticated()
                     // Booking leave is not a clinical mutation either. Fourth exception of the same
                     // shape, and the one with the plainest consequence: under the POST /api/** rule
-                    // below, a carer, care angel, chemist or technician could not ASK FOR TIME OFF.
+                    // below, a carer, chemist or technician could not ASK FOR TIME OFF.
                     // Per-record authorization is AbsenceService's — you write your own, an
                     // administrator writes anyone's — and approval is @PreAuthorize(ADMIN) on the
                     // resource, so nothing here loosens who may grant.

@@ -72,9 +72,18 @@ class DeviceTokenResourceIT {
             .andExpect(status().isCreated());
     }
 
+    /**
+     * And so can a token bearing {@code ROLE_ANGEL}, which is not an authority of this subsystem at all
+     * (docs/backlog.md item 44) but still arrives — hc-patient mints it, the three gateways share one
+     * signing key and this service validates no issuer, and an account on a long-lived database may
+     * hold a grant made before the removal. The point of the case is unchanged and is worth keeping in
+     * this shape: {@code /api/notifications/**} is {@code .authenticated()} above the mutation matrix,
+     * so registering a device does not depend on holding any recognised role, and an unrecognised
+     * authority does not make a caller less authenticated than a role-less applicant.
+     */
     @Test
     @WithMockUser(username = "device-angel", authorities = { "ROLE_ANGEL" })
-    void soCanAnAngel() throws Exception {
+    void soCanACallerHoldingAnAuthorityThisServiceDoesNotKnow() throws Exception {
         restMockMvc
             .perform(post("/api/notifications/devices").contentType(MediaType.APPLICATION_JSON).content(body("tok-angel", "IOS")))
             .andExpect(status().isCreated());

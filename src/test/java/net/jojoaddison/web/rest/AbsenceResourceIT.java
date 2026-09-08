@@ -123,8 +123,8 @@ class AbsenceResourceIT {
     @WithMockUser(username = CARER, authorities = { "ROLE_CARER" })
     void aReadOnlyClinicalRoleCanStillAskForTimeOff() throws Exception {
         // The security-config trap, asserted. CLINICAL_MUTATION is admin/doctor/nurse/paramedic/
-        // pharmacist/therapist, so under the bare POST /api/** rule a carer, care angel, chemist or
-        // technician could not have requested a holiday — a silent 403 with nothing to point at.
+        // pharmacist/therapist, so under the bare POST /api/** rule a carer, chemist or technician
+        // could not have requested a holiday — a silent 403 with nothing to point at.
         // /api/absences/** is registered .authenticated() above that rule for exactly this reason.
         restMockMvc
             .perform(post("/api/absences").contentType(MediaType.APPLICATION_JSON).content(absenceJson(FROM, TO, "HOLIDAY")))

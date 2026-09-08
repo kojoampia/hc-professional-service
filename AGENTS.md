@@ -22,7 +22,7 @@ Server port: **8081** (dev).
 ## Code layout (`src/main/java/net/jojoaddison`)
 
 - `domain/` — MongoDB documents. Generated CRUD entities: `Activity`, `Address`, `Category`, `PersonalDocument`, `Metadata`, `Profile`, `Report`, `Task`, `Team`, `DutyRoster`. Onboarding entities: `ProfessionalApplication`, `OnboardingEvent`, and `EmergencyContact` (embedded in `Profile`). All extend `AbstractAuditingEntity`.
-- `domain/enumeration/` — `DocumentType`, `VerificationStatus` (document credentialing verdict), `OnboardingStatus` (application lifecycle), `DutyRole` and `ShiftType` (duty roster). Each carries a Javadoc stating its contract — read it before adding a value; `ShiftType`'s time windows and `DutyRole`'s nine-role alignment are mirrored in `web/`.
+- `domain/enumeration/` — `DocumentType`, `VerificationStatus` (document credentialing verdict), `OnboardingStatus` (application lifecycle), `DutyRole` and `ShiftType` (duty roster). Each carries a Javadoc stating its contract — read it before adding a value; `ShiftType`'s time windows and `DutyRole`'s eight-discipline alignment are mirrored in `web/`. `DutyRole.ANGEL` was retired on 2026-09-08 (`../docs/backlog.md` item 44) and `AngelDutyRoleMigration` in `config/` deletes the rows that carried it.
 - `repository/` — one `MongoRepository` per entity.
 - `web/rest/` — one CRUD `*Resource` per generated entity, plus the hand-written `OnboardingResource`, `OnboardingDocumentResource`, `DutyRosterResource`, `ComplianceResource`, and `professionalServiceKafkaResource` (note the lowercase-p class name — existing quirk).
 - `service/` — thin for the **generated** entities (most `*Resource` classes call repositories directly; don't introduce a DTO/mapper layer that isn't there), but the onboarding domain has real services: `OnboardingService` (state machine, see below), `ComplianceService` + `ComplianceScheduler`, `PersonalDocumentService`, `ProfileService`. Follow whichever pattern the area you're touching already uses.
@@ -52,10 +52,12 @@ Two further cross-repo documents sit beside it and are the origin of contracts t
 `config/SecurityConfiguration` gates by **route and HTTP method**, not by annotations:
 
 - `GET /api/**` — any authenticated role.
-- `POST`/`PUT`/`PATCH`/`DELETE` `/api/**` — `AuthoritiesConstants.CLINICAL_MUTATION` only: admin, doctor, nurse, paramedic, pharmacist, therapist. **Carer, angel, chemist and technician are read-only in v1.**
+- `POST`/`PUT`/`PATCH`/`DELETE` `/api/**` — `AuthoritiesConstants.CLINICAL_MUTATION` only: admin, doctor, nurse, paramedic, pharmacist, therapist. **Carer, chemist and technician are read-only in v1.**
 - `/api/admin/**` — admin. `/api/onboarding/**` — any authenticated user (see above).
 
-`ClinicalAuthorityMatrixIT` proves the split per role; if you change the matrix, change that test with it. The nine clinical authorities are declared in three repos (here, `gateway/security/AuthoritiesConstants`, and web's `authority.constants.ts`/`authority-role.ts`) and drift silently — web expresses the same six mutating roles differently, admin/doctor via an early return in `hasHealthConnectPermission`.
+`ClinicalAuthorityMatrixIT` proves the split per role; if you change the matrix, change that test with it. The eight clinical disciplines are declared in three repos (here, `gateway/security/AuthoritiesConstants`, and web's `authority.constants.ts`/`authority-role.ts`) and drift silently — web expresses the same six mutating roles differently, admin/doctor via an early return in `hasHealthConnectPermission`.
+
+**`ROLE_ANGEL` is not an authority of this subsystem** (`../docs/backlog.md` item 44, 2026-09-08). A care angel supports one named patient; hc-patient holds the authority — an `ACTIVE CareDelegation` re-read per request — and the whole surface for it. Nothing here names it. **A token carrying it still arrives**, because the three gateways share one signing key and this service validates no issuer, and because an account on a long-lived database may hold a grant made before the removal. Such a caller is exactly a role-less applicant: everything gated on `CLINICAL_AND_ADMIN` or `CLINICAL_MUTATION` refuses it (both are positive lists), and everything `.authenticated()` still serves it. `AuthoritiesConstantsUnitTest` fails if the literal reappears in any privilege set in that class; `ClinicalAuthorityMatrixIT` holds the runtime behaviour with real requests.
 
 This service only **validates** JWTs; it issues none.
 
