@@ -167,7 +167,7 @@ class LocationHeaderIT {
         assertThat(created.location()).isEqualTo("https://" + EXTERNAL_HOST + GATEWAY_PREFIX + path + "/" + created.id());
         followable(path, created.id());
 
-        restMockMvc.perform(delete(path + "/" + created.id())).andExpect(status().is2xxSuccessful());
+        removeCreatedRow(path, created.id());
     }
 
     /**
@@ -186,7 +186,28 @@ class LocationHeaderIT {
         assertThat(created.location()).isEqualTo("http://localhost" + path + "/" + created.id());
         followable(path, created.id());
 
-        restMockMvc.perform(delete(path + "/" + created.id())).andExpect(status().is2xxSuccessful());
+        removeCreatedRow(path, created.id());
+    }
+
+    /**
+     * Housekeeping, and one assertion that is not housekeeping.
+     *
+     * <p>Eight of the nine paths clean up through their own {@code DELETE}, and asserting 2xx keeps
+     * that honest. <b>{@code /api/profiles} has no {@code DELETE} — backlog item 56</b>, where it was
+     * removed because it orphaned six collections that reference a profile by id and announced
+     * nothing to hc-admin, which {@code ProfileStatus}'s seven contracted fields cannot express.
+     *
+     * <p>So the profile case asserts <b>405</b> rather than skipping the call: a regeneration that
+     * quietly restores that mapping fails here as well as in {@code ProfileResourceIT}. The row itself
+     * needs no cleaning up — {@code @AfterEach} already calls {@code profileRepository.deleteAll()},
+     * which is why this delete was redundant for profiles even before the endpoint went.
+     */
+    private void removeCreatedRow(String path, String id) throws Exception {
+        if ("/api/profiles".equals(path)) {
+            restMockMvc.perform(delete(path + "/" + id)).andExpect(status().isMethodNotAllowed());
+            return;
+        }
+        restMockMvc.perform(delete(path + "/" + id)).andExpect(status().is2xxSuccessful());
     }
 
     /**

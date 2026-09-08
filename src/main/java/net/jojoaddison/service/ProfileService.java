@@ -174,16 +174,6 @@ public class ProfileService {
     }
 
     /**
-     * Delete the profile by id.
-     *
-     * @param id the id of the entity.
-     */
-    public void delete(String id) {
-        log.debug("Request to delete Profile : {}", id);
-        profileRepository.deleteById(id);
-    }
-
-    /**
      * Whether this account wants message pushes. Absent preference means yes, so existing
      * profiles keep working without a migration.
      */
