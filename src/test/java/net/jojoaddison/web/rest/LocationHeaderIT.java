@@ -194,7 +194,7 @@ class LocationHeaderIT {
      *
      * <p>Eight of the nine paths clean up through their own {@code DELETE}, and asserting 2xx keeps
      * that honest. <b>{@code /api/profiles} has no {@code DELETE} — backlog item 56</b>, where it was
-     * removed because it orphaned five collections that reference a profile by id and announced
+     * removed because it orphaned six collections that reference a profile by id and announced
      * nothing to hc-admin, which {@code ProfileStatus}'s seven contracted fields cannot express.
      *
      * <p>So the profile case asserts <b>405</b> rather than skipping the call: a regeneration that

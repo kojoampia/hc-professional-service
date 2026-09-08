@@ -206,10 +206,11 @@ public class ProfileResource {
      * There is deliberately no DELETE here. It was generated CRUD, no client ever called it, and it
      * did two things wrong at once — backlog item 56.
      *
-     * It orphaned five collections: DutyRoster, Absence, Report, PersonalDocument and
-     * ProfessionalApplication all carry a professionalId or profileId, and ProfileService.delete was a
-     * bare deleteById with no cascade, so a clinician's roster, absences, reports, documents and
-     * application all survived the clinician.
+     * It orphaned six collections. DutyRoster, Absence, Report, PersonalDocument and
+     * ProfessionalApplication carry a professionalId or profileId; Team.members is a list of profile
+     * ids under a name that shares neither word, which is why a sweep for those two finds five and
+     * stops. ProfileService.delete was a bare deleteById with no cascade, so a clinician's roster,
+     * absences, reports, documents, application and team membership all survived the clinician.
      *
      * And it announced nothing. A delete is the one change ProfileStatus cannot express — its seven
      * fields are contracted with hc-admin and none can say "gone" — so hc-admin's directory would have

@@ -470,10 +470,10 @@ class ProfileResourceIT {
 
     /**
      * There is no DELETE on this resource, and this asserts the absence rather than trusting it —
-     * backlog item 56. The generated endpoint orphaned five collections (DutyRoster, Absence, Report,
-     * PersonalDocument, ProfessionalApplication all carry a professionalId or profileId and nothing
-     * cascaded) and announced nothing to hc-admin, because a delete is the one change ProfileStatus's
-     * seven contracted fields cannot express.
+     * backlog item 56. The generated endpoint orphaned six collections — DutyRoster, Absence, Report,
+     * PersonalDocument and ProfessionalApplication by professionalId or profileId, and Team.members,
+     * which holds profile ids under a name carrying neither word — and announced nothing to hc-admin,
+     * because a delete is the one change ProfileStatus's seven contracted fields cannot express.
      *
      * <p>Asserted as 405 rather than 404: the path pattern still matches GET/PUT/PATCH, so Spring
      * rejects the method rather than the route. A regeneration that quietly restores the mapping turns
