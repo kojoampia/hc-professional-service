@@ -26,16 +26,26 @@ public class ProfileService {
         this.organizationReferenceValidator = organizationReferenceValidator;
     }
 
-    /**
-     * Save a profile.
+    /*
+     * There is deliberately no `save` here, and it is the second generated method on this entity to
+     * go — backlog.md item 66, after item 56 took the delete.
      *
-     * @param profile the entity to save.
-     * @return the persisted entity.
+     * Its only caller was `ProfileResource.createProfile`, which now refuses: since item 54 made
+     * `accountId` READ_ONLY over HTTP, a create from a request body could only produce a profile
+     * belonging to nobody, and nothing could afterwards give it an owner. The argument is on that
+     * handler.
+     *
+     * What made it worth removing rather than leaving unused is that it was the one write path to
+     * this collection with no rule on it at all: `update` preserves accountId/accountUid/createdDate
+     * from the stored row and runs `OrganizationReferenceValidator`, `partialUpdate` merges field by
+     * field, `upsertOwnProfile` forces the account to the caller. A bare repository passthrough on
+     * the service is what the next create would have been written against.
+     *
+     * The two paths that legitimately create a profile do it through the repository, each with its
+     * own reason recorded: `OnboardingService.upsertOwnProfile` (the clinician's own, from their
+     * token) and `updatePushPreferences` below (the caller's own, so a toggle works before
+     * onboarding finishes).
      */
-    public Profile save(Profile profile) {
-        log.debug("Request to save Profile : {}", profile);
-        return profileRepository.save(profile);
-    }
 
     /**
      * Update a profile.

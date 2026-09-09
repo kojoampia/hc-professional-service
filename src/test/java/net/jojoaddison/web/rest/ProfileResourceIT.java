@@ -134,46 +134,125 @@ class ProfileResourceIT {
         profile = createEntity();
     }
 
+    /**
+     * <b>The create is refused, and the generated test that asserted a 201 is what this replaces</b>
+     * (backlog.md item 66).
+     *
+     * <p>It asserted the eleven fields came back and never looked at {@code accountId}, so it stayed
+     * green through item 54 — which made that field {@code READ_ONLY} over HTTP for update
+     * <em>and</em> create, and turned every {@code POST} here into a profile belonging to nobody that
+     * no later call could give an owner. Nobody noticed because the defect was framed as reassignment
+     * and every test inherited the frame — and because the quality stack's thirteen seeded profiles
+     * were written before the hardening, so they are linked and look right.
+     *
+     * <p>Both bodies the old pair sent are asserted here — with an id and without — because they now
+     * get the same answer for the same reason, and a 400 that arrived only for the id would prove
+     * nothing about the create.
+     */
     @Test
-    void createProfile() throws Exception {
+    void aCreateIsRefusedRatherThanMakingAProfileThatBelongsToNobody() throws Exception {
         int databaseSizeBeforeCreate = profileRepository.findAll().size();
-        // Create the Profile
-        restProfileMockMvc
+
+        String body = restProfileMockMvc
             .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(profile)))
-            .andExpect(status().isCreated());
+            .andExpect(status().isBadRequest())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
 
-        // Validate the Profile in the database
-        List<Profile> profileList = profileRepository.findAll();
-        assertThat(profileList).hasSize(databaseSizeBeforeCreate + 1);
-        Profile testProfile = profileList.get(profileList.size() - 1);
-        assertThat(testProfile.getFirstName()).isEqualTo(DEFAULT_FIRST_NAME);
-        assertThat(testProfile.getMiddleNames()).isEqualTo(DEFAULT_MIDDLE_NAMES);
-        assertThat(testProfile.getLastName()).isEqualTo(DEFAULT_LAST_NAME);
-        assertThat(testProfile.getBirthDate()).isEqualTo(DEFAULT_BIRTH_DATE);
-        assertThat(testProfile.getSex()).isEqualTo(DEFAULT_SEX);
-        assertThat(testProfile.getMobilePhone()).isEqualTo(DEFAULT_MOBILE_PHONE);
-        assertThat(testProfile.getPhoneNumber()).isEqualTo(DEFAULT_PHONE_NUMBER);
-        assertThat(testProfile.getEmail()).isEqualTo(DEFAULT_EMAIL);
-        assertThat(testProfile.getCardType()).isEqualTo(DEFAULT_CARD_TYPE);
-        assertThat(testProfile.getCardNumber()).isEqualTo(DEFAULT_CARD_NUMBER);
-        assertThat(testProfile.getAddress()).isEqualTo(DEFAULT_ADDRESS);
-    }
+        assertThat(body)
+            .as("a refusal that will not say where the caller should go instead is item 46 wearing a 400")
+            .contains("PUT /api/onboarding/profile");
 
-    @Test
-    void createProfileWithExistingId() throws Exception {
-        // Create the Profile with an existing ID
+        // The same, with an id — the case the generated createProfileWithExistingId covered.
         profile.setId("existing_id");
-
-        int databaseSizeBeforeCreate = profileRepository.findAll().size();
-
-        // An entity with an existing ID cannot be created, so this API call must fail
         restProfileMockMvc
             .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(profile)))
             .andExpect(status().isBadRequest());
 
-        // Validate the Profile in the database
-        List<Profile> profileList = profileRepository.findAll();
-        assertThat(profileList).hasSize(databaseSizeBeforeCreate);
+        assertThat(profileRepository.findAll()).as("a refused create writes nothing at all").hasSize(databaseSizeBeforeCreate);
+    }
+
+    /**
+     * <b>The create cannot be aimed at an account, and this is the test that decides whether item
+     * 66's answer is safe.</b>
+     *
+     * <p>The rejected shape for item 66 was "make {@code accountId} writable on create, immutable
+     * thereafter". Both halves of why it was rejected are exercised here, as raw JSON because a
+     * hostile client is not obliged to use our serialiser:
+     *
+     * <ul>
+     *   <li><b>Re-pointing an existing row.</b> The unique sparse index on {@code account_id} would
+     *       refuse the write, but with a duplicate-key 500 rather than a decision — a database
+     *       constraint answering an authorization question, which is the reasoning item 54 already
+     *       recorded when it noted the index forced the takeover into two writes instead of
+     *       preventing it.</li>
+     *   <li><b>Claiming a login that has no row yet</b> — the half the index cannot see, and the
+     *       reason a creation-time exception is not a smaller version of item 54's fix. Any of the
+     *       six {@code CLINICAL_MUTATION} roles could author a colleague's profile before that
+     *       colleague onboards, and {@code upsertOwnProfile} adopts the row it finds by
+     *       {@code accountId}: the victim would inherit an identity somebody else wrote, including
+     *       the push preferences item 60 refused to let this same role set.</li>
+     * </ul>
+     */
+    @Test
+    void aCreateCannotBeAimedAtAnAccount() throws Exception {
+        Profile victim = profileRepository.save(new Profile().firstName("Ama").lastName("Serwaa").accountId("ama.serwaa"));
+        int before = profileRepository.findAll().size();
+
+        // 1. an account that already has a profile
+        restProfileMockMvc
+            .perform(
+                post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content("{\"firstName\":\"Mal\",\"accountId\":\"ama.serwaa\"}")
+            )
+            .andExpect(status().isBadRequest());
+
+        // 2. an account that does not — invited, not yet onboarded, and the index cannot see it
+        restProfileMockMvc
+            .perform(
+                post(ENTITY_API_URL)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"firstName\":\"Mal\",\"accountId\":\"not.yet.onboarded\"}")
+            )
+            .andExpect(status().isBadRequest());
+
+        assertThat(profileRepository.findAll()).as("neither attempt may leave a row behind").hasSize(before);
+        assertThat(profileRepository.findByAccountId("ama.serwaa").orElseThrow().getId())
+            .as("the victim still owns their profile")
+            .isEqualTo(victim.getId());
+        assertThat(profileRepository.findByAccountId("not.yet.onboarded"))
+            .as("and the account with no profile still has none to inherit")
+            .isEmpty();
+    }
+
+    /**
+     * <b>The positive half: a profile does end up linked, through the caller item 66 settled on.</b>
+     *
+     * <p>Item 66 asked how a profile becomes attached to an account now that a create cannot do it,
+     * and the answer is that it never was a create's job — {@code PUT /api/onboarding/profile} force
+     * -sets {@code accountId} to the caller's own token and has done since WP4. This runs as an
+     * applicant holding nothing but {@code ROLE_USER}, which is what an applicant really holds and
+     * what {@code POST /api/profiles} refuses outright, so it also shows the two paths are not
+     * competing for the same caller.
+     *
+     * <p>It passes against {@code main} on purpose. The refusal above is the change; this is the
+     * control that says the refusal removed nothing anybody could use, and it fails loudly if a later
+     * change breaks the path the refusal names.
+     */
+    @Test
+    @WithMockUser(username = "item66.applicant", authorities = { "ROLE_USER" })
+    void theApplicantPathIsWhatLinksAProfileToAnAccount() throws Exception {
+        restProfileMockMvc
+            .perform(
+                put("/api/onboarding/profile")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"firstName\":\"Kofi\",\"lastName\":\"Mensah\"}")
+            )
+            .andExpect(status().isOk());
+
+        Profile linked = profileRepository.findByAccountId("item66.applicant").orElseThrow();
+        assertThat(linked.getFirstName()).isEqualTo("Kofi");
+        assertThat(linked.getAccountId()).isEqualTo("item66.applicant");
     }
 
     @Test

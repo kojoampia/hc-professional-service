@@ -2,7 +2,8 @@ package net.jojoaddison.web.rest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -36,6 +37,7 @@ import org.springframework.data.mongodb.core.index.Index;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultMatcher;
 
 /**
  * WP2 gate (professional-onboarding-workflow.md § Data contracts): coverage
@@ -84,27 +86,56 @@ class OnboardingContractsIT {
         onboardingEventRepository.deleteAll();
     }
 
+    /**
+     * The WP2 contract this class exists for — the four fields WP2 added to {@code Profile} survive a
+     * REST round trip — driven over {@code PUT} and {@code GET} rather than {@code POST}.
+     *
+     * <p>It was a create until backlog.md item 66 refused that: since item 54 made {@code accountId}
+     * {@code READ_ONLY} over HTTP, a {@code POST} could only produce a profile belonging to nobody,
+     * and this test was one of the places that never noticed, because it asserted the four fields and
+     * never looked at the account. <b>The contract it guards is unchanged</b> — that is why the same
+     * six assertions are made twice here, once on the write's own response and once on an independent
+     * read, which is strictly more than the create asserted.
+     *
+     * <p>The row is seeded through the repository, so the {@code PUT} carries the organisation
+     * pointers forward rather than introducing them and {@code OrganizationReferenceValidator}
+     * (item 60) has nothing to resolve — the reference integrity rule has its own test in
+     * {@code OrganizationReferenceIntegrityIT} and is not what this one is about.
+     */
     @Test
     @WithMockUser(authorities = { "ROLE_DOCTOR" })
     void profileRoundTripsOnboardingFieldsOverRest() throws Exception {
-        Profile profile = new Profile()
-            .accountId("account-1")
-            .firstName("Ama")
-            .lastName("Serwaa")
-            .title("RN")
-            .specialtyCategoryId("cat-midwifery")
-            .teamIds(List.of("team-1", "team-2"))
-            .emergencyContact(new EmergencyContact().name("Kojo A").relationship("spouse").phone("0242000000"));
+        Profile profile = profileRepository.save(
+            new Profile()
+                .accountId("account-1")
+                .firstName("Ama")
+                .lastName("Serwaa")
+                .title("RN")
+                .specialtyCategoryId("cat-midwifery")
+                .teamIds(List.of("team-1", "team-2"))
+                .emergencyContact(new EmergencyContact().name("Kojo A").relationship("spouse").phone("0242000000"))
+        );
 
         restMockMvc
-            .perform(post("/api/profiles").contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(profile)))
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.title").value("RN"))
-            .andExpect(jsonPath("$.specialtyCategoryId").value("cat-midwifery"))
-            .andExpect(jsonPath("$.teamIds", org.hamcrest.Matchers.contains("team-1", "team-2")))
-            .andExpect(jsonPath("$.emergencyContact.name").value("Kojo A"))
-            .andExpect(jsonPath("$.emergencyContact.relationship").value("spouse"))
-            .andExpect(jsonPath("$.emergencyContact.phone").value("0242000000"));
+            .perform(
+                put("/api/profiles/{id}", profile.getId()).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(profile))
+            )
+            .andExpect(status().isOk())
+            .andExpectAll(theFourWP2Fields());
+
+        restMockMvc.perform(get("/api/profiles/{id}", profile.getId())).andExpect(status().isOk()).andExpectAll(theFourWP2Fields());
+    }
+
+    /** {@code title}, {@code specialtyCategoryId}, {@code teamIds} and {@code emergencyContact}. */
+    private static ResultMatcher[] theFourWP2Fields() {
+        return new ResultMatcher[] {
+            jsonPath("$.title").value("RN"),
+            jsonPath("$.specialtyCategoryId").value("cat-midwifery"),
+            jsonPath("$.teamIds", org.hamcrest.Matchers.contains("team-1", "team-2")),
+            jsonPath("$.emergencyContact.name").value("Kojo A"),
+            jsonPath("$.emergencyContact.relationship").value("spouse"),
+            jsonPath("$.emergencyContact.phone").value("0242000000"),
+        };
     }
 
     @Test
