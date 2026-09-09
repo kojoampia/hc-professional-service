@@ -18,11 +18,15 @@ import tech.jhipster.web.util.PaginationUtil;
 /**
  * The calling clinician's own case queue.
  *
- * <p><b>Why this is not just a call to patientservice.</b> Its {@code /api/clinical-cases} is
- * generated CRUD: no filters, no paging, and — the part that matters — no clinician scope. A client
+ * <p><b>Why this is not just a call to patientservice.</b> Its {@code /api/clinical-cases} pages and
+ * filters by patient, and — the part that matters — carries <b>no clinician scope</b>. A client
  * calling it receives every clinical case in the estate and narrows the list in the browser, which
  * is how the web dashboard works today. That is tolerable behind a desktop session and is not
  * something to ship to a phone, both because of what it downloads and because of what it exposes.
+ *
+ * <p>This paragraph said "no filters, no paging" until 2026-09-10. Both were wrong by then — backlog
+ * item 22 established that every collection there pages, and item 23 that all five take a
+ * {@code patientId} — and neither was ever the reason this resource exists. The clinician scope is.
  *
  * <p>So the caseload is resolved here, from {@code ClinicalCase.assignedProfessionalId} against the
  * caller's own profile, and only their cases leave this service.

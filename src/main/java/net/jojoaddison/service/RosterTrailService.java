@@ -123,8 +123,18 @@ public class RosterTrailService {
         Instant cutoff = Instant.now().minus(Duration.ofDays(TRAIL_DAYS));
         // Uncaught on purpose: PatientServiceUnavailableException becomes a 503 through
         // ExceptionTranslator. See this method's javadoc, and backlog.md item 24.
+        //
+        // Scoped at the sibling, not here (backlog.md item 23). This read used to fetch every activity
+        // log in the estate and keep one customer's — correct since item 22, and unbounded by anything
+        // but the platform's own size: the most expensive way possible to answer a question about one
+        // person. No row count is quoted here on purpose. The ~1260 figure the backlog uses is the
+        // *clinical case* count (items 22-24); the quality box holds twenty activity logs, and neither
+        // number says what production holds. Item 23's review caught that figure transplanted onto this
+        // collection, in a change whose whole purpose was correcting six comments that were untrue.
+        // The in-memory customerId filter below is kept as a cheap assertion over one patient's rows;
+        // it is no longer what makes the answer right.
         return patientServiceClient
-            .activityLogs()
+            .activityLogs(customerId)
             .stream()
             .filter(entry -> customerId.equals(entry.patientId()))
             .filter(entry -> occurredAt(entry) != null && occurredAt(entry).isAfter(cutoff))

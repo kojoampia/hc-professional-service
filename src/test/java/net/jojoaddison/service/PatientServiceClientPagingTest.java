@@ -339,7 +339,7 @@ class PatientServiceClientPagingTest {
      *
      * <p><b>Paging introduced this and the per-page timeout does not cover it.</b> {@code timeout-seconds}
      * bounds one request; multiplied by {@value PatientServiceClient#MAX_PAGES} it bounds a collection
-     * at 500 seconds on the defaults, and {@code PatientDirectoryService.record()} makes six collection
+     * at 500 seconds on the defaults, and {@code PatientDirectoryService.record()} makes five collection
      * reads inside one MVC request. This client's own javadoc promises that a hung sibling cannot hold
      * a worker thread open indefinitely, so the whole read carries a wall-clock deadline as well.
      *
@@ -438,6 +438,94 @@ class PatientServiceClientPagingTest {
         assertThat(queriesSeen).isEmpty();
     }
 
+    // --- Scoping the read at the sibling (backlog.md item 23) ---------------------------------
+
+    /**
+     * A per-patient read asks the sibling to filter, on <b>every</b> page of it.
+     *
+     * <p><b>This has to be asserted on the request, and there is no second-best.</b> Filtering an
+     * estate-wide collection in memory produces the identical list — that is precisely why the defect
+     * survived item 22's review and why item 23 exists — so an assertion on the returned rows passes
+     * against the unfixed client and proves nothing at all. What changed is what went over the wire.
+     *
+     * <p>The parameter is {@code patientId} because that is what hc-patient's five collection
+     * resources declare: {@code @RequestParam(required = false) String patientId}, handed to
+     * {@code PatientScope.findScopedPage}. Read from their source rather than from a comment on this
+     * side, two of which asserted the opposite until 2026-09-10.
+     */
+    @Test
+    void aPerPatientReadAsksTheSiblingToScopeTheQuery() {
+        sibling(COLLECTION_SIZE);
+
+        clientForThisServer().clinicalCases("patient-7");
+
+        assertThat(queriesSeen).isNotEmpty();
+        assertThat(queriesSeen).allSatisfy(query -> assertThat(query).contains("patientId=patient-7"));
+        // Still paged, sorted and deduped like any other read: scoping changes which rows, not how
+        // they are collected. A scoped read that stopped paging would be item 22 again, in one patient.
+        assertThat(queriesSeen).allSatisfy(query -> assertThat(query).contains("page=").contains("size="));
+        assertThat(queriesSeen).allSatisfy(PatientServiceClientPagingTest::assertSortsByIdAscending);
+    }
+
+    /**
+     * The other half of it: an estate-wide read sends no {@code patientId} at all.
+     *
+     * <p>Paired with the case above for the reason every pair in this class exists. A client that
+     * always sent the filter would satisfy that test and quietly break the three reads whose subject
+     * is a whole caseload or a whole round — the caseload union, the directory's profiles, the roster
+     * snapshots — which have no single patient to name and would be scoped to a null one.
+     */
+    @Test
+    void anEstateWideReadSendsNoPatientIdAtAll() {
+        sibling(COLLECTION_SIZE);
+
+        clientForThisServer().clinicalCases();
+
+        assertThat(queriesSeen).isNotEmpty();
+        assertThat(queriesSeen).allSatisfy(query -> assertThat(query).doesNotContain("patientId"));
+    }
+
+    /**
+     * A blank id is absent, not a filter for the empty-string patient.
+     *
+     * <p>{@code patientId=} would reach the sibling as a scope matching nothing, so a caller who had
+     * lost track of which patient they meant would receive a confident empty collection instead of the
+     * collection or an error. Empty is the one answer this client works hardest not to say by accident
+     * (item 24), and this is the cheapest way to say it wrongly.
+     */
+    @Test
+    void aBlankPatientIdIsTreatedAsNoFilterRatherThanAnImpossibleOne() {
+        sibling(PatientServiceClient.PAGE_SIZE + 5);
+
+        assertThat(clientForThisServer().activityLogs("   ")).hasSize(PatientServiceClient.PAGE_SIZE + 5);
+        assertThat(queriesSeen).allSatisfy(query -> assertThat(query).doesNotContain("patientId"));
+    }
+
+    /**
+     * A scoped read keeps every one of item 24's answers.
+     *
+     * <p>Both forms go through the same {@code getAll}, and this is what says so out loud: asking a
+     * narrower question must not teach a caller a different vocabulary of answers. A failed scoped read
+     * raises rather than answering empty, and a deployment with no sibling answers empty rather than
+     * raising — the two boundaries item 24 spent an entry establishing for the no-argument form.
+     */
+    @Test
+    void aScopedReadFailsAndDegradesExactlyAsAnEstateWideOneDoes() {
+        serve(exchange -> new Response(500, "{}"));
+        assertThatThrownBy(() -> clientForThisServer().reports("patient-7"))
+            .isInstanceOf(PatientServiceUnavailableException.class)
+            .hasMessageContaining("/api/reports");
+
+        PatientServiceClient disabled = new PatientServiceClient(
+            RestClient.builder(),
+            "http://127.0.0.1:1",
+            false,
+            PAGE_TIMEOUT_SECONDS,
+            READ_BUDGET_SECONDS
+        );
+        assertThat(disabled.medications("patient-7")).isEmpty();
+    }
+
     /**
      * Every collection read pages, including the ones written after this test.
      *
@@ -448,10 +536,13 @@ class PatientServiceClientPagingTest {
      * item 8).
      *
      * <p><b>Parameters are not a reason to stop covering a method.</b> This filtered on
-     * {@code getParameterCount() == 0} until 2026-09-02, which meant it would silently drop
-     * {@code clinicalCases(String patientId)} on the day backlog item 23 adds the sibling's
+     * {@code getParameterCount() == 0} until 2026-09-02, which meant it would have silently dropped
+     * {@code clinicalCases(String patientId)} on the day backlog item 23 added the sibling's
      * {@code patientId} filter — the sweep quietly narrowing to exclude precisely the methods about to
-     * change. Reference parameters are passed as null, which for a filter means "no filter".
+     * change. That day was 2026-09-10 and the five scoped reads it added are covered here without
+     * anyone editing this test, which is the whole of the argument. Reference parameters are passed as
+     * null, which for a filter means "no filter", so each scoped read is exercised in its unscoped
+     * form; that it sends the filter when given one is asserted above.
      */
     @Test
     void everyCollectionReadAsksForAPage() throws Exception {

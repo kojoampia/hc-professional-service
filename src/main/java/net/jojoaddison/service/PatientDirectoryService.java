@@ -31,6 +31,7 @@ import net.jojoaddison.service.dto.PatientDtos.PatientListItem;
 import net.jojoaddison.service.dto.PatientDtos.PatientRecord;
 import net.jojoaddison.service.dto.PatientDtos.RecordEntry;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ActivityLog;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.PatientProfile;
 import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.Report;
 import org.slf4j.Logger;
@@ -116,6 +117,14 @@ public class PatientDirectoryService {
      * unreadable. It raises rather than returning the task half alone — a partial entitlement set is
      * an entitlement set that says no to real patients, which is item 24's defect in a smaller shape.
      *
+     * <p><b>The estate-wide read here is the one backlog item 23 could not remove.</b> The question is
+     * "which patients are this clinician's", and the sibling's only filter is a single
+     * {@code patientId} — the one value this method is trying to discover. Nothing narrows a set-shaped
+     * question at the source until an {@code assignedProfessionalId} filter or a clinician-scoped read
+     * exists over there, which is a contract to agree with hc-patient's owners rather than something to
+     * invent in a client. <b>Asking about <em>one</em> patient is a different question</b> and does not
+     * come through here: see {@link #entitledCases}, which answers membership with a scoped read.
+     *
      * @throws PatientServiceUnavailableException when the case collection could not be read
      */
     public Set<String> patientIdsFor(String professionalId) {
@@ -124,7 +133,7 @@ public class PatientDirectoryService {
             .clinicalCases()
             .stream()
             .filter(clinicalCase -> professionalId.equals(clinicalCase.assignedProfessionalId()))
-            .map(net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase::patientId);
+            .map(ClinicalCase::patientId);
         // LinkedHashSet: a patient reached through both a task and a case must appear once, and the
         // directory should not reshuffle between requests for no reason.
         return Stream.concat(fromTasks, fromCases)
@@ -266,27 +275,39 @@ public class PatientDirectoryService {
      * able to probe.
      *
      * <p><b>It does not cover "patientservice is down", and that is backlog item 24.</b> Both
-     * {@code patientIdsFor} and {@code profilesByPatientId} below read across the wire; a read that
+     * {@code entitledCases} and {@code patientProfile} below read across the wire; a read that
      * failed raises out of this method rather than becoming an empty {@link Optional}, so the caller
      * sees a 503 instead of being told the patient in front of them is not theirs.
+     *
+     * <p><b>Six estate-wide reads became five scoped ones, and the sixth is gone</b> (backlog item 23).
+     * Every collection here is about one patient, so each is asked for with {@code patientId} rather
+     * than pulled whole and filtered — and the case collection, which used to be read twice in this
+     * one method (once for the entitlement check and once for the list), is now read once and used
+     * twice. The saving is not a nicety: after item 22 made these reads complete, each estate-wide one
+     * was seven requests and ~1260 rows.
      *
      * @throws PatientServiceUnavailableException when the sibling could not be read
      */
     public Optional<PatientRecord> record(String patientId) {
         String professionalId = callerProfileId().orElse(null);
-        if (professionalId == null || !patientIdsFor(professionalId).contains(patientId)) {
+        // The same cases answer both questions: whether this patient is the caller's at all, and what
+        // their case list is. Reading them twice was the cheapest half of backlog item 23.
+        Optional<List<ClinicalCase>> entitled = entitledCases(professionalId, patientId);
+        if (entitled.isEmpty()) {
             // Reached only when the caseload was actually read. An unreadable one raised above.
             return Optional.empty();
         }
-        PatientProfile profile = profilesByPatientId(Set.of(patientId)).get(patientId);
+        PatientProfile profile = patientProfile(patientId).orElse(null);
         if (profile == null) {
             return Optional.empty();
         }
 
-        List<CaseSummary> cases = patientService
-            .clinicalCases()
+        // Already this patient's — entitledCases narrows locally, for the reason given there — so no
+        // second filter is needed here and none is written, unlike the collections below whose rows
+        // this service has not looked at.
+        List<CaseSummary> cases = entitled
+            .orElseThrow()
             .stream()
-            .filter(c -> patientId.equals(c.patientId()))
             .map(
                 c ->
                     new CaseSummary(
@@ -302,8 +323,12 @@ public class PatientDirectoryService {
         // occurredAt is the clinical time — when the thing happened — falling back to the filing
         // date. Ordering a record by when it was typed rather than when it happened puts a
         // late-entered observation at the top, which reads as the most recent event.
+        //
+        // The in-memory patientId filters below are kept although the sibling now scopes the query:
+        // they cost nothing over one patient's rows and they are what makes this method's answer
+        // independent of the far side honouring a parameter. They are no longer the mechanism.
         List<ActivityLogEntry> activities = patientService
-            .activityLogs()
+            .activityLogs(patientId)
             .stream()
             .filter(a -> patientId.equals(a.patientId()))
             .map(
@@ -320,14 +345,14 @@ public class PatientDirectoryService {
             .toList();
 
         List<RecordEntry> medications = patientService
-            .medications()
+            .medications(patientId)
             .stream()
             .filter(m -> patientId.equals(m.patientId()))
             .map(m -> new RecordEntry(m.id(), occurredAt(null, m.startedOn() == null ? m.createdDate() : m.startedOn()), m.name()))
             .toList();
 
         List<ClinicalReport> reports = patientService
-            .reports()
+            .reports(patientId)
             .stream()
             .filter(r -> patientId.equals(r.patientId()))
             .map(
@@ -379,7 +404,7 @@ public class PatientDirectoryService {
      *     able to discover that a patient id is real by trying to write to it.
      */
     public ActivityLogEntry appendActivity(String patientId, CreateActivity request) {
-        String accountId = requireEntitlement(patientId);
+        String accountId = requireEntitlement(patientId).accountId();
 
         Optional<PatientWriteReceipt> replay = replayOf(request.clientRef(), accountId, patientId, "activity");
         if (replay.isPresent()) {
@@ -410,7 +435,7 @@ public class PatientDirectoryService {
 
     /** Files a clinical report against one of the caller's own patients. See {@link #appendActivity}. */
     public ClinicalReport appendReport(String patientId, CreateReport request) {
-        String accountId = requireEntitlement(patientId);
+        String accountId = requireEntitlement(patientId).accountId();
 
         Optional<PatientWriteReceipt> replay = replayOf(request.clientRef(), accountId, patientId, "report");
         if (replay.isPresent()) {
@@ -441,10 +466,16 @@ public class PatientDirectoryService {
      * The caller's own caseload, newest first — the case queue's source.
      *
      * <p>Assembled here rather than read from patientservice directly, and that is the whole point
-     * of this method. The sibling's {@code /api/clinical-cases} is generated CRUD with no filters and
-     * no clinician scope: a client that calls it gets <em>every case in the estate</em> and narrows
-     * the list in the browser. Going through here means the narrowing is server-side and the caller
-     * never receives a case that is not theirs.
+     * of this method. The sibling's {@code /api/clinical-cases} takes a {@code patientId} and
+     * <b>no clinician scope</b>: a client that calls it gets <em>every case in the estate</em> and
+     * narrows the list in the browser. Going through here means the narrowing is server-side and the
+     * caller never receives a case that is not theirs.
+     *
+     * <p><b>This read stays estate-wide, and it is the expensive one</b> (backlog item 23). The
+     * question is which cases name this clinician, and the one filter on offer names a patient — so
+     * there is nothing to pass. Narrowing it needs an {@code assignedProfessionalId} filter or a
+     * clinician-scoped read agreed with hc-patient's owners; the per-patient methods below no longer
+     * pay this cost, but this one and {@link #directory()} still do.
      */
     public Page<CaseSummary> myCases(Pageable pageable, String status) {
         String professionalId = callerProfileId().orElse(null);
@@ -457,31 +488,25 @@ public class PatientDirectoryService {
             .filter(c -> professionalId.equals(c.assignedProfessionalId()))
             .filter(c -> c.archivedAt() == null)
             .filter(c -> status == null || status.isBlank() || status.equalsIgnoreCase(c.status()))
-            .sorted(
-                Comparator.comparing(
-                    net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase::openedAt,
-                    Comparator.nullsLast(Comparator.reverseOrder())
-                )
-            )
+            .sorted(Comparator.comparing(ClinicalCase::openedAt, Comparator.nullsLast(Comparator.reverseOrder())))
             .map(this::toCaseSummary)
             .toList();
         return slice(matches, pageable);
     }
 
-    /** One patient's cases, entitlement-checked the same way their record is. */
+    /**
+     * One patient's cases, entitlement-checked the same way their record is.
+     *
+     * <p>One scoped read serves both, because the entitlement check and the answer are the same rows:
+     * see {@link #requireEntitlement}.
+     */
     public Page<CaseSummary> casesFor(String patientId, Pageable pageable) {
-        requireEntitlement(patientId);
-        List<CaseSummary> matches = patientService
-            .clinicalCases()
+        List<CaseSummary> matches = requireEntitlement(patientId)
+            .cases()
             .stream()
             .filter(c -> patientId.equals(c.patientId()))
             .filter(c -> c.archivedAt() == null)
-            .sorted(
-                Comparator.comparing(
-                    net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase::openedAt,
-                    Comparator.nullsLast(Comparator.reverseOrder())
-                )
-            )
+            .sorted(Comparator.comparing(ClinicalCase::openedAt, Comparator.nullsLast(Comparator.reverseOrder())))
             .map(this::toCaseSummary)
             .toList();
         return slice(matches, pageable);
@@ -491,9 +516,9 @@ public class PatientDirectoryService {
      * Updates the clinical fields of one of the caller's own cases.
      *
      * <p><b>This exists so the caller is scoped, not because the sibling is open.</b> patientservice's
-     * {@code /api/clinical-cases} is generated CRUD with no clinician scope, so a client calling it
-     * directly receives every case in the estate and narrows the list itself. Routed through here it
-     * is behind {@code CLINICAL_MUTATION} <em>and</em> the caseload check.
+     * {@code /api/clinical-cases} has no clinician scope, so a client calling it directly receives
+     * every case in the estate and narrows the list itself. Routed through here it is behind
+     * {@code CLINICAL_MUTATION} <em>and</em> the caseload check.
      *
      * <p>An earlier version of this note claimed the sibling's {@code requireWrite} passed for any
      * authenticated non-patient caller, so a read-only role could edit a diagnosis by going around.
@@ -506,12 +531,10 @@ public class PatientDirectoryService {
      * caller move a case to another patient or reassign it, neither of which is this screen's job.
      */
     public CaseSummary updateCase(String patientId, String caseId, CaseUpdate changes) {
-        requireEntitlement(patientId);
-
-        // "No such case" only when the case collection was read and did not contain it. An unreadable
-        // one raises out of clinicalCases() before this stream begins — item 24.
-        net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase existing = patientService
-            .clinicalCases()
+        // "No such case" only when the patient's cases were read and did not contain it. An unreadable
+        // collection raises inside requireEntitlement before this stream begins — item 24.
+        ClinicalCase existing = requireEntitlement(patientId)
+            .cases()
             .stream()
             .filter(c -> caseId.equals(c.id()) && patientId.equals(c.patientId()))
             .findFirst()
@@ -542,16 +565,17 @@ public class PatientDirectoryService {
      * <p>Entitlement-checked against the patient, not the case: holding a case id is not authority
      * over it, which is the same reason the PATCH path carries the patient too.
      *
-     * <p>Archived cases are readable here although they are excluded from every list. A case that
-     * was archived while a clinician had it open should render rather than 404 — they are being
-     * shown something that exists, and the alternative reads as data loss.
+     * <p>Archived cases are excluded from every list here — and, since the sibling's own
+     * {@code includeArchived} defaults to false and this service does not override it, they never
+     * reach this method either. This paragraph claimed the opposite until 2026-09-10; the claim is
+     * older than the sibling's default and was not made false by backlog item 23, which changed which
+     * rows are fetched and not which rows exist. Filed as backlog item 82.
      */
     public CaseDetail caseDetail(String patientId, String caseId) {
-        requireEntitlement(patientId);
-        // As in updateCase: a failed read raises rather than reaching the orElseThrow below, so a 503
-        // is never dressed up as "no such case for this clinician" (item 24).
-        return patientService
-            .clinicalCases()
+        // As in updateCase: a failed read raises inside requireEntitlement rather than reaching the
+        // orElseThrow below, so a 503 is never dressed up as "no such case for this clinician" (item 24).
+        return requireEntitlement(patientId)
+            .cases()
             .stream()
             .filter(c -> caseId.equals(c.id()) && patientId.equals(c.patientId()))
             .findFirst()
@@ -576,7 +600,7 @@ public class PatientDirectoryService {
     /** The clinical fields a clinician may edit. Everything else on a case is somebody else's. */
     public record CaseUpdate(String symptoms, String diagnosis, String brief, String status) {}
 
-    private CaseSummary toCaseSummary(net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase c) {
+    private CaseSummary toCaseSummary(ClinicalCase c) {
         return new CaseSummary(
             c.id(),
             c.patientId(),
@@ -597,20 +621,75 @@ public class PatientDirectoryService {
     }
 
     /**
-     * The caller's login, having established they may write to this patient.
+     * The caller's login and this patient's cases, having established the two belong together.
      *
      * <p><b>Refusal and unavailability are two different answers</b> (backlog item 24).
-     * {@code patientIdsFor} raises {@link PatientServiceUnavailableException} when the caseload could
-     * not be read, and that propagates as a 503; {@link PatientNotInCaseloadException} below is
+     * {@link #entitledCases} raises {@link PatientServiceUnavailableException} when the patient's cases
+     * could not be read, and that propagates as a 503; {@link PatientNotInCaseloadException} below is
      * therefore only ever a statement about a caseload this service actually saw. Catching the first
      * and folding it into the second is exactly the defect item 24 exists to close.
+     *
+     * <p><b>It hands back the cases rather than discarding them</b> (backlog item 23). Three of the
+     * five callers went on to read the same collection again for the answer they were computing, which
+     * was two estate-wide reads per request before item 22 and roughly fourteen HTTP requests after it.
+     * Returning the rows the check already read is the whole fix, and it is preferred here to a
+     * request-scoped cache over {@link PatientServiceClient}: a cache would have to be keyed on the
+     * path <em>and</em> the filter, be invalidated by the writes in this same class, and be reasoned
+     * about by everyone who later adds a read — for a saving that is one parameter and one return type
+     * in the place where the duplication actually is. The two callers that want only the login pay one
+     * scoped read they did not before, and it replaces an estate-wide one.
      */
-    private String requireEntitlement(String patientId) {
+    private Entitlement requireEntitlement(String patientId) {
         String professionalId = callerProfileId().orElse(null);
-        if (professionalId == null || patientId == null || !patientIdsFor(professionalId).contains(patientId)) {
-            throw new PatientNotInCaseloadException(patientId);
+        List<ClinicalCase> cases = entitledCases(professionalId, patientId).orElseThrow(() -> new PatientNotInCaseloadException(patientId));
+        String accountId = SecurityUtils.getCurrentUserLogin().orElseThrow(() -> new PatientNotInCaseloadException(patientId));
+        return new Entitlement(accountId, cases);
+    }
+
+    /** What {@link #requireEntitlement} established, and what it read to establish it. */
+    private record Entitlement(String accountId, List<ClinicalCase> cases) {}
+
+    /**
+     * This patient's cases, if the caller works with this patient; empty if they do not.
+     *
+     * <p><b>A membership question, not a set-shaped one, which is why it can be asked cheaply</b>
+     * (backlog item 23). "Is this patient mine" is answered by the same union as the directory — a
+     * {@code Task} here naming the caller as attendant, or a {@code ClinicalCase} over there naming
+     * them as assigned professional — but it needs only <em>this</em> patient's rows, and
+     * {@code /api/clinical-cases} takes a {@code patientId}. So it is a scoped read of a handful of
+     * rows rather than {@link #patientIdsFor}'s estate-wide one, and it produces exactly the same
+     * answer: the caller is in the union for this patient iff one of these cases is assigned to them
+     * or one of their tasks names the patient.
+     *
+     * <p><b>The read happens before the task half is consulted, deliberately.</b> Checking tasks first
+     * and returning early would make a task-entitled patient readable during a patientservice outage —
+     * plausibly an improvement, and not this change's to make: it would turn a 503 into a 200 carrying
+     * a record with no cases, no activity and no medications, which is the "empty is a fact" conflation
+     * item 24 closed, wearing a different hat. Behaviour here is unchanged: an unreadable sibling is a
+     * 503 for every patient.
+     *
+     * <p>A caller with no profile, or no patient named, is refused without reading anything. There is
+     * no caseload question to ask, and a scoped read with no id would be an estate-wide one.
+     *
+     * <p><b>The rows are narrowed again here, and that one is not redundant.</b> Everywhere else in
+     * this class the in-memory {@code patientId} filter is belt-and-braces over a query the sibling has
+     * already scoped; on this path it is load-bearing, because these rows decide an <em>entitlement</em>.
+     * A sibling that ignored the parameter — the same failure mode {@code getAll}'s page guard exists
+     * for — would otherwise hand back the estate, and any clinician holding one case anywhere would be
+     * entitled to every patient. An authorization rule may not rest on another service honouring a
+     * query parameter.
+     */
+    private Optional<List<ClinicalCase>> entitledCases(String professionalId, String patientId) {
+        if (professionalId == null || patientId == null || patientId.isBlank()) {
+            return Optional.empty();
         }
-        return SecurityUtils.getCurrentUserLogin().orElseThrow(() -> new PatientNotInCaseloadException(patientId));
+        List<ClinicalCase> cases = patientService.clinicalCases(patientId).stream().filter(c -> patientId.equals(c.patientId())).toList();
+        boolean assignedToMe = cases.stream().anyMatch(c -> professionalId.equals(c.assignedProfessionalId()));
+        boolean scheduledWithMe = taskRepository
+            .findByAttendantId(professionalId)
+            .stream()
+            .anyMatch(task -> patientId.equals(task.getPatientId()));
+        return assignedToMe || scheduledWithMe ? Optional.of(cases) : Optional.empty();
     }
 
     /**
@@ -719,6 +798,29 @@ public class PatientDirectoryService {
         return new DashboardSummary(directory.size(), female, male, kids);
     }
 
+    /**
+     * One patient's profile, scoped by the sibling rather than sieved out of the estate's.
+     *
+     * <p>Separate from {@link #profilesByPatientId} because the two are different questions:
+     * {@code /api/profiles} takes one {@code patientId} and cannot express a set, so the directory's
+     * many-patient read stays estate-wide (backlog item 23) while this one costs a single scoped page.
+     *
+     * <p>First row wins, as in the map below: two profile documents for one patient is a data fault in
+     * the sibling, and throwing over it would take out a patient record that is otherwise readable.
+     */
+    private Optional<PatientProfile> patientProfile(String patientId) {
+        return patientService.profiles(patientId).stream().filter(profile -> patientId.equals(profile.patientId())).findFirst();
+    }
+
+    /**
+     * Profiles for a set of patients, indexed by {@code patientId}.
+     *
+     * <p><b>Estate-wide, and it is the directory's share of backlog item 23's cross-stack half.</b> The
+     * sibling filters by one patient at a time, so narrowing this would mean one request per patient —
+     * a caseload of a hundred against the three pages it takes to read ~600 profiles. The arithmetic
+     * only works with a filter that takes a set, which does not exist over there. Use
+     * {@link #patientProfile} whenever the question really is about one patient.
+     */
     private Map<String, PatientProfile> profilesByPatientId(Set<String> patientIds) {
         return patientService
             .profiles()
@@ -731,7 +833,12 @@ public class PatientDirectoryService {
             );
     }
 
-    /** Most recent activity per patient, used to order the directory. */
+    /**
+     * Most recent activity per patient, used to order the directory.
+     *
+     * <p>Estate-wide for {@link #profilesByPatientId}'s reason: the ordering is over the whole
+     * directory, and one scoped read per patient would cost a request each (backlog item 23).
+     */
     private Map<String, String> lastActivityByPatient() {
         return patientService
             .activityLogs()

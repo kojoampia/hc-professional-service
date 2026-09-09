@@ -59,10 +59,10 @@ import org.springframework.web.server.ResponseStatusException;
  *
  * <p><strong>Paging made one request into several, so the timeouts had to grow a second dimension.</strong>
  * {@code timeout-seconds} bounds one page; on its own it bounds a whole read at {@code MAX_PAGES ×}
- * that, which is 500 seconds at the defaults — and {@code PatientDirectoryService.record()} makes six
- * collection reads in one MVC request. {@code read-budget-seconds} is the wall-clock deadline for a
- * whole collection and is what keeps the promise made two paragraphs up. Exhausting it is a failure,
- * so it raises like any other.
+ * that, which is 500 seconds at the defaults — and {@code PatientDirectoryService.record()} makes five
+ * collection reads in one MVC request (six, and two of them the same collection, until backlog item
+ * 23). {@code read-budget-seconds} is the wall-clock deadline for a whole collection and is what keeps
+ * the promise made two paragraphs up. Exhausting it is a failure, so it raises like any other.
  *
  * <p><strong>Failure is a much more frequent answer than it was, which is why it is now a
  * distinguishable one.</strong> A single request either worked or did not; a paged read of ~1260
@@ -73,13 +73,26 @@ import org.springframework.web.server.ResponseStatusException;
  * nuance. Since backlog item 24 that caller cannot make the mistake by accident: an unread collection
  * arrives as a {@link PatientServiceUnavailableException} and an empty one as an empty list.
  *
- * <p><strong>Known limit, and it is deliberate for now.</strong> Those endpoints offer no
- * clinician-scoped filter — no {@code assignedProfessionalId}, no set of patient ids — so a caseload
- * is still assembled by reading an estate-wide collection and narrowing it in memory. Paging makes
- * that correct and makes it more expensive, and cross-stack API design was not this fix's to do — so
- * the volume half is carried as backlog item 23 (see {@code docs/backlog.md}), which has an in-repo
- * half the sibling already supports (a single {@code patientId} filter, useful to the per-patient
- * reads) and a cross-stack half that needs a clinician-scoped endpoint over there.
+ * <p><strong>Every read comes in two forms, and the difference is one query parameter.</strong> The
+ * no-argument form reads the estate-wide collection; the {@code patientId} form asks the sibling to
+ * scope the query, which is what its five collection resources have always offered — every one of
+ * them declares {@code @RequestParam(required = false) String patientId} and runs it through
+ * {@code PatientScope.findScopedPage}. Backlog item 23's in-repo half is nothing more than calling
+ * the second form wherever the answer concerns one patient, and it was worth doing because item 22
+ * made the estate-wide read <em>complete</em> and therefore expensive: a patient record used to
+ * filter ~1260 cases, ~600 profiles and every activity log in the estate down to one person's, in
+ * memory, having paged all of it across the wire first.
+ *
+ * <p><strong>Known limit, and it is still deliberate.</strong> Those endpoints offer no
+ * clinician-scoped filter — no {@code assignedProfessionalId}, no <em>set</em> of patient ids — so
+ * the two reads whose subject is a whole caseload ({@code PatientDirectoryService.directory} and
+ * {@code myCases}) and the one whose subject is a whole round
+ * ({@code DutyRosterService.refreshSnapshots}) still read an estate-wide collection and narrow it
+ * here. A single-valued filter cannot express either question, and issuing one filtered request per
+ * patient is arithmetic that runs the wrong way — a dozen visits is a dozen round trips against the
+ * three it takes to page ~600 profiles. Closing that needs an endpoint agreed with hc-patient's
+ * owners rather than a client change, so it stays the cross-stack half of backlog item 23 (see
+ * {@code docs/backlog.md}) and is not invented here.
  */
 @Service
 public class PatientServiceClient {
@@ -114,11 +127,20 @@ public class PatientServiceClient {
      * of this guard returned the rows it had, which is the one thing {@link #getAll}'s own contract
      * forbids — and it did it on the single path where the client <em>knows</em> the answer is
      * incomplete. It was also biased: {@code sort=id,asc} over Mongo ObjectIds is approximately
-     * oldest-first, so the twenty thousand rows kept were the oldest, and the consumer most likely to
-     * reach the ceiling is {@code RosterTrailService.trailFor}, which reads all of
+     * oldest-first, so the twenty thousand rows kept were the oldest, and the consumer then most
+     * likely to reach the ceiling was {@code RosterTrailService.trailFor}, which read all of
      * {@code /api/activity-logs} to build a <em>last-N-days</em> view. At the ceiling that consumer
-     * would receive exactly the rows a trail cannot use and render a quiet week — item 22's own third
-     * consequence, reproduced by item 22's fix.
+     * would have received exactly the rows a trail cannot use and rendered a quiet week — item 22's
+     * own third consequence, reproduced by item 22's fix.
+     *
+     * <p><b>That consumer is no longer the exposed one, and the guard is unchanged all the same</b>
+     * (backlog item 23). The trail now reads {@code /api/activity-logs?patientId=…}, so it is bounded
+     * by one person's history rather than the estate's and cannot plausibly reach twenty thousand
+     * rows. What remains exposed is what remains estate-wide: {@code /api/profiles} and
+     * {@code /api/clinical-cases} for the caseload union and the roster snapshots, whose ceiling is
+     * the size of the platform. Filtering moves which reads can reach this guard; it does not change
+     * what happens when one does, and a clinician-scoped read designed over on the sibling's side
+     * still has to say what it does past its own.
      */
     static final int MAX_PAGES = 100;
 
@@ -177,11 +199,31 @@ public class PatientServiceClient {
     /**
      * Every patient profile. The join key is {@link PatientProfile#patientId()}, not the profile id.
      *
+     * <p><b>Estate-wide, and every remaining caller of this form means it.</b> Prefer
+     * {@link #profiles(String)} whenever the answer concerns one patient — see that method, and the
+     * class javadoc on which questions a single-valued filter cannot ask.
+     *
      * @throws PatientServiceUnavailableException if the collection could not be read. An empty list
      *     means the sibling holds no profiles, which is a different fact — see {@link #getAll}.
      */
     public List<PatientProfile> profiles() {
-        return getAll("/api/profiles", PROFILE_LIST);
+        return profiles(null);
+    }
+
+    /**
+     * One patient's profile rows, scoped by the sibling rather than filtered here.
+     *
+     * <p>A {@code List} rather than an {@code Optional} because that is what the endpoint answers and
+     * what {@link #getAll} pages: the sibling holds no uniqueness constraint on {@code patientId}, and
+     * a patient with two profile documents is a data fault the caller decides what to do about. It is
+     * normally empty or one row.
+     *
+     * @param patientId the patient to scope to; {@code null} or blank reads the whole collection,
+     *     which is what the no-argument form does and is never what a per-patient caller wants.
+     * @throws PatientServiceUnavailableException if the read could not be made
+     */
+    public List<PatientProfile> profiles(String patientId) {
+        return getAll("/api/profiles", PROFILE_LIST, patientId);
     }
 
     /**
@@ -235,27 +277,73 @@ public class PatientServiceClient {
     }
 
     /**
-     * Every clinical case. Filter by {@code assignedProfessionalId} for a clinician's own caseload.
+     * Every clinical case, archived ones excluded — the sibling's {@code includeArchived} defaults to
+     * false and this client does not override it.
+     *
+     * <p><b>The estate-wide form, and the caseload union is why it survives.</b> A clinician's own
+     * cases are those whose {@code assignedProfessionalId} is theirs, and the sibling offers no filter
+     * for that field, so the narrowing happens here — see the class javadoc. Anything asking about one
+     * patient wants {@link #clinicalCases(String)} instead.
      *
      * @throws PatientServiceUnavailableException if the collection could not be read
      */
     public List<ClinicalCase> clinicalCases() {
-        return getAll("/api/clinical-cases", CASE_LIST);
+        return clinicalCases(null);
+    }
+
+    /**
+     * One patient's clinical cases, scoped by the sibling.
+     *
+     * @param patientId the patient to scope to; {@code null} or blank reads the whole collection.
+     * @throws PatientServiceUnavailableException if the read could not be made
+     */
+    public List<ClinicalCase> clinicalCases(String patientId) {
+        return getAll("/api/clinical-cases", CASE_LIST, patientId);
     }
 
     /** @throws PatientServiceUnavailableException if the collection could not be read */
     public List<ActivityLog> activityLogs() {
-        return getAll("/api/activity-logs", ACTIVITY_LIST);
+        return activityLogs(null);
+    }
+
+    /**
+     * One patient's activity log, scoped by the sibling.
+     *
+     * @param patientId the patient to scope to; {@code null} or blank reads the whole collection.
+     * @throws PatientServiceUnavailableException if the read could not be made
+     */
+    public List<ActivityLog> activityLogs(String patientId) {
+        return getAll("/api/activity-logs", ACTIVITY_LIST, patientId);
     }
 
     /** @throws PatientServiceUnavailableException if the collection could not be read */
     public List<Medication> medications() {
-        return getAll("/api/medications", MEDICATION_LIST);
+        return medications(null);
+    }
+
+    /**
+     * One patient's medications, scoped by the sibling.
+     *
+     * @param patientId the patient to scope to; {@code null} or blank reads the whole collection.
+     * @throws PatientServiceUnavailableException if the read could not be made
+     */
+    public List<Medication> medications(String patientId) {
+        return getAll("/api/medications", MEDICATION_LIST, patientId);
     }
 
     /** @throws PatientServiceUnavailableException if the collection could not be read */
     public List<Report> reports() {
-        return getAll("/api/reports", REPORT_LIST);
+        return reports(null);
+    }
+
+    /**
+     * One patient's reports, scoped by the sibling.
+     *
+     * @param patientId the patient to scope to; {@code null} or blank reads the whole collection.
+     * @throws PatientServiceUnavailableException if the read could not be made
+     */
+    public List<Report> reports(String patientId) {
+        return getAll("/api/reports", REPORT_LIST, patientId);
     }
 
     /**
@@ -391,7 +479,7 @@ public class PatientServiceClient {
      * <p><b>A whole collection has a wall-clock budget, not only a per-page timeout.</b> The request
      * factory's timeout bounds one page. Before this budget existed the only bound on a whole read was
      * {@link #MAX_PAGES} multiplied by it — 500 seconds at the defaults, per collection, and
-     * {@code PatientDirectoryService.record()} makes six collection reads in one MVC request. That is
+     * {@code PatientDirectoryService.record()} makes five collection reads in one MVC request. That is
      * an availability regression against the promise in this class's own javadoc, so the deadline is
      * taken once at the top and checked before each further page. It bounds the loop rather than the
      * request in flight, so the true ceiling is the budget plus one page timeout.
@@ -416,11 +504,25 @@ public class PatientServiceClient {
      * like any other failure. Answering empty for it was the same conflation as answering empty for an
      * outage, and it is reachable in exactly the situation where a wrong answer is most plausible —
      * a caller whose credential this service could not relay.
+     *
+     * <h3>The {@code patientId} filter changes what is read, and nothing else</h3>
+     * It is appended to every page request when present and omitted when not, so a scoped read pages,
+     * dedupes, sorts, budgets and fails exactly as an estate-wide one does. That matters for backlog
+     * item 24: a caller must not learn a <em>different</em> vocabulary of answers by asking a narrower
+     * question. An empty scoped read still means "this patient has no rows", a failed one still raises,
+     * and {@code enabled=false} still answers empty.
+     *
+     * <p><b>Blank is treated as absent rather than as a filter.</b> Sending {@code patientId=} would
+     * reach the sibling as a filter for a patient whose id is the empty string, which matches nothing —
+     * so a caller who lost track of which patient they meant would be handed a confident empty list
+     * where they should be handed the collection or an error. The callers here all guard against a
+     * blank id before they get this far; this is the second of the two.
      */
-    private <T extends PatientServiceRow> List<T> getAll(String path, ParameterizedTypeReference<List<T>> type) {
+    private <T extends PatientServiceRow> List<T> getAll(String path, ParameterizedTypeReference<List<T>> type, String patientId) {
         if (!enabled) {
             return List.of();
         }
+        String scope = (patientId == null || patientId.isBlank()) ? null : patientId;
         String token = SecurityUtils.getCurrentUserJWT().orElse(null);
         if (token == null) {
             // No credential to relay. Reading with none would either 401 or, worse, succeed against
@@ -443,7 +545,7 @@ public class PatientServiceClient {
                         "%ds, after %d page(s) and %d row(s)".formatted(readBudget.toSeconds(), page, rows.size())
                     );
                 }
-                List<T> batch = getPage(path, type, token, page);
+                List<T> batch = getPage(path, type, token, page, scope);
                 if (batch == null || batch.isEmpty()) {
                     return List.copyOf(rows.values());
                 }
@@ -597,18 +699,26 @@ public class PatientServiceClient {
     /**
      * One page of one collection. Throws on failure — {@link #getAll} decides what a failure means.
      *
-     * <p>All three query parameters are asserted by {@code PatientServiceClientPagingTest}, {@code sort}
-     * included and on every request: it is the parameter that stops page 2 repeating page 1, and it was
-     * deletable without turning a test red for as long as only {@code page} and {@code size} were
-     * checked.
+     * <p>All three paging parameters are asserted by {@code PatientServiceClientPagingTest},
+     * {@code sort} included and on every request: it is the parameter that stops page 2 repeating page
+     * 1, and it was deletable without turning a test red for as long as only {@code page} and
+     * {@code size} were checked.
+     *
+     * <p>{@code patientId} is asserted the same way and for the same reason — deleting it leaves a read
+     * that returns the identical answer, more expensively, having pulled an estate-wide collection to
+     * do it. That is backlog item 23's whole shape, and it is invisible to any assertion made on the
+     * result.
      */
-    private <T> List<T> getPage(String path, ParameterizedTypeReference<List<T>> type, String token, int page) {
+    private <T> List<T> getPage(String path, ParameterizedTypeReference<List<T>> type, String token, int page, String patientId) {
         return restClient
             .get()
-            .uri(
-                uriBuilder ->
-                    uriBuilder.path(path).queryParam("page", page).queryParam("size", PAGE_SIZE).queryParam("sort", "id,asc").build()
-            )
+            .uri(uriBuilder -> {
+                uriBuilder.path(path).queryParam("page", page).queryParam("size", PAGE_SIZE).queryParam("sort", "id,asc");
+                if (patientId != null) {
+                    uriBuilder.queryParam("patientId", patientId);
+                }
+                return uriBuilder.build();
+            })
             .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
             .retrieve()
             .body(type);
