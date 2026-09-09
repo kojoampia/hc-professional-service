@@ -7,12 +7,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.service.ProfileService;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
-import net.jojoaddison.web.rest.util.LocationUri;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -122,8 +120,6 @@ public class ProfileResource {
 
     private final ProfileRepository profileRepository;
 
-    private final DomainEventPublisher domainEventPublisher;
-
     /**
      * Injected so {@link #partialUpdateProfile} can bind the merge-patch document itself — see the
      * note there on why the raw {@link ObjectNode} has to survive as far as this class.
@@ -143,41 +139,86 @@ public class ProfileResource {
      * failing here. This resource used to call {@code OnboardingService.publishProfileStatus} on
      * three of its handlers to say so; it no longer does, because a table of handlers is what missed
      * the two in backlog.md item 49. {@code ProfileStatusAnnouncer} announces off the save itself.
+     *
+     * <p><b>No {@code DomainEventPublisher} since backlog.md item 66.</b> Its one use here was the
+     * {@code entity.created} the refused {@code POST} published; the create that survives —
+     * {@code OnboardingService.upsertOwnProfile} — publishes its own, so no {@code Profile}
+     * {@code entity.created} was lost with it. The only one that would have been is the event for a
+     * profile belonging to nobody, which no consumer could have placed.
      */
-    public ProfileResource(
-        ProfileService profileService,
-        ProfileRepository profileRepository,
-        DomainEventPublisher domainEventPublisher,
-        ObjectMapper objectMapper
-    ) {
+    public ProfileResource(ProfileService profileService, ProfileRepository profileRepository, ObjectMapper objectMapper) {
         this.profileService = profileService;
         this.profileRepository = profileRepository;
-        this.domainEventPublisher = domainEventPublisher;
         this.objectMapper = objectMapper;
     }
 
     /**
-     * {@code POST  /profiles} : Create a new profile.
+     * What a caller is told instead of being handed a profile that belongs to nobody
+     * (backlog.md item 66).
      *
-     * @param profile the profile to create.
-     * @return the {@link ResponseEntity} with status {@code 201 (Created)} and with body the new profile, or with status {@code 400 (Bad Request)} if the profile has already an ID.
+     * <p>It names the endpoint that does create one, for the reason {@link #PATCH_REFUSED_FIELDS}
+     * gives at length: a refusal that will not say where to go instead is backlog.md item 46 wearing
+     * a 400.
+     */
+    static final String CREATE_REFUSAL =
+        "A profile is created by the clinician it belongs to, through PUT /api/onboarding/profile. " +
+        "This endpoint cannot link one to an account — accountId is read-only over HTTP — so every " +
+        "profile it created would belong to nobody, and nothing could ever give it an owner.";
+
+    /**
+     * {@code POST /profiles} : refused. <b>Since backlog.md item 54 this endpoint could only ever
+     * create a profile that belongs to nobody, and it answered 201 while doing it.</b>
+     *
+     * <p>Item 54 made {@link Profile#getAccountId() accountId} {@code READ_ONLY} over HTTP to close a
+     * live account takeover, and {@code READ_ONLY} applies to a create as well as to an update. So a
+     * {@code POST} here returned 201 with {@code accountId: null} — measured on the quality stack,
+     * twice — and no later call can repair that: {@code PUT} preserves the stored value (which is
+     * null), {@code PATCH} cannot carry the field either, and there is no other writer. The row is
+     * unreachable the moment it exists. {@code findByAccountId} is how every ownership check in this
+     * service resolves a caller, so nobody owns it, no document, roster, absence or patient
+     * directory ever hangs off it, and {@code ProfileStatusAnnouncer} skips it because
+     * {@code publishProfileStatus} returns on a null {@code accountId} — the estate is never told it
+     * exists either. Three such rows are on the quality box, every one of them a probe; its thirteen
+     * seeded profiles predate the hardening and are linked, which is exactly why nothing noticed.
+     * A {@code --clean} reload would produce thirteen that are not, and that is the cost item 66
+     * records: the quality stack cannot be rebuilt from empty.
+     *
+     * <p><b>The decision behind the refusal, which is item 66's substance.</b> Three shapes were
+     * considered and the two that add service surface were refused. <em>Make {@code accountId}
+     * writable on create only</em> hands the six {@code CLINICAL_MUTATION} roles a way to author a
+     * colleague's profile before that colleague onboards — the unique sparse index refuses a second
+     * row for a login that already has one, but it says nothing about a login that does not yet, and
+     * {@code upsertOwnProfile} then adopts whatever was planted, push preferences and organisation
+     * included; it would also need item 60's five-field refusal duplicated onto the create path, and
+     * item 50 will turn the identifier the caller types into a {@code User.id}, which is the value
+     * item 55 had to gate an enumeration endpoint over. <em>Add an admin link endpoint</em> is
+     * narrower and auditable, but the {@code OnboardingEvent} that would make it auditable has
+     * nothing to hang on at the only moment anything calls it: the fixture links a profile before the
+     * application exists.
+     *
+     * <p><b>What settled it is that no product surface creates a profile on another's behalf.</b>
+     * Established across all seven repos and both sibling stacks: {@code web/} and {@code mobile/}
+     * write a profile only through {@code PUT /api/onboarding/profile}, hc-admin and hc-patient only
+     * ever {@code GET} this path, and the sole non-test caller in the estate was
+     * {@code quality/seed-data.py}. The product's answer to "create a professional on somebody's
+     * behalf" is already built and is the gateway's: an administrator creates the <em>account</em>,
+     * and the clinician completes their own profile through onboarding, which is also what makes the
+     * identity on it something credentialing verifies rather than something an administrator
+     * asserted. An endpoint added here would have been an endpoint added for a fixture.
+     *
+     * <p><b>Refused rather than deleted, which is where this parts company with items 56 and 57.</b>
+     * Those removed a {@code DELETE} nobody reaches for, so a 405 costs nobody anything. A
+     * {@code POST} on a collection is the first thing every REST client tries — the fixture author
+     * tried it, the item 61 author tried it, and both got a 201 that meant nothing — and a 405 sends
+     * the next one looking for a different verb or a different path rather than to the endpoint that
+     * works.
+     *
+     * @return never; always throws.
      */
     @PostMapping
-    public ResponseEntity<Profile> createProfile(@RequestBody Profile profile) {
-        log.debug("REST request to save Profile : {}", profile);
-        if (profile.getId() != null) {
-            throw new BadRequestAlertException("A new profile cannot already have an ID", ENTITY_NAME, "idexists");
-        }
-        profile = profileService.save(profile);
-        domainEventPublisher.publishEntityCreated(
-            "Profile",
-            profile.getId(),
-            profile.getAccountId(),
-            net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
-        );
-        return ResponseEntity.created(LocationUri.of(profile.getId()))
-            .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, profile.getId()))
-            .body(profile);
+    public ResponseEntity<Profile> createProfile() {
+        log.debug("REST request to save Profile — refused, see backlog.md item 66");
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, CREATE_REFUSAL);
     }
 
     /**

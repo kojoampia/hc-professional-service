@@ -71,14 +71,22 @@ class LocationHeaderIT {
     /**
      * The collection endpoints whose {@code POST} takes a body needing nothing but an empty object.
      *
-     * <p>Nine of the eleven. Each is a generated resource that saves straight to its repository with
+     * <p>Eight of the ten. Each is a generated resource that saves straight to its repository with
      * no {@code @Valid} and no cross-entity reference, so {@code &#123;&#125;} is a valid create —
-     * which is what makes them worth driving as one parameterized case rather than eleven copies.
+     * which is what makes them worth driving as one parameterized case rather than ten copies.
      * {@code /api/absences} and {@code /api/duty-roster} need real fixtures and get their own tests
-     * below, so all eleven are covered.
+     * below, so all ten are covered.
+     *
+     * <p><b>There were eleven, and {@code /api/profiles} is the one that left</b> — backlog.md item
+     * 66 refused its {@code POST}, because since item 54 a create there could only produce a profile
+     * belonging to nobody. So this is the one removal from this list that costs coverage rather than
+     * tidying it, and it is worth being plain about what is now unheld: no test asserts a
+     * {@code Location} for a profile create, because there is no profile create. If one ever comes
+     * back it belongs in this list again, and
+     * {@code ProfileResourceIT.aCreateIsRefusedRatherThanMakingAProfileThatBelongsToNobody} is what
+     * fails first to say so.
      */
     static final List<String> SIMPLE_CREATES = List.of(
-        "/api/profiles",
         "/api/personal-documents",
         "/api/teams",
         "/api/addresses",
@@ -204,21 +212,25 @@ class LocationHeaderIT {
     }
 
     /**
-     * The three collections whose generated {@code DELETE} was removed because it orphaned the rows
-     * pointing at it — {@code /api/profiles} by backlog item 56, the other two by item 57.
-     *
-     * <p>A profile delete orphaned six collections and could announce nothing, since none of
-     * {@code ProfileStatus}'s seven contracted fields can say "gone". A category delete left every
+     * The collections in {@link #SIMPLE_CREATES} whose generated {@code DELETE} was removed because it
+     * orphaned the rows pointing at it — both by backlog item 57. A category delete left every
      * {@code Profile.specialtyCategoryId} naming a discipline that resolves to nothing; a team delete
      * left {@code Profile.teamIds} and {@code Task.teamId} pointing at the same nothing.
+     *
+     * <p><b>{@code /api/profiles} was a third entry and is not one now.</b> Its {@code DELETE} is
+     * still gone — item 56, because a profile delete orphaned six collections and could announce
+     * nothing, since none of {@code ProfileStatus}'s seven contracted fields can say "gone" — but its
+     * {@code POST} went with item 66, so this class can no longer reach a profile row to try deleting
+     * it, and an entry here would be a constant asserting something nothing runs.
+     * {@code ProfileResourceIT.thereIsNoDeleteOnThisResource} holds that 405, and always did.
      */
-    private static final List<String> NO_DELETE = List.of("/api/profiles", "/api/categories", "/api/teams");
+    private static final List<String> NO_DELETE = List.of("/api/categories", "/api/teams");
 
     /**
-     * Housekeeping, and three assertions that are not housekeeping.
+     * Housekeeping, and two assertions that are not housekeeping.
      *
-     * <p>Six of the nine paths clean up through their own {@code DELETE}, and asserting 2xx keeps that
-     * honest. The three in {@link #NO_DELETE} assert <b>405</b> rather than skipping the call: a
+     * <p>Six of the eight paths clean up through their own {@code DELETE}, and asserting 2xx keeps that
+     * honest. The two in {@link #NO_DELETE} assert <b>405</b> rather than skipping the call: a
      * regeneration that quietly restores one of those mappings fails here as well as in that
      * resource's own IT, which is two independent guards on the same fact.
      *
