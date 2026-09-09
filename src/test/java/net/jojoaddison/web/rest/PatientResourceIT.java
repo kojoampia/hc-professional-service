@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -206,7 +207,10 @@ class PatientResourceIT {
     @Test
     @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
     void readingAPatientDuringAnOutageIs503_notNotFound() throws Exception {
-        when(patientServiceClient.clinicalCases()).thenThrow(outage());
+        // The scoped read, because a patient record asks about one patient since backlog item 23. The
+        // directory case below still stages the estate-wide one, and the pair is worth reading
+        // together: the two surfaces genuinely make different requests now.
+        when(patientServiceClient.clinicalCases(anyString())).thenThrow(outage());
 
         restMockMvc.perform(get("/api/patients/some-patient")).andExpect(status().isServiceUnavailable());
     }
@@ -242,7 +246,7 @@ class PatientResourceIT {
     @Test
     @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
     void filingAnActivityDuringAnOutageIs503_notNotFound() throws Exception {
-        when(patientServiceClient.clinicalCases()).thenThrow(outage());
+        when(patientServiceClient.clinicalCases(anyString())).thenThrow(outage());
 
         restMockMvc
             .perform(post("/api/patients/some-patient/activities").contentType(MediaType.APPLICATION_JSON).content(ACTIVITY))

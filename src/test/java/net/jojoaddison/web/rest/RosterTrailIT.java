@@ -1,5 +1,7 @@
 package net.jojoaddison.web.rest;
 
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -78,7 +80,11 @@ class RosterTrailIT {
         round(mine.getId(), LocalDate.now(), MINE);
         round(theirs.getId(), LocalDate.now(), THEIRS);
 
-        when(patientServiceClient.activityLogs()).thenReturn(
+        // Stubbed on any patient id and deliberately still mixed. The sibling scopes the query since
+        // backlog item 23, so a real read would not contain THEIRS at all — serving it anyway keeps
+        // this fixture testing the local filter as well as the request, and a stack that ignored the
+        // parameter would still not leak another customer's row into a trail.
+        when(patientServiceClient.activityLogs(anyString())).thenReturn(
             List.of(
                 log("a-recent", MINE, "Blood pressure checked", 2),
                 log("a-older", MINE, "Dressing changed", 5),
@@ -148,6 +154,23 @@ class RosterTrailIT {
             .andExpect(jsonPath("$.length()").value(2))
             .andExpect(jsonPath("$[0].id").value("a-recent"))
             .andExpect(jsonPath("$[1].id").value("a-older"));
+    }
+
+    /**
+     * And it asks the sibling for that customer's log rather than the estate's (backlog item 23).
+     *
+     * <p><b>Asserted on the call, because the trail above is identical either way.</b> This read used
+     * to fetch every activity log in the platform and keep one customer's — which item 22 made
+     * complete and thereby made seven requests and ~1260 rows to answer a question about one person.
+     * Nothing in the response says which of the two happened, so nothing but this assertion can.
+     */
+    @Test
+    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    void asksTheSiblingForTHATcustomersActivityRatherThanTheEstates() throws Exception {
+        restMockMvc.perform(get(trail(MINE))).andExpect(status().isOk());
+
+        verify(patientServiceClient).activityLogs(MINE);
+        verify(patientServiceClient, org.mockito.Mockito.never()).activityLogs();
     }
 
     @Test
@@ -254,7 +277,7 @@ class RosterTrailIT {
     void answersAnEmptyTrailWhenTheCustomerGENUINELYhasNoActivity() throws Exception {
         // A read that worked and found nothing. This is the rendered empty state — "nothing happened
         // this week" — and it must stay a 200, or the outage case below proves nothing.
-        when(patientServiceClient.activityLogs()).thenReturn(List.of());
+        when(patientServiceClient.activityLogs(anyString())).thenReturn(List.of());
 
         restMockMvc.perform(get(trail(MINE))).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
     }
@@ -276,7 +299,7 @@ class RosterTrailIT {
     @Test
     @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
     void answersA503WhenTheTrailCouldNotBeREADratherThanAQuietWeek() throws Exception {
-        when(patientServiceClient.activityLogs()).thenThrow(
+        when(patientServiceClient.activityLogs(anyString())).thenThrow(
             PatientServiceUnavailableException.read(
                 "/api/activity-logs",
                 PatientServiceUnavailableException.Fault.TRANSPORT,
@@ -294,7 +317,7 @@ class RosterTrailIT {
     @Test
     @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
     void anOutageDoesNotTurnAREFUSALintoA503() throws Exception {
-        when(patientServiceClient.activityLogs()).thenThrow(
+        when(patientServiceClient.activityLogs(anyString())).thenThrow(
             PatientServiceUnavailableException.read(
                 "/api/activity-logs",
                 PatientServiceUnavailableException.Fault.TRANSPORT,
@@ -308,7 +331,7 @@ class RosterTrailIT {
     @Test
     @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
     void toleratesAnActivityEntryWithNoDate() throws Exception {
-        when(patientServiceClient.activityLogs()).thenReturn(
+        when(patientServiceClient.activityLogs(anyString())).thenReturn(
             List.of(
                 new ActivityLog("a-undated", MINE, "case-1", null, "No date", "detail", "OBSERVATION", "CLINICIAN", "professional-1", null),
                 log("a-recent", MINE, "Dated", 1)

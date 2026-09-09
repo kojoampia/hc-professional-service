@@ -153,9 +153,10 @@ public class PatientResource {
     /**
      * {@code GET /api/patients/{id}/cases} : the patient's open cases.
      *
-     * <p>Proxied rather than read from patientservice directly. Its {@code /api/clinical-cases} is
-     * generated CRUD with no filters and no clinician scope, so a client calling it receives every
-     * case in the estate and narrows the list in the browser. Here the narrowing is server-side.
+     * <p>Proxied rather than read from patientservice directly. Its {@code /api/clinical-cases} has no
+     * clinician scope — it filters by patient, not by who is asking — so a client calling it receives
+     * every case in the estate and narrows the list in the browser. Here the narrowing is server-side,
+     * and since backlog item 23 the read behind it is scoped to the patient in the path.
      *
      * <p>Archived cases are excluded, matching the sibling's own default.
      */

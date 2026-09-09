@@ -2,6 +2,7 @@ package net.jojoaddison.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.InstanceOfAssertFactories.LIST;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
@@ -79,6 +80,14 @@ class PatientDirectoryServiceUnitTest {
         when(patientService.activityLogs()).thenReturn(List.of());
         when(patientService.medications()).thenReturn(List.of());
         when(patientService.reports()).thenReturn(List.of());
+        // The scoped forms are stubbed separately and deliberately: an unstubbed one answers null and
+        // NPEs, so a test that means to exercise a per-patient path cannot accidentally be served by
+        // the estate-wide stub. That distinction is the subject of backlog item 23.
+        when(patientService.clinicalCases(anyString())).thenReturn(List.of());
+        when(patientService.profiles(anyString())).thenReturn(List.of());
+        when(patientService.activityLogs(anyString())).thenReturn(List.of());
+        when(patientService.medications(anyString())).thenReturn(List.of());
+        when(patientService.reports(anyString())).thenReturn(List.of());
         receiptRepository = new InMemoryReceiptRepository();
         service = new PatientDirectoryService(taskRepository, profileRepository, patientService, receiptRepository);
     }
@@ -180,7 +189,9 @@ class PatientDirectoryServiceUnitTest {
     @Test
     void aPatientInTheCaseloadCanBeRead() {
         when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task("patient-mine")));
-        when(patientService.profiles()).thenReturn(List.of(profile("patient-mine", "Ama", "Mensah", "female", LocalDate.of(1990, 1, 1))));
+        when(patientService.profiles("patient-mine")).thenReturn(
+            List.of(profile("patient-mine", "Ama", "Mensah", "female", LocalDate.of(1990, 1, 1)))
+        );
 
         assertThat(service.record("patient-mine")).isPresent().get().extracting("patientName").isEqualTo("Ama Mensah");
     }
@@ -248,7 +259,28 @@ class PatientDirectoryServiceUnitTest {
     @Test
     void anOutageIsNOTanEmptyRecord() {
         when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task("patient-mine")));
-        when(patientService.clinicalCases()).thenThrow(outage());
+        when(patientService.clinicalCases("patient-mine")).thenThrow(outage());
+
+        assertThatThrownBy(() -> service.record("patient-mine")).isInstanceOf(PatientServiceUnavailableException.class);
+    }
+
+    /**
+     * A task-entitled patient is still a 503 during an outage, not a 200 with an empty record.
+     *
+     * <p>The scoped read of backlog item 23 made this reachable in a way it was not before: the
+     * entitlement question for one patient could now be answered from the task half alone, so the case
+     * read could have been skipped when a task already granted. It is not, deliberately —
+     * {@code entitledCases} reads before it consults tasks. Serving a record with no cases, no
+     * activity and no medications because the sibling is down is item 24's conflation wearing a
+     * different hat, and this is what pins the ordering.
+     */
+    @Test
+    void aTASKentitledPatientIsStillA503DuringAnOutage() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task("patient-mine")));
+        when(patientService.clinicalCases("patient-mine")).thenThrow(outage());
+        when(patientService.profiles("patient-mine")).thenReturn(
+            List.of(profile("patient-mine", "Ama", "Mensah", "female", LocalDate.of(1990, 1, 1)))
+        );
 
         assertThatThrownBy(() -> service.record("patient-mine")).isInstanceOf(PatientServiceUnavailableException.class);
     }
@@ -257,7 +289,7 @@ class PatientDirectoryServiceUnitTest {
     @Test
     void anOutageReadingTheProfilesIsNOTanEmptyRecordEither() {
         when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task("patient-mine")));
-        when(patientService.profiles()).thenThrow(
+        when(patientService.profiles(anyString())).thenThrow(
             PatientServiceUnavailableException.read(
                 "/api/profiles",
                 PatientServiceUnavailableException.Fault.TRANSPORT,
@@ -278,7 +310,7 @@ class PatientDirectoryServiceUnitTest {
     @Test
     void aPatientTrulyOutsideTheCaseloadIsStillAnEmptyRecord() {
         when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task("patient-mine")));
-        when(patientService.clinicalCases()).thenReturn(List.of());
+        when(patientService.clinicalCases("patient-someone-else")).thenReturn(List.of());
 
         assertThat(service.record("patient-someone-else")).isEmpty();
     }
@@ -286,7 +318,7 @@ class PatientDirectoryServiceUnitTest {
     @Test
     void anOutageIsNOTaPatientNotInCaseloadOnTheCaseDetail() {
         when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task(MINE)));
-        when(patientService.clinicalCases()).thenThrow(outage());
+        when(patientService.clinicalCases(MINE)).thenThrow(outage());
 
         assertThatThrownBy(() -> service.caseDetail(MINE, "c1"))
             .isInstanceOf(PatientServiceUnavailableException.class)
@@ -296,7 +328,7 @@ class PatientDirectoryServiceUnitTest {
     @Test
     void anOutageIsNOTaPatientNotInCaseloadOnAnEdit() {
         when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task(MINE)));
-        when(patientService.clinicalCases()).thenThrow(outage());
+        when(patientService.clinicalCases(MINE)).thenThrow(outage());
 
         assertThatThrownBy(() -> service.updateCase(MINE, "c1", new PatientDirectoryService.CaseUpdate("x", null, null, null)))
             .isInstanceOf(PatientServiceUnavailableException.class)
@@ -462,10 +494,16 @@ class PatientDirectoryServiceUnitTest {
 
     private static final String MINE = "p-mine";
 
-    /** One patient in the caller's caseload, so a write has somewhere legitimate to land. */
+    /**
+     * One patient in the caller's caseload, so a write has somewhere legitimate to land.
+     *
+     * <p>The profile is stubbed on both forms of the read: the directory takes the estate-wide one and
+     * a patient record takes the scoped one (backlog item 23), and tests here use both.
+     */
     private void onePatientOfMine() {
         when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task(MINE)));
         when(patientService.profiles()).thenReturn(List.of(profile(MINE, "Ama", "Mensah", "female", LocalDate.of(1990, 1, 1))));
+        when(patientService.profiles(MINE)).thenReturn(List.of(profile(MINE, "Ama", "Mensah", "female", LocalDate.of(1990, 1, 1))));
     }
 
     private static ActivityLog createdLog(String id, String clientSummary) {
@@ -549,7 +587,7 @@ class PatientDirectoryServiceUnitTest {
         // response lands and retries on reconnect must not leave two notes in the record.
         onePatientOfMine();
         when(patientService.createActivityLog(any())).thenReturn(createdLog("al-1", "Wound dressed"));
-        when(patientService.activityLogs()).thenReturn(List.of(createdLog("al-1", "Wound dressed")));
+        when(patientService.activityLogs(MINE)).thenReturn(List.of(createdLog("al-1", "Wound dressed")));
 
         var first = service.appendActivity(MINE, new CreateActivity("Wound dressed", "d", null, "ref-1"));
         var replay = service.appendActivity(MINE, new CreateActivity("Wound dressed", "d", null, "ref-1"));
@@ -848,7 +886,9 @@ class PatientDirectoryServiceUnitTest {
     @Test
     void aCaseOnAPatientOUTSIDEmyCaseloadCannotBeEdited() {
         onePatientOfMine();
-        when(patientService.clinicalCases()).thenReturn(List.of(aCase("c-theirs", "p-other", "OPEN", "someone-else")));
+        // The case is real and readable; it is simply nobody's business here. Stubbed on the scoped
+        // read so the refusal comes from the entitlement rule rather than from an empty stub.
+        when(patientService.clinicalCases("p-other")).thenReturn(List.of(aCase("c-theirs", "p-other", "OPEN", "someone-else")));
 
         assertThatThrownBy(
             () -> service.updateCase("p-other", "c-theirs", new PatientDirectoryService.CaseUpdate("x", null, null, null))
@@ -860,7 +900,7 @@ class PatientDirectoryServiceUnitTest {
     void onlyTheFOUReditableFieldsAreForwarded() {
         // A whole-document PATCH would let a caller move a case to another patient or reassign it.
         onePatientOfMine();
-        when(patientService.clinicalCases()).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
         when(patientService.patchClinicalCase(any(), any())).thenReturn(aCase("c1", MINE, "CLOSED", PROFESSIONAL_ID));
 
         service.updateCase(MINE, "c1", new PatientDirectoryService.CaseUpdate("new symptoms", null, null, "CLOSED"));
@@ -875,7 +915,7 @@ class PatientDirectoryServiceUnitTest {
     void theBodyCarriesTheIdPatientserviceInsistsOn() {
         // Its PATCH rejects a body whose id does not match the path — a JHipster convention.
         onePatientOfMine();
-        when(patientService.clinicalCases()).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
         when(patientService.patchClinicalCase(any(), any())).thenReturn(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID));
 
         service.updateCase(MINE, "c1", new PatientDirectoryService.CaseUpdate("s", null, null, null));
@@ -890,7 +930,7 @@ class PatientDirectoryServiceUnitTest {
         // A merge-patch null means "clear this". Sending one for every untouched field would wipe a
         // diagnosis because the clinician edited the symptoms.
         onePatientOfMine();
-        when(patientService.clinicalCases()).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
         when(patientService.patchClinicalCase(any(), any())).thenReturn(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID));
 
         service.updateCase(MINE, "c1", new PatientDirectoryService.CaseUpdate("s", null, null, null));
@@ -903,11 +943,156 @@ class PatientDirectoryServiceUnitTest {
     @Test
     void aPatientsCasesAreEntitlementChecked() {
         onePatientOfMine();
-        when(patientService.clinicalCases()).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
 
         assertThat(service.casesFor(MINE, PageRequest.of(0, 20)).getContent()).extracting("id").containsExactly("c1");
         assertThatThrownBy(() -> service.casesFor("p-other", PageRequest.of(0, 20))).isInstanceOf(
             PatientDirectoryService.PatientNotInCaseloadException.class
         );
+    }
+
+    // --- What is asked of the sibling, not what comes back (backlog.md item 23) ----------------
+
+    /**
+     * A patient record asks the sibling for <b>that patient's</b> rows, on all four collections.
+     *
+     * <p><b>Asserted on the call, because the result cannot tell the two apart.</b> Reading ~1260
+     * estate-wide cases and keeping one patient's produces exactly the list this method produces now —
+     * that is why the cost survived item 22's review, and it is the whole reason item 23 is a separate
+     * entry. Any assertion on the returned record passes against the expensive version.
+     *
+     * <p>The {@code never()} half is not decoration either: a "fix" that called the scoped read and
+     * then fell back to the estate-wide one, or that left one of the four behind, would satisfy the
+     * first half of this test and change nothing about what crosses the network.
+     */
+    @Test
+    void aPatientRecordReadsONLYthatPatientsRowsFromTheSibling() {
+        onePatientOfMine();
+        when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
+
+        assertThat(service.record(MINE)).isPresent();
+
+        // atLeastOnce, not once: how many times the cases are read is the next test's subject, and a
+        // guard that fails for two separate reasons cannot tell you which one broke.
+        verify(patientService, org.mockito.Mockito.atLeastOnce()).clinicalCases(MINE);
+        verify(patientService).profiles(MINE);
+        verify(patientService).activityLogs(MINE);
+        verify(patientService).medications(MINE);
+        verify(patientService).reports(MINE);
+        verify(patientService, org.mockito.Mockito.never()).clinicalCases();
+        verify(patientService, org.mockito.Mockito.never()).profiles();
+        verify(patientService, org.mockito.Mockito.never()).activityLogs();
+        verify(patientService, org.mockito.Mockito.never()).medications();
+        verify(patientService, org.mockito.Mockito.never()).reports();
+    }
+
+    /**
+     * And it reads the case collection <b>once</b>, not twice.
+     *
+     * <p>{@code record()} read {@code /api/clinical-cases} twice in one method: once through the
+     * entitlement check and once for the case list, on the same collection, in the same request. That
+     * was two HTTP calls before item 22 made the reads complete and roughly fourteen after, at seven
+     * requests a read. The rows the check already holds are now the rows the list is built from.
+     */
+    @Test
+    void aPatientRecordReadsTheCaseCollectionONCE() {
+        onePatientOfMine();
+        when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
+
+        assertThat(service.record(MINE)).isPresent().get().extracting("cases").asInstanceOf(LIST).hasSize(1);
+
+        verify(patientService, org.mockito.Mockito.times(1)).clinicalCases(MINE);
+    }
+
+    /**
+     * The same, for the three surfaces that check entitlement and then answer from the same rows.
+     *
+     * <p>Each of these used to read the case collection twice for one request — the check, then the
+     * answer — which is the identical defect the record had, in three smaller places.
+     */
+    @Test
+    void aCaseListAnEditAndADetailEachReadTheCasesONCE() {
+        onePatientOfMine();
+        when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.patchClinicalCase(any(), any())).thenReturn(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID));
+
+        service.casesFor(MINE, PageRequest.of(0, 20));
+        verify(patientService, org.mockito.Mockito.times(1)).clinicalCases(MINE);
+
+        org.mockito.Mockito.clearInvocations(patientService);
+        service.caseDetail(MINE, "c1");
+        verify(patientService, org.mockito.Mockito.times(1)).clinicalCases(MINE);
+
+        org.mockito.Mockito.clearInvocations(patientService);
+        service.updateCase(MINE, "c1", new PatientDirectoryService.CaseUpdate("s", null, null, null));
+        verify(patientService, org.mockito.Mockito.times(1)).clinicalCases(MINE);
+
+        verify(patientService, org.mockito.Mockito.never()).clinicalCases();
+    }
+
+    /**
+     * A write's entitlement check is scoped too — and it is the only sibling read it makes.
+     *
+     * <p>{@code appendActivity} does not need the cases it reads; it needs to know the patient is the
+     * caller's, and that question is now asked about one patient rather than the estate. The rows come
+     * back because the check has them anyway.
+     */
+    @Test
+    void aWriteChecksEntitlementWithAScopedReadRatherThanTheWholeEstate() {
+        onePatientOfMine();
+        when(patientService.createActivityLog(any())).thenReturn(createdLog("al-1", "Wound dressed"));
+
+        service.appendActivity(MINE, new CreateActivity("Wound dressed", "No exudate", null, null));
+
+        verify(patientService).clinicalCases(MINE);
+        verify(patientService, org.mockito.Mockito.never()).clinicalCases();
+    }
+
+    /**
+     * A sibling that ignored the filter could not widen anyone's caseload.
+     *
+     * <p><b>The scoped read is a cost decision; the entitlement rule may not rest on it.</b> Backlog
+     * item 23 moved the narrowing of these rows to the far side of a network hop, and the rows decide
+     * whether a clinician may read and write a patient — so if that hop ever answered with the estate
+     * (a sibling ignoring {@code patientId}, which is a failure mode this client already guards for in
+     * its paging), every clinician holding one case anywhere would be entitled to every patient in the
+     * platform. {@code entitledCases} narrows again locally, and this is what says so.
+     *
+     * <p>Staged by stubbing the scoped call with a row belonging to somebody else, which is precisely
+     * what an ignored parameter looks like from this side.
+     */
+    @Test
+    void aSIBLINGthatIGNOREDtheFilterCouldNotWidenTheCaseload() {
+        when(patientService.clinicalCases(anyString())).thenReturn(List.of(aCase("c-mine", MINE, "OPEN", PROFESSIONAL_ID)));
+
+        assertThatThrownBy(() -> service.casesFor("p-not-mine", PageRequest.of(0, 20))).isInstanceOf(
+            PatientDirectoryService.PatientNotInCaseloadException.class
+        );
+        assertThatThrownBy(() -> service.appendActivity("p-not-mine", new CreateActivity("s", "d", null, null))).isInstanceOf(
+            PatientDirectoryService.PatientNotInCaseloadException.class
+        );
+        verify(patientService, org.mockito.Mockito.never()).createActivityLog(any());
+    }
+
+    /**
+     * The reads that must stay estate-wide, asserted so that "scope everything" is not a fix.
+     *
+     * <p>The directory and the case queue ask which patients and which cases are <em>this
+     * clinician's</em>, and the sibling has no filter for that — only {@code patientId}, which is the
+     * answer rather than the question. Scoping them would mean one request per patient, or a request
+     * scoped to a null id, and either would be worse than what item 22 left behind. This is the
+     * cross-stack half of item 23 and it is deliberately not attempted here.
+     */
+    @Test
+    void theCASELOADunionStillReadsTheEstateWideCollections() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task(MINE)));
+        when(patientService.profiles()).thenReturn(List.of(profile(MINE, "Ama", "Mensah", "female", LocalDate.of(1990, 1, 1))));
+
+        service.directory();
+        service.myCases(PageRequest.of(0, 20), null);
+
+        verify(patientService, org.mockito.Mockito.atLeastOnce()).clinicalCases();
+        verify(patientService).profiles();
+        verify(patientService, org.mockito.Mockito.never()).profiles(anyString());
     }
 }

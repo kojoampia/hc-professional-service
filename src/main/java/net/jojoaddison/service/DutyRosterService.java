@@ -326,8 +326,12 @@ public class DutyRosterService {
      * <p>This is the answer to open question 2, "batching the on-read refresh". The naive shape is one
      * profile lookup per visit, which is a dozen cross-stack calls to open a busy day; this fetches the
      * collection once and indexes it in memory, exactly as {@link #populateSnapshots} does on the write
-     * path. It is a cache rather than a query only because {@code /api/profiles} still takes no filter
-     * — when it learns to, this becomes a query and the whole shape gets cheaper.
+     * path. <b>It stays a cache rather than a query, and backlog item 23 is why the arithmetic does not
+     * change.</b> {@code /api/profiles} takes a single {@code patientId} — it always did, and this line
+     * said "no filter" until 2026-09-10 — but a round is a set of customers, and one filtered request
+     * per visit is the dozen calls this shape exists to avoid, against the three pages it takes to read
+     * ~600 profiles whole. A filter that takes a set, or a round-scoped read, would make this a query;
+     * neither exists over there.
      *
      * <p><b>Neither an outage nor an empty collection clears a snapshot, and that is this service's own
      * decision.</b> The two used to be indistinguishable here — {@link PatientServiceClient} answered
@@ -559,9 +563,10 @@ public class DutyRosterService {
      * next day-view open. This is the write-path half of the same decision {@link #refreshSnapshots}
      * makes on the read path.
      *
-     * <p>One call for the whole round, not one per visit: {@code /api/profiles} takes no filter — the
-     * limit MOB-P2-PRE describes — so this fetches the collection once and indexes it in memory.
-     * When that endpoint learns to filter, this becomes a query and not a cache.
+     * <p>One call for the whole round, not one per visit: {@code /api/profiles} filters by a single
+     * {@code patientId} and a round is a set of them, so this fetches the collection once and indexes
+     * it in memory. See {@link #refreshSnapshots} for the arithmetic, and backlog item 23 for the
+     * set-shaped read that would change it.
      */
     private void populateSnapshots(DutyRoster round) {
         if (round.getVisits().isEmpty()) {
@@ -596,8 +601,8 @@ public class DutyRosterService {
      * knock on the door. {@code PatientDirectoryService} reads the same signal and answers 503, which
      * is the point of moving the decision out of the client: the two callers are both right.
      *
-     * <p>Not a per-visit lookup: {@code /api/profiles} takes no filter, so one paged read is indexed
-     * in memory for the whole round.
+     * <p>Not a per-visit lookup: {@code /api/profiles}'s only filter names one patient, so one paged
+     * read is indexed in memory for the whole round rather than one request per customer.
      */
     private Map<String, PatientProfile> patientProfilesByPatientId() {
         List<PatientProfile> profiles;
