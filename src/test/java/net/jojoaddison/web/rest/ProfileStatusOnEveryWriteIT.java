@@ -19,12 +19,14 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.broker.DomainEventPublisher;
+import net.jojoaddison.domain.Category;
 import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
 import net.jojoaddison.domain.enumeration.OnboardingStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
+import net.jojoaddison.repository.CategoryRepository;
 import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
@@ -95,6 +97,12 @@ class ProfileStatusOnEveryWriteIT {
     @Autowired
     private OnboardingEventRepository eventRepository;
 
+    // assigningAnOrganisationAnnouncesOnce names a specialty, and since backlog.md item 60 a write
+    // naming one has to resolve. This class is about the announcement, not the refusal, so the row
+    // exists.
+    @Autowired
+    private CategoryRepository categoryRepository;
+
     /**
      * The far side of the announcement, mocked so that "was anything published, and what did it say"
      * is answerable without a broker. Its other methods are unstubbed and return void, which is what
@@ -118,6 +126,7 @@ class ProfileStatusOnEveryWriteIT {
         applicationRepository.deleteAll();
         profileRepository.deleteAll();
         eventRepository.deleteAll();
+        categoryRepository.deleteAll();
     }
 
     /**
@@ -274,6 +283,7 @@ class ProfileStatusOnEveryWriteIT {
         ProfessionalApplication application = applicationRepository.save(
             CompleteOnboardingFixture.consentedApplication(CLINICIAN, OnboardingStatus.APPROVED).profileId(profile.getId())
         );
+        categoryRepository.save(new Category().id("cardiology").name("Cardiology"));
         clearInvocations(events);
 
         restMockMvc

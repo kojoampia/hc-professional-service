@@ -40,11 +40,14 @@ import org.springframework.test.web.servlet.MockMvc;
  * That is the same distinction {@code ProfileStatusOnEveryWriteIT} draws against the call-site table
  * it replaced (item 49).
  *
- * <p><b>What it does not cover.</b> Nothing stops a pointer being written that never resolved: neither
- * {@code OnboardingService.assignOrganization} nor {@code ProfileResource}'s whole-entity write checks
- * that the ids they store name existing rows, so a typo still produces exactly the dangling pointer
- * this class refuses to let a delete produce. That is referential integrity on the write, a separate
- * question, and it is not what item 57 filed.
+ * <p><b>The other half, and where it now lives.</b> This class says nothing about a pointer that never
+ * resolved in the first place: neither {@code OnboardingService.assignOrganization} nor
+ * {@code ProfileResource}'s whole-entity write checked that the ids they stored named existing rows,
+ * so a typo produced by hand exactly the dangling pointer this class refuses to let a delete produce.
+ * That gap was filed as backlog.md item 60 and closed on 2026-09-09 —
+ * {@code OrganizationReferenceIntegrityIT} is its test. The two remain separate classes because they
+ * state separate properties: this one is about what a delete may not take away, that one about what a
+ * write may not introduce.
  *
  * <p>Run as {@code ROLE_DOCTOR}: one of the six the blanket {@code DELETE /api/**} rule admits, so
  * the refusals below are the mapping's absence and not the mutation matrix doing the work.

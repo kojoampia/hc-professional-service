@@ -19,8 +19,11 @@ public class ProfileService {
 
     private final ProfileRepository profileRepository;
 
-    public ProfileService(ProfileRepository profileRepository) {
+    private final OrganizationReferenceValidator organizationReferenceValidator;
+
+    public ProfileService(ProfileRepository profileRepository, OrganizationReferenceValidator organizationReferenceValidator) {
         this.profileRepository = profileRepository;
+        this.organizationReferenceValidator = organizationReferenceValidator;
     }
 
     /**
@@ -55,21 +58,46 @@ public class ProfileService {
         //
         // Read from the stored row rather than trusted from the body: the body is the caller's, the
         // row is the service's.
-        profileRepository
-            .findById(profile.getId())
-            .ifPresent(stored -> {
-                // accountId first, and for a harder reason than the other two: it is the ownership
-                // check. READ_ONLY stops a client *sending* one; this stops a PUT that omits it from
-                // clearing the field and detaching the clinician from their own documents.
-                profile.setAccountId(stored.getAccountId());
-                profile.setAccountUid(stored.getAccountUid());
-                profile.setCreatedDate(stored.getCreatedDate());
-            });
+        Profile stored = profileRepository.findById(profile.getId()).orElse(null);
+        if (stored != null) {
+            // accountId first, and for a harder reason than the other two: it is the ownership
+            // check. READ_ONLY stops a client *sending* one; this stops a PUT that omits it from
+            // clearing the field and detaching the clinician from their own documents.
+            profile.setAccountId(stored.getAccountId());
+            profile.setAccountUid(stored.getAccountUid());
+            profile.setCreatedDate(stored.getCreatedDate());
+        }
+        // A specialty or team this write *introduces* must name a row that exists (backlog item 60).
+        // Verified reachable before this line existed: on the quality stack a PUT carrying a
+        // fabricated category id and a fabricated team id returned 200 and stored both, producing by
+        // typo exactly the dangling pointer item 57 stopped a delete from producing.
+        organizationReferenceValidator.requireIntroducedReferencesResolve(profile, stored);
         return profileRepository.save(profile);
     }
 
     /**
      * Partially update a profile.
+     *
+     * <p><b>Thirteen fields, and the other five are guaranteed absent rather than ignored here.</b>
+     * This copied eleven and stopped, so a merge-patch naming {@code title},
+     * {@code emergencyContact}, {@code specialtyCategoryId}, {@code teamIds} or one of the three push
+     * preferences answered 200 with the row unchanged and the unmodified profile as the body —
+     * backlog.md item 60. {@code title} and {@code emergencyContact} join the eleven below;
+     * {@link net.jojoaddison.web.rest.ProfileResource} refuses the other five with a 400 before this
+     * method is reached, and the argument for that split lives there because it is an argument about
+     * the HTTP surface.
+     *
+     * <p>So this method is deliberately <em>not</em> the place that guards the five: it cannot be.
+     * Whether a merge-patch <em>named</em> a field is a fact about the JSON document, and by the time
+     * a {@link Profile} has been bound an absent {@code teamIds} and an explicitly empty one are the
+     * same empty list — the field is initialised, so a {@code != null} guard of the shape used below
+     * would fire on every patch and empty a clinician's teams whenever they changed their phone
+     * number. Only the resource, which still holds the raw node, can tell the two apart.
+     *
+     * <p>{@code .jhipster/Profile.json} lists {@code title}, {@code emergencyContact},
+     * {@code specialtyCategoryId} and {@code teamIds}, so a regeneration would re-emit all four into
+     * this if-chain and quietly undo the refusal. {@code ProfilePatchFieldCoverageIT} is what fails
+     * when that happens.
      *
      * @param profile the entity to update partially.
      * @return the persisted entity.
@@ -112,6 +140,24 @@ public class ProfileService {
                 }
                 if (profile.getAddress() != null) {
                     existingProfile.setAddress(profile.getAddress());
+                }
+                if (profile.getTitle() != null) {
+                    existingProfile.setTitle(profile.getTitle());
+                }
+                // Whole-object replace, not a recursive merge, which is a deviation from RFC 7396 —
+                // the media type this endpoint consumes — and a deliberate one.
+                //
+                // Not because a merge is impossible. It used to be: the body was bound to a Profile
+                // before it reached any of this, so an absent "phone" and an explicit "phone": null
+                // arrived as the same Java null. THIS COMMIT ENDED THAT — ProfileResource now holds
+                // the raw ObjectNode, so a recursive merge is reconstructible there and could be
+                // handed down. It simply is not, for the two reasons that were always the real ones:
+                // address above, the other embedded object partialUpdate copies, has always replaced
+                // wholesale, and OnboardingService.upsertOwnProfile replaces this very field. A
+                // merge here would make the two paths that write emergencyContact disagree about
+                // what writing it means.
+                if (profile.getEmergencyContact() != null) {
+                    existingProfile.setEmergencyContact(profile.getEmergencyContact());
                 }
 
                 return existingProfile;
