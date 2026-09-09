@@ -12,16 +12,20 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.List;
 import net.jojoaddison.IntegrationTest;
+import net.jojoaddison.domain.Category;
 import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
+import net.jojoaddison.domain.Team;
 import net.jojoaddison.domain.enumeration.DocumentType;
 import net.jojoaddison.domain.enumeration.OnboardingStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
+import net.jojoaddison.repository.CategoryRepository;
 import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.repository.TeamRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -61,6 +65,16 @@ class OnboardingFlowIT {
     @Autowired
     private PersonalDocumentRepository personalDocumentRepository;
 
+    // The organisation step below names a category and two teams, and since backlog.md item 60 a
+    // write naming either has to resolve. These rows exist so that this class goes on testing what
+    // it is about — the transition chain and its guards — rather than the new refusal, which
+    // OrganizationReferenceIntegrityIT owns.
+    @Autowired
+    private CategoryRepository categoryRepository;
+
+    @Autowired
+    private TeamRepository teamRepository;
+
     private Profile profile;
 
     @BeforeEach
@@ -80,6 +94,8 @@ class OnboardingFlowIT {
         eventRepository.deleteAll();
         profileRepository.deleteAll();
         personalDocumentRepository.deleteAll();
+        categoryRepository.deleteAll();
+        teamRepository.deleteAll();
     }
 
     @Test
@@ -280,6 +296,9 @@ class OnboardingFlowIT {
             .forEach(d -> personalDocumentRepository.save(d.verificationStatus(VerificationStatus.VERIFIED)));
 
         decide(application.getId(), "APPROVED", null).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("APPROVED"));
+        categoryRepository.save(new Category().id("cat-1").name("Geriatric nursing"));
+        categoryRepository.save(new Category().id("cat-2").name("Palliative care"));
+        teamRepository.save(new Team().id("team-1").name("Home visits \u00b7 North"));
         restMockMvc
             .perform(
                 put("/api/onboarding/applications/" + application.getId() + "/organization")

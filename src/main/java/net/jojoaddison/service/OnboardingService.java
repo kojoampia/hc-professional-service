@@ -119,18 +119,22 @@ public class OnboardingService {
     private final PersonalDocumentRepository personalDocumentRepository;
     private final DomainEventPublisher domainEventPublisher;
 
+    private final OrganizationReferenceValidator organizationReferenceValidator;
+
     public OnboardingService(
         ProfessionalApplicationRepository applicationRepository,
         OnboardingEventRepository eventRepository,
         ProfileRepository profileRepository,
         PersonalDocumentRepository personalDocumentRepository,
-        DomainEventPublisher domainEventPublisher
+        DomainEventPublisher domainEventPublisher,
+        OrganizationReferenceValidator organizationReferenceValidator
     ) {
         this.applicationRepository = applicationRepository;
         this.eventRepository = eventRepository;
         this.profileRepository = profileRepository;
         this.personalDocumentRepository = personalDocumentRepository;
         this.domainEventPublisher = domainEventPublisher;
+        this.organizationReferenceValidator = organizationReferenceValidator;
     }
 
     public ProfessionalApplication startApplication(
@@ -391,6 +395,11 @@ public class OnboardingService {
         Profile profile = profileRepository
             .findById(application.getProfileId() == null ? "" : application.getProfileId())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Application has no linked profile"));
+        // Before the write and before the transition: this is *the* assignment operation, so an id
+        // that names nothing is a mistake worth refusing outright rather than one to be tolerated
+        // because the profile already held it (backlog item 60). Nothing is saved and the application
+        // does not advance.
+        organizationReferenceValidator.requireReferencesResolve(specialtyCategoryId, teamIds);
         profile.specialtyCategoryId(specialtyCategoryId);
         if (teamIds != null) {
             profile.teamIds(teamIds);

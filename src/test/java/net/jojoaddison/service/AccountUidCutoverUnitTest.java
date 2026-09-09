@@ -58,7 +58,8 @@ class AccountUidCutoverUnitTest {
             mock(OnboardingEventRepository.class),
             profileRepository,
             personalDocumentRepository,
-            events
+            events,
+            mock(OrganizationReferenceValidator.class)
         );
 
         when(applicationRepository.findByAccountId(anyString())).thenReturn(Optional.empty());

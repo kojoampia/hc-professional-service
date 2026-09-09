@@ -71,7 +71,8 @@ class ProfileStatusPublicationUnitTest {
             mock(OnboardingEventRepository.class),
             profileRepository,
             personalDocumentRepository,
-            events
+            events,
+            mock(OrganizationReferenceValidator.class)
         );
         announcer = new ProfileStatusAnnouncer(profileRepository, personalDocumentRepository, service);
 
