@@ -161,7 +161,7 @@ class RosterTrailIT {
      *
      * <p><b>Asserted on the call, because the trail above is identical either way.</b> This read used
      * to fetch every activity log in the platform and keep one customer's — which item 22 made
-     * complete and thereby made seven requests and ~1260 rows to answer a question about one person.
+     * complete, and so as expensive as the platform is large, to answer a question about one person.
      * Nothing in the response says which of the two happened, so nothing but this assertion can.
      */
     @Test
