@@ -25,6 +25,7 @@ import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,7 +36,6 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.index.Index;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultMatcher;
 
@@ -103,7 +103,7 @@ class OnboardingContractsIT {
      * {@code OrganizationReferenceIntegrityIT} and is not what this one is about.
      */
     @Test
-    @WithMockUser(authorities = { "ROLE_DOCTOR" })
+    @WithMockGatewayUser(authorities = { "ROLE_DOCTOR" })
     void profileRoundTripsOnboardingFieldsOverRest() throws Exception {
         Profile profile = profileRepository.save(
             new Profile()

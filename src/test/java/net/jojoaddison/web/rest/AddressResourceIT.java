@@ -14,12 +14,12 @@ import java.util.UUID;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.Address;
 import net.jojoaddison.repository.AddressRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -27,7 +27,7 @@ import org.springframework.test.web.servlet.MockMvc;
  */
 @IntegrationTest
 @AutoConfigureMockMvc
-@WithMockUser(authorities = { "ROLE_DOCTOR" })
+@WithMockGatewayUser(authorities = { "ROLE_DOCTOR" })
 class AddressResourceIT {
 
     private static final String DEFAULT_DIGITAL_ADDRESS = "AAAAAAAAAA";

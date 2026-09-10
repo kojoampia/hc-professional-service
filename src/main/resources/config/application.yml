@@ -322,3 +322,15 @@ application:
       # To trust a sibling's issuer, set application.security.jwt.trusted-issuers per environment,
       # listing hc-professional-gateway in it as well: binding a list REPLACES the default rather
       # than adding to it.
+  gateway:
+    # THE ONLY CALL THIS SERVICE MAKES BACK TO ITS OWN GATEWAY, and it exists for one operator
+    # endpoint: POST /api/admin/account-id-migration reads the login-to-User.id table from
+    # GET /api/admin/users (backlog.md item 50, and item 55 for why that endpoint is admin-only).
+    # Nothing on a request path uses it.
+    #
+    # The default is the prod-server compose service name; a local stack runs the gateway on the
+    # host, so set application.gateway.base-url=http://localhost:5505 there. A wrong value fails the
+    # migration with a 503 naming this URL and writes nothing, which is the intended failure — there
+    # is no partially-migrated state to recover from.
+    base-url: http://gateway:5505
+    timeout-seconds: 10

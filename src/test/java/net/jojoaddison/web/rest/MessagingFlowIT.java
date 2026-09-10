@@ -15,6 +15,7 @@ import net.jojoaddison.repository.ConversationRepository;
 import net.jojoaddison.repository.MessageRecipientRepository;
 import net.jojoaddison.repository.MessageRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import net.jojoaddison.service.MessagingService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,7 +23,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -37,9 +37,24 @@ import org.springframework.test.web.servlet.MockMvc;
 @IntegrationTest
 class MessagingFlowIT {
 
-    private static final String SENDER = "msg-sender";
-    private static final String RECIPIENT = "msg-recipient";
-    private static final String STRANGER = "msg-stranger";
+    /**
+     * A login and the account id behind it, kept apart (backlog.md item 50).
+     *
+     * <p>{@code MessageRecipient.recipientId} and {@code Message.senderId} hold the gateway's
+     * {@code User.id}; the login is the display name on the recipient picker. The two are spelled
+     * differently here so that a regression to addressing a frame by {@code sub} fails rather than
+     * matching by coincidence, and the constants are compile-time so the annotations can still take
+     * the login.
+     */
+    private static final String SENDER_LOGIN = "msg-sender";
+    private static final String RECIPIENT_LOGIN = "msg-recipient";
+    private static final String STRANGER_LOGIN = "msg-stranger";
+    private static final String CARER_LOGIN = "msg-carer";
+
+    private static final String SENDER = WithMockGatewayUser.ACCOUNT_ID_PREFIX + SENDER_LOGIN;
+    private static final String RECIPIENT = WithMockGatewayUser.ACCOUNT_ID_PREFIX + RECIPIENT_LOGIN;
+    private static final String STRANGER = WithMockGatewayUser.ACCOUNT_ID_PREFIX + STRANGER_LOGIN;
+    private static final String CARER = WithMockGatewayUser.ACCOUNT_ID_PREFIX + CARER_LOGIN;
     private static final String NURSE_A = "msg-nurse-a";
     private static final String NURSE_B = "msg-nurse-b";
 
@@ -137,7 +152,7 @@ class MessagingFlowIT {
     }
 
     @Test
-    @WithMockUser(username = STRANGER)
+    @WithMockGatewayUser(login = STRANGER_LOGIN)
     void aStrangerCannotReadAMessageByIdEvenKnowingIt() throws Exception {
         Message message = messagingService.startConversation(SENDER, SENDER, "Private", "Not for you", java.util.List.of(RECIPIENT), null);
 
@@ -145,7 +160,7 @@ class MessagingFlowIT {
     }
 
     @Test
-    @WithMockUser(username = STRANGER)
+    @WithMockGatewayUser(login = STRANGER_LOGIN)
     void aStrangerSeesNoMessagesInAConversationTheyAreNotIn() throws Exception {
         Message message = messagingService.startConversation(SENDER, SENDER, "Private", "Not for you", java.util.List.of(RECIPIENT), null);
 
@@ -156,7 +171,7 @@ class MessagingFlowIT {
     }
 
     @Test
-    @WithMockUser(username = STRANGER)
+    @WithMockGatewayUser(login = STRANGER_LOGIN)
     void aStrangerCannotReplyIntoSomeoneElsesConversation() throws Exception {
         Message message = messagingService.startConversation(SENDER, SENDER, "Private", "Not for you", java.util.List.of(RECIPIENT), null);
 
@@ -171,7 +186,7 @@ class MessagingFlowIT {
     }
 
     @Test
-    @WithMockUser(username = RECIPIENT)
+    @WithMockGatewayUser(login = RECIPIENT_LOGIN)
     void theRecipientCanFetchTheMessageTheNotificationPointsAt() throws Exception {
         Message message = messagingService.startConversation(
             SENDER,
@@ -191,7 +206,7 @@ class MessagingFlowIT {
     }
 
     @Test
-    @WithMockUser(username = RECIPIENT)
+    @WithMockGatewayUser(login = RECIPIENT_LOGIN)
     void markAllReadClearsOnlyTheCallersRows() throws Exception {
         messagingService.startConversation(SENDER, SENDER, "One", "a", java.util.List.of(RECIPIENT, STRANGER), null);
         messagingService.startConversation(SENDER, SENDER, "Two", "b", java.util.List.of(RECIPIENT, STRANGER), null);
@@ -209,7 +224,7 @@ class MessagingFlowIT {
      * the empty-recipient guard. {@code ROLE_NURSE} matches the two broadcast cases below.
      */
     @Test
-    @WithMockUser(username = SENDER, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = SENDER_LOGIN, authorities = { "ROLE_NURSE" })
     void sendingRequiresARecipientOrARole() throws Exception {
         mockMvc
             .perform(post("/api/messaging/conversations").contentType(MediaType.APPLICATION_JSON).content("{\"body\":\"hello\"}"))
@@ -292,7 +307,7 @@ class MessagingFlowIT {
     }
 
     @Test
-    @WithMockUser(username = SENDER, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = SENDER_LOGIN, authorities = { "ROLE_NURSE" })
     void aBroadcastToARoleNOBODYholdsIsREFUSED() throws Exception {
         // It used to log at info and store a message with zero recipients, answering 200 — the
         // clinician saw their escalation sent and it reached no one. 422 rather than 400: the
@@ -309,7 +324,7 @@ class MessagingFlowIT {
     }
 
     @Test
-    @WithMockUser(username = SENDER, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = SENDER_LOGIN, authorities = { "ROLE_NURSE" })
     void aBroadcastToARoleSOMEONEholdsIsSent() throws Exception {
         activeNurse(NURSE_A);
 
@@ -325,18 +340,18 @@ class MessagingFlowIT {
     }
 
     @Test
-    @WithMockUser(username = "msg-carer", authorities = { "ROLE_CARER" })
+    @WithMockGatewayUser(login = CARER_LOGIN, authorities = { "ROLE_CARER" })
     void aREADONLYroleCanStillReadAThreadAndMarkItRead() throws Exception {
         // /api/messaging/** is hoisted above the CLINICAL_MUTATION rules for exactly this:
         // correspondence is not a clinical mutation, and a carer who could receive a message but
         // never answer or clear it would be worse than one who got none. The 2026-09-03 tightening
         // narrowed the hoist to the own-scoped endpoints and left this one among them; the carer's
         // access to the directory and to composing is asserted in ClinicalAuthorityMatrixIT.
-        messagingService.startConversation(SENDER, SENDER, "One", "body", java.util.List.of("msg-carer"), null);
-        String conversationId = messagingService.conversationsFor("msg-carer").get(0).getId();
+        messagingService.startConversation(SENDER, SENDER, "One", "body", java.util.List.of(CARER), null);
+        String conversationId = messagingService.conversationsFor(CARER).get(0).getId();
 
         mockMvc.perform(post("/api/messaging/conversations/" + conversationId + "/read")).andExpect(status().isOk());
 
-        assertThat(messagingService.unreadCount("msg-carer")).isZero();
+        assertThat(messagingService.unreadCount(CARER)).isZero();
     }
 }

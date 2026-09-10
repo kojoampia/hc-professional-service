@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.Map;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.config.EmbeddedKafka;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
@@ -20,14 +21,13 @@ import org.springframework.cloud.stream.binder.test.TestChannelBinderConfigurati
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageHeaders;
 import org.springframework.messaging.support.GenericMessage;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.util.MimeTypeUtils;
 
 @IntegrationTest
 @AutoConfigureMockMvc
-@WithMockUser(authorities = { "ROLE_DOCTOR" })
+@WithMockGatewayUser(authorities = { "ROLE_DOCTOR" })
 @EmbeddedKafka
 @ImportAutoConfiguration(TestChannelBinderConfiguration.class)
 class professionalServiceKafkaResourceIT {

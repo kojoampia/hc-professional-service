@@ -1,5 +1,8 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.gatewayUser;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -31,6 +34,7 @@ import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,7 +44,6 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder;
@@ -116,7 +119,7 @@ class ProfileStatusOnEveryWriteIT {
     @BeforeEach
     void setUp() {
         cleanup();
-        profile = profileRepository.save(CompleteOnboardingFixture.completeProfile(CLINICIAN));
+        profile = profileRepository.save(CompleteOnboardingFixture.completeProfile(accountIdFor(CLINICIAN)));
         clearInvocations(events);
     }
 
@@ -136,7 +139,7 @@ class ProfileStatusOnEveryWriteIT {
      * service's own code calls the worse half of the two.
      */
     @Test
-    @WithMockUser(username = CLINICIAN, authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = CLINICIAN, authorities = { "ROLE_USER" })
     void renewingALicenceAnnouncesThatTheClinicianIsNoLongerVerified() throws Exception {
         personalDocumentRepository.save(
             new PersonalDocument()
@@ -163,7 +166,7 @@ class ProfileStatusOnEveryWriteIT {
      * for.
      */
     @Test
-    @WithMockUser(username = CLINICIAN, authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = CLINICIAN, authorities = { "ROLE_USER" })
     void aSupersedingRenewalAnnouncesOnceAndAfterBothWrites() throws Exception {
         upload(DocumentType.LICENSE, "licence-2025.pdf", LocalDate.now().plusWeeks(2), null);
         personalDocumentRepository.save(byName("licence-2025.pdf").verificationStatus(VerificationStatus.VERIFIED));
@@ -186,7 +189,7 @@ class ProfileStatusOnEveryWriteIT {
      * none of the four announced anything before item 49.
      */
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void everyPersonalDocumentCrudWriteAnnounces() throws Exception {
         String created = restMockMvc
             .perform(
@@ -253,7 +256,7 @@ class ProfileStatusOnEveryWriteIT {
         restMockMvc
             .perform(
                 put("/api/notifications/preferences")
-                    .with(user(CLINICIAN).authorities(new SimpleGrantedAuthority("ROLE_CARER")))
+                    .with(gatewayUser(CLINICIAN, "ROLE_CARER"))
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"messages\":false,\"compliance\":true,\"showSenderName\":false}")
             )
@@ -264,12 +267,12 @@ class ProfileStatusOnEveryWriteIT {
         restMockMvc
             .perform(
                 put("/api/notifications/preferences")
-                    .with(user("clinician-with-no-profile-yet").authorities(new SimpleGrantedAuthority("ROLE_CARER")))
+                    .with(gatewayUser("clinician-with-no-profile-yet", "ROLE_CARER"))
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"messages\":true,\"compliance\":true,\"showSenderName\":true}")
             )
             .andExpect(status().isOk());
-        Profile born = profileRepository.findByAccountId("clinician-with-no-profile-yet").orElseThrow();
+        Profile born = profileRepository.findByAccountId(accountIdFor("clinician-with-no-profile-yet")).orElseThrow();
         assertThat(announcedProfileIds()).as("a profile that came into being here is announced").containsExactly(born.getId());
     }
 
@@ -281,7 +284,7 @@ class ProfileStatusOnEveryWriteIT {
     @Test
     void assigningAnOrganisationAnnouncesOnce() throws Exception {
         ProfessionalApplication application = applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(CLINICIAN, OnboardingStatus.APPROVED).profileId(profile.getId())
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(CLINICIAN), OnboardingStatus.APPROVED).profileId(profile.getId())
         );
         categoryRepository.save(new Category().id("cardiology").name("Cardiology"));
         clearInvocations(events);
@@ -326,7 +329,9 @@ class ProfileStatusOnEveryWriteIT {
         // requirements and it lives on the application, not on the profile or on any document.
         clearInvocations(events);
         applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(CLINICIAN, OnboardingStatus.APPLICATION_STARTED).profileId(profile.getId())
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(CLINICIAN), OnboardingStatus.APPLICATION_STARTED).profileId(
+                profile.getId()
+            )
         );
         assertThat(announcedProfileIds()).as("a bare application save").containsExactly(profile.getId());
     }

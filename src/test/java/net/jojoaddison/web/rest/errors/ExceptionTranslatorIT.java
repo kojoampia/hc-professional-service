@@ -7,17 +7,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import net.jojoaddison.IntegrationTest;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Integration tests {@link ExceptionTranslator} controller advice.
  */
-@WithMockUser(authorities = { "ROLE_DOCTOR" })
+@WithMockGatewayUser(authorities = { "ROLE_DOCTOR" })
 @AutoConfigureMockMvc
 @IntegrationTest
 class ExceptionTranslatorIT {

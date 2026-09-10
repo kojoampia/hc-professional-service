@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -9,13 +10,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -45,7 +46,7 @@ class NotificationPreferenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void anAccountWithNoProfileGetsTheDefaults() throws Exception {
         // 200 with defaults rather than 404: the client is asking what would happen if a
         // notification arrived now, and that is well defined before onboarding completes.
@@ -59,7 +60,7 @@ class NotificationPreferenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void writingPreferencesForAnAccountWithNoProfileCreatesOne() throws Exception {
         restMockMvc
             .perform(put("/api/notifications/preferences").contentType(MediaType.APPLICATION_JSON).content(body(false, true, true)))
@@ -69,13 +70,13 @@ class NotificationPreferenceResourceIT {
 
         // A toggle that flips back on the next visit is worse than no toggle, so the write cannot
         // simply be dropped for a clinician who has not finished onboarding.
-        assertThat(profileRepository.findByAccountId(NURSE)).isPresent();
+        assertThat(profileRepository.findByAccountId(accountIdFor(NURSE))).isPresent();
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void aWritePreservesTheRestOfTheProfile() throws Exception {
-        Profile existing = new Profile().accountId(NURSE).firstName("Ama").lastName("Mensah").mobilePhone("+233200000000");
+        Profile existing = new Profile().accountId(accountIdFor(NURSE)).firstName("Ama").lastName("Mensah").mobilePhone("+233200000000");
         profileRepository.save(existing);
 
         restMockMvc
@@ -84,14 +85,14 @@ class NotificationPreferenceResourceIT {
 
         // The whole reason this is not routed through PUT /api/onboarding/profile, which sets every
         // field it knows from the body it is given.
-        Profile saved = profileRepository.findByAccountId(NURSE).orElseThrow();
+        Profile saved = profileRepository.findByAccountId(accountIdFor(NURSE)).orElseThrow();
         assertThat(saved.getFirstName()).isEqualTo("Ama");
         assertThat(saved.getMobilePhone()).isEqualTo("+233200000000");
         assertThat(saved.getPushMessagesEnabled()).isFalse();
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void whatIsWrittenIsWhatIsReadBack() throws Exception {
         restMockMvc
             .perform(put("/api/notifications/preferences").contentType(MediaType.APPLICATION_JSON).content(body(true, false, true)))
@@ -113,7 +114,7 @@ class NotificationPreferenceResourceIT {
      * would get a silent 403 turning their own notifications off, and would have no way to act on it.
      */
     @Test
-    @WithMockUser(username = CARER, authorities = { "ROLE_CARER" })
+    @WithMockGatewayUser(login = CARER, authorities = { "ROLE_CARER" })
     void aReadOnlyRoleCanStillChangeItsOwnPreferences() throws Exception {
         restMockMvc
             .perform(put("/api/notifications/preferences").contentType(MediaType.APPLICATION_JSON).content(body(false, false, false)))

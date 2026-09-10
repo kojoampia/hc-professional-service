@@ -169,18 +169,18 @@ public class OnboardingDocumentResource {
         if (SecurityUtils.hasCurrentUserAnyOfAuthorities(AuthoritiesConstants.ADMIN)) {
             return;
         }
-        String login = SecurityUtils.getCurrentUserLogin().orElse("");
-        boolean owner = profileRepository.findByAccountId(login).map(p -> p.getId().equals(document.getProfileId())).orElse(false);
+        String accountId = SecurityUtils.getCurrentAccountId().orElse("");
+        boolean owner = profileRepository.findByAccountId(accountId).map(p -> p.getId().equals(document.getProfileId())).orElse(false);
         if (!owner) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not the document owner");
         }
     }
 
     private Profile ownProfile() {
-        String login = SecurityUtils.getCurrentUserLogin()
+        String accountId = SecurityUtils.getCurrentAccountId()
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "No authenticated account"));
         return profileRepository
-            .findByAccountId(login)
+            .findByAccountId(accountId)
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Create your professional profile before uploading documents")
             );

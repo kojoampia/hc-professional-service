@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
@@ -22,6 +23,7 @@ import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import net.jojoaddison.service.ComplianceService;
 import net.jojoaddison.service.OnboardingService;
 import org.junit.jupiter.api.AfterEach;
@@ -29,7 +31,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -96,9 +97,9 @@ class ComplianceFlowIT {
     @BeforeEach
     void setUp() {
         cleanup();
-        profile = profileRepository.save(CompleteOnboardingFixture.completeProfile(PRO));
+        profile = profileRepository.save(CompleteOnboardingFixture.completeProfile(accountIdFor(PRO)));
         application = applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(PRO, OnboardingStatus.ACTIVE)
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(PRO), OnboardingStatus.ACTIVE)
                 .login(PRO)
                 .profileId(profile.getId())
                 .requestedRole("ROLE_NURSE")
@@ -126,7 +127,7 @@ class ComplianceFlowIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void expiredLicenseSweepRestrictsAndReactivationNeedsANewLicense() throws Exception {
         // the lapsed license shows up on the watchlist before the sweep
         restMockMvc
@@ -219,7 +220,7 @@ class ComplianceFlowIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void metricsCountFunnelByStatusAndSource() throws Exception {
         applicationRepository.save(new ProfessionalApplication().accountId("direct-1").status(OnboardingStatus.CREDENTIAL_REVIEW));
         restMockMvc
@@ -233,7 +234,7 @@ class ComplianceFlowIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void recentEventsFeedIsNewestFirstAcrossApplications() throws Exception {
         restMockMvc.perform(post("/api/onboarding/compliance/sweep")).andExpect(status().isOk());
         restMockMvc
@@ -244,7 +245,7 @@ class ComplianceFlowIT {
     }
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void complianceSurfaceIsAdminOnly() throws Exception {
         restMockMvc.perform(post("/api/onboarding/compliance/sweep")).andExpect(status().isForbidden());
         restMockMvc.perform(get("/api/onboarding/compliance/expiring")).andExpect(status().isForbidden());

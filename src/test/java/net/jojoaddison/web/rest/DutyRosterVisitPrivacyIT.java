@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -17,13 +18,13 @@ import net.jojoaddison.domain.enumeration.DutyRole;
 import net.jojoaddison.domain.enumeration.ShiftType;
 import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import net.jojoaddison.service.PatientServiceClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -85,7 +86,7 @@ class DutyRosterVisitPrivacyIT {
     @BeforeEach
     void setUp() {
         cleanup();
-        profile = profileRepository.save(new Profile().accountId(PRO).firstName("Pri").lastName("Vacy"));
+        profile = profileRepository.save(new Profile().accountId(accountIdFor(PRO)).firstName("Pri").lastName("Vacy"));
         org.mockito.Mockito.when(patientServiceClient.profiles()).thenReturn(List.of());
         store(TOMORROW, "Ward 3");
     }
@@ -115,7 +116,7 @@ class DutyRosterVisitPrivacyIT {
     // ------------------------------------------------- the caller's own roster
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void theOwnRosterReadCarriesNoCustomerSnapshot() throws Exception {
         restMockMvc
             .perform(get("/api/duty-roster"))
@@ -132,7 +133,7 @@ class DutyRosterVisitPrivacyIT {
     }
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void theUnboundedOwnRosterReadIsTheOneThatMattersAndCarriesNoSnapshotEither() throws Exception {
         // Omitting from/to returns the whole roster and is what the dashboard asks for on every load,
         // so this is the shape the leak actually took in production rather than an edge of it. A
@@ -151,7 +152,7 @@ class DutyRosterVisitPrivacyIT {
     }
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void theRangeNarrowedReadCarriesNoSnapshot() throws Exception {
         restMockMvc
             .perform(get("/api/duty-roster").param("from", TOMORROW.toString()).param("to", TOMORROW.toString()))
@@ -167,7 +168,7 @@ class DutyRosterVisitPrivacyIT {
     // --------------------------------------------------------- the estate read
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void theEstateReadCarriesNoCustomerSnapshot() throws Exception {
         restMockMvc
             .perform(get("/api/duty-roster/all"))
@@ -179,7 +180,7 @@ class DutyRosterVisitPrivacyIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void theEstateReadIsPagedAndCountsTheWholeCollection() throws Exception {
         store(TOMORROW.plusDays(40), "Ward 9");
         store(TOMORROW.plusDays(80), "Ward 12");
@@ -210,7 +211,7 @@ class DutyRosterVisitPrivacyIT {
     // ------------------------------------------------- the deliberate exception
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void theDayReadStillCarriesTheSnapshotBecauseSomebodyIsAboutToWalkToTheAddress() throws Exception {
         // The other way to fail § 6. A privacy rule that only ever demanded absence would be satisfied
         // by a day view showing a visit with no address, which is a clinician standing in the street.
@@ -223,7 +224,7 @@ class DutyRosterVisitPrivacyIT {
     }
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void theYearSummaryCarriesNoCustomerAtAll() throws Exception {
         // Not merely no snapshot: no customer id and no visit objects either, only a count. That is
         // what makes a year of it safe to hold in a browser while the day read is one day at a time.

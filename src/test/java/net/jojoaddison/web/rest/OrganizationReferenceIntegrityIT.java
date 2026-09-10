@@ -16,12 +16,12 @@ import net.jojoaddison.repository.CategoryRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.repository.TeamRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import net.jojoaddison.service.OnboardingService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -53,7 +53,7 @@ import org.springframework.web.server.ResponseStatusException;
  */
 @AutoConfigureMockMvc
 @IntegrationTest
-@WithMockUser(authorities = { "ROLE_DOCTOR" })
+@WithMockGatewayUser(authorities = { "ROLE_DOCTOR" })
 class OrganizationReferenceIntegrityIT {
 
     private static final String ENTITY_API_URL_ID = "/api/profiles/{id}";

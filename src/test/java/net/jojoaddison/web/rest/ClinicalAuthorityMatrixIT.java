@@ -5,11 +5,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import net.jojoaddison.IntegrationTest;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -53,13 +53,13 @@ class ClinicalAuthorityMatrixIT {
     private MockMvc restMockMvc;
 
     @Test
-    @WithMockUser(authorities = { "ROLE_CARER" })
+    @WithMockGatewayUser(authorities = { "ROLE_CARER" })
     void readOnlyRoleCanRead() throws Exception {
         restMockMvc.perform(get("/api/categories")).andExpect(status().isOk());
     }
 
     @Test
-    @WithMockUser(authorities = { "ROLE_CARER" })
+    @WithMockGatewayUser(authorities = { "ROLE_CARER" })
     void carerCannotMutate() throws Exception {
         restMockMvc
             .perform(post("/api/categories").contentType(MediaType.APPLICATION_JSON).content(CATEGORY_PAYLOAD))
@@ -67,7 +67,7 @@ class ClinicalAuthorityMatrixIT {
     }
 
     @Test
-    @WithMockUser(authorities = { "ROLE_ANGEL" })
+    @WithMockGatewayUser(authorities = { "ROLE_ANGEL" })
     void aTokenBearingTheCareAngelAuthorityCannotMutate() throws Exception {
         restMockMvc
             .perform(post("/api/categories").contentType(MediaType.APPLICATION_JSON).content(CATEGORY_PAYLOAD))
@@ -75,7 +75,7 @@ class ClinicalAuthorityMatrixIT {
     }
 
     @Test
-    @WithMockUser(authorities = { "ROLE_CHEMIST" })
+    @WithMockGatewayUser(authorities = { "ROLE_CHEMIST" })
     void chemistCannotMutate() throws Exception {
         restMockMvc
             .perform(post("/api/categories").contentType(MediaType.APPLICATION_JSON).content(CATEGORY_PAYLOAD))
@@ -83,7 +83,7 @@ class ClinicalAuthorityMatrixIT {
     }
 
     @Test
-    @WithMockUser(authorities = { "ROLE_TECHNICIAN" })
+    @WithMockGatewayUser(authorities = { "ROLE_TECHNICIAN" })
     void technicianCannotMutate() throws Exception {
         restMockMvc
             .perform(post("/api/categories").contentType(MediaType.APPLICATION_JSON).content(CATEGORY_PAYLOAD))
@@ -91,7 +91,7 @@ class ClinicalAuthorityMatrixIT {
     }
 
     @Test
-    @WithMockUser(authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(authorities = { "ROLE_NURSE" })
     void mutationRoleCanCreate() throws Exception {
         restMockMvc
             .perform(post("/api/categories").contentType(MediaType.APPLICATION_JSON).content(CATEGORY_PAYLOAD))
@@ -99,7 +99,7 @@ class ClinicalAuthorityMatrixIT {
     }
 
     @Test
-    @WithMockUser(authorities = { "ROLE_DOCTOR" })
+    @WithMockGatewayUser(authorities = { "ROLE_DOCTOR" })
     void doctorCanCreate() throws Exception {
         restMockMvc
             .perform(post("/api/categories").contentType(MediaType.APPLICATION_JSON).content(CATEGORY_PAYLOAD))
@@ -119,7 +119,7 @@ class ClinicalAuthorityMatrixIT {
 
     /** The hoist survives: a read-only role still composes and still reads the directory. */
     @Test
-    @WithMockUser(username = "matrix-carer", authorities = { "ROLE_CARER" })
+    @WithMockGatewayUser(login = "matrix-carer", authorities = { "ROLE_CARER" })
     void aReadOnlyClinicalRoleCanStillStartAConversation() throws Exception {
         restMockMvc
             .perform(post("/api/messaging/conversations").contentType(MediaType.APPLICATION_JSON).content(CONVERSATION_PAYLOAD))
@@ -127,7 +127,7 @@ class ClinicalAuthorityMatrixIT {
     }
 
     @Test
-    @WithMockUser(username = "matrix-carer", authorities = { "ROLE_CARER" })
+    @WithMockGatewayUser(login = "matrix-carer", authorities = { "ROLE_CARER" })
     void aReadOnlyClinicalRoleCanStillReadTheRecipientDirectory() throws Exception {
         restMockMvc.perform(get("/api/messaging/recipients")).andExpect(status().isOk());
     }
@@ -140,7 +140,7 @@ class ClinicalAuthorityMatrixIT {
      * {@code ROLE_USER}, which is every applicant here and every caller from the two sibling stacks.
      */
     @Test
-    @WithMockUser(username = "matrix-applicant", authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
     void anApplicantCannotReadTheRecipientDirectory() throws Exception {
         restMockMvc.perform(get("/api/messaging/recipients")).andExpect(status().isForbidden());
     }
@@ -154,7 +154,7 @@ class ClinicalAuthorityMatrixIT {
      * on the applicant's own profile tab. So no reply path is owed to them either.
      */
     @Test
-    @WithMockUser(username = "matrix-applicant", authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
     void anApplicantCannotStartAConversation() throws Exception {
         restMockMvc
             .perform(post("/api/messaging/conversations").contentType(MediaType.APPLICATION_JSON).content(CONVERSATION_PAYLOAD))
@@ -168,7 +168,7 @@ class ClinicalAuthorityMatrixIT {
      * than no island, because the refusal is attributed to the service.
      */
     @Test
-    @WithMockUser(username = "matrix-applicant", authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
     void anApplicantStillReachesTheOwnScopedInboxReads() throws Exception {
         restMockMvc.perform(get("/api/messaging/conversations")).andExpect(status().isOk());
         restMockMvc.perform(get("/api/messaging/unread-count")).andExpect(status().isOk());
@@ -191,14 +191,14 @@ class ClinicalAuthorityMatrixIT {
 
     /** Not in the estate's professional directory, which is its list of valid logins. */
     @Test
-    @WithMockUser(username = "matrix-angel", authorities = { "ROLE_ANGEL" })
+    @WithMockGatewayUser(login = "matrix-angel", authorities = { "ROLE_ANGEL" })
     void aTokenBearingTheCareAngelAuthorityCannotReadTheRecipientDirectory() throws Exception {
         restMockMvc.perform(get("/api/messaging/recipients")).andExpect(status().isForbidden());
     }
 
     /** Nor may it put a message into a clinician's inbox, role broadcast included. */
     @Test
-    @WithMockUser(username = "matrix-angel", authorities = { "ROLE_ANGEL" })
+    @WithMockGatewayUser(login = "matrix-angel", authorities = { "ROLE_ANGEL" })
     void aTokenBearingTheCareAngelAuthorityCannotStartAConversation() throws Exception {
         restMockMvc
             .perform(post("/api/messaging/conversations").contentType(MediaType.APPLICATION_JSON).content(CONVERSATION_PAYLOAD))
@@ -214,7 +214,7 @@ class ClinicalAuthorityMatrixIT {
      * can be given a clinical authority, or pointed at patient.abofonsa.com where an angel belongs.
      */
     @Test
-    @WithMockUser(username = "matrix-angel", authorities = { "ROLE_ANGEL" })
+    @WithMockGatewayUser(login = "matrix-angel", authorities = { "ROLE_ANGEL" })
     void aTokenBearingTheCareAngelAuthorityStillReachesTheOwnScopedInboxReads() throws Exception {
         restMockMvc.perform(get("/api/messaging/conversations")).andExpect(status().isOk());
         restMockMvc.perform(get("/api/messaging/unread-count")).andExpect(status().isOk());
@@ -229,7 +229,7 @@ class ClinicalAuthorityMatrixIT {
      * is not what was decided.
      */
     @Test
-    @WithMockUser(authorities = { "ROLE_ANGEL" })
+    @WithMockGatewayUser(authorities = { "ROLE_ANGEL" })
     void aTokenBearingTheCareAngelAuthorityStillReadsWhatAnyAuthenticatedCallerReads() throws Exception {
         restMockMvc.perform(get("/api/categories")).andExpect(status().isOk());
     }

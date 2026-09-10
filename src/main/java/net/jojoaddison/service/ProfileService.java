@@ -36,7 +36,7 @@ public class ProfileService {
      * handler.
      *
      * What made it worth removing rather than leaving unused is that it was the one write path to
-     * this collection with no rule on it at all: `update` preserves accountId/accountUid/createdDate
+     * this collection with no rule on it at all: `update` preserves accountId and createdDate
      * from the stored row and runs `OrganizationReferenceValidator`, `partialUpdate` merges field by
      * field, `upsertOwnProfile` forces the account to the caller. A bare repository passthrough on
      * the service is what the next create would have been written against.
@@ -58,23 +58,21 @@ public class ProfileService {
         // A whole-document replace, so anything the request body omits is dropped. Two fields must
         // survive that, and both are invisible to the caller by design (backlog item 48's review):
         //
-        //   accountUid — READ_ONLY over HTTP, so a client CANNOT send it and every PUT would
-        //                otherwise clear it. Profile.accountUid says it "is never cleared once set";
-        //                without this line that was true of upsertOwnProfile and false here, and the
-        //                published ProfileStatus would flip a known uid to null — exactly what
-        //                aPreClaimTokenDoesNotClearAUidTheProfileAlreadyLearnt exists to prevent.
+        //   accountId — READ_ONLY over HTTP, so a client CANNOT send it and every PUT would
+        //               otherwise clear it. It is also the ownership check, which is a harder reason
+        //               than the other: READ_ONLY stops a client *sending* one, and this stops a PUT
+        //               that omits it from detaching the clinician from their own documents.
         //   createdDate — @CreatedDate is not re-applied to an entity that already has an id, so a
         //                 replace persists whatever the body carried, which is normally nothing.
+        //
+        // There was a third, accountUid, until backlog item 50 folded it into accountId — the two
+        // held the same value once accountId became the gateway's User.id.
         //
         // Read from the stored row rather than trusted from the body: the body is the caller's, the
         // row is the service's.
         Profile stored = profileRepository.findById(profile.getId()).orElse(null);
         if (stored != null) {
-            // accountId first, and for a harder reason than the other two: it is the ownership
-            // check. READ_ONLY stops a client *sending* one; this stops a PUT that omits it from
-            // clearing the field and detaching the clinician from their own documents.
             profile.setAccountId(stored.getAccountId());
-            profile.setAccountUid(stored.getAccountUid());
             profile.setCreatedDate(stored.getCreatedDate());
         }
         // A specialty or team this write *introduces* must name a row that exists (backlog item 60).

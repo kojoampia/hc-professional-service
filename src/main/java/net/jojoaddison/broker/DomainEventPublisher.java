@@ -192,44 +192,40 @@ public class DomainEventPublisher {
      * identifiers-only rule {@link DomainEventEnvelope} states outright, so no departure from it has
      * to be argued for.
      *
-     * <h2>{@code accountId} is the gateway's {@code User.id}, which is not what this database stores</h2>
+     * <h2>{@code accountId} is the gateway's {@code User.id}, and since item 50 so is the field</h2>
      *
-     * <p><b>This is the one place the two meanings of that name have to be held apart.</b> The
-     * specified contract names {@code accountId} and means the gateway's {@code User.id}. This
-     * service resolves its caller from the JWT subject, so what
-     * {@code OnboardingResource.currentAccountId()} returns — and what {@code Profile.accountId}
-     * stores — is the <b>login</b>. Two different values wearing one name.
+     * <p><b>This used to be the one place the two meanings of that name had to be held apart.</b> The
+     * specified contract names {@code accountId} and means the gateway's {@code User.id}, while this
+     * service resolved its caller from the JWT subject, so {@code Profile.accountId} stored the
+     * <b>login</b> — two different values wearing one name, and this payload took the
+     * specification's meaning from an eighth field called {@code accountUid}. Backlog.md item 50
+     * removed the fork: {@code SecurityUtils.getCurrentAccountId()} reads the {@code uid} claim,
+     * {@code Profile.accountId} holds it, {@code AccountIdMigrationService} moved the stored values,
+     * and {@code accountUid} is gone. <b>The wire contract did not change with it</b> — this key has
+     * meant {@code User.id} since 2026-09-08 and still does; only where the value is read from did.
      *
-     * <p>The payload takes the specification's meaning. Until 2026-09-08 it did the opposite: it
-     * published the login under {@code accountId} and added the {@code User.id} as an eighth field
-     * called {@code accountUid}, naming the specified field after the value this database happens to
-     * hold rather than after the value the estate asked for. Renaming the payload key does <b>not</b>
-     * rename {@code Profile.accountId}, which 54 call sites key off — that is item 48's migration,
-     * and it is now required rather than declined; see below.
-     *
-     * <h2>{@code accountId} is the only join, and this half often does not have it yet</h2>
+     * <h2>{@code accountId} is the only join</h2>
      *
      * <p>The estate's decision is that the account identifier correlates a professional and
      * <b>nothing else does</b> — which is what hc-admin's {@code SiblingDomainEvent} has said all
      * along: <i>"the correlation key: lowercased email for a patient, {@code accountId} for a
-     * professional."</i> The login used to ride in {@code subject.login} beside it and was the join
-     * that worked; it is gone, because two join keys is two answers to "is this the same clinician",
-     * and a login is editable in user management.
+     * professional."</i> The login used to ride in {@code subject.login} beside it; it is gone,
+     * because two join keys is two answers to "is this the same clinician", and a login is editable
+     * in user management.
      *
-     * <p><b>So a frame whose {@code accountId} is null cannot be placed by any consumer.</b> This
-     * service learns {@code User.id} only when a clinician saves their own profile with a
-     * uid-bearing token, so that is every profile written before 2026-09-07 and every one whose owner
-     * has not signed in since. Until those are backfilled this half announces status for clinicians
-     * hc-admin cannot identify — and the Kafka key is null for them too, so their frames are not even
-     * ordered against each other. Both costs are paid off by backfilling {@code User.id}, not by
-     * reintroducing a second identifier.
+     * <p><b>A frame whose {@code accountId} is null still cannot be placed by any consumer</b>, and
+     * that remains reachable rather than theoretical — a profile whose login resolved to no gateway
+     * account is quarantined by the migration with its key cleared, exactly so that it announces
+     * nothing it cannot substantiate. What has stopped being true is that it was the ordinary case:
+     * before item 50 the field was null for every profile written before 2026-09-07 and every one
+     * whose owner had not signed in since.
      *
-     * <p>{@code lastModifiedBy} is an <b>account identifier and never a display name</b>:
-     * {@code SpringSecurityAuditorAware} fills it from the JWT subject, so today it holds a login for
-     * the same reason — item 48 again. The name a directory displays comes from the account half;
-     * nothing here duplicates it.
+     * <p>{@code lastModifiedBy} is an <b>audit value and never a lookup key</b>:
+     * {@code SpringSecurityAuditorAware} fills it from the JWT subject, so it holds the login, and
+     * that is deliberate — a person reading a trail needs a name rather than a Mongo id. Do not
+     * "correct" it to the account id; nothing joins on it.
      *
-     * <p>Nothing is nulled and nothing is synthesised. Recorded in backlog.md items 47 § 2b and 48.
+     * <p>Nothing is nulled and nothing is synthesised. Recorded in backlog.md items 47 § 2b, 48 and 50.
      *
      * <p>One consequence is not softened: the halves are <b>not co-partitioned</b>, so nothing
      * orders this against the account events. It is a snapshot rather than a delta for exactly that
@@ -256,23 +252,16 @@ public class DomainEventPublisher {
     ) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("profileId", profileId);
-        // `accountId` IS THE GATEWAY'S User.id, which is what the specified contract names — not this
-        // service's stored Profile.accountId, which holds the login. Those are two different values
-        // wearing one name, and the payload takes the spec's meaning.
-        //
-        // This field was published as `accountUid` beside a login-valued `accountId` until 2026-09-08.
-        // That was an eighth field on a seven-field contract, and it named the specified field after
-        // the value this database happens to store rather than after the value the estate asked for.
-        // The login has not been lost: it travels in `subject.login`, which is what hc-admin actually
-        // correlates the two phases on — see backlog item 48. Renaming the payload key does NOT rename
-        // Profile.accountId, which 54 call sites key off; that is item 48's declined migration and is
-        // recorded there.
+        // `accountId` IS THE GATEWAY'S User.id, which is what the specified contract names AND, since
+        // backlog item 50, what Profile.accountId stores. The two used to be different values wearing
+        // one name; the caller reads the field now rather than a shadow field called `accountUid`.
         //
         // OMITTED when unknown, never present-and-null. TokenProvider omits the `uid` claim when blank
         // on the argument that a present-and-empty value is one a reader can compare against stored
-        // data and match something, while an absent one is the only unambiguous "not known". For the
-        // month after this ships it is unknown on nearly every row, so a present null would be the
-        // shape most consumers meet first.
+        // data and match something, while an absent one is the only unambiguous "not known". Still
+        // reachable after item 50: a profile the migration could not resolve to a gateway account has
+        // its key cleared rather than left holding a login, and announces nothing joinable — which is
+        // the honest frame for a row that belongs to nobody.
         if (accountId != null) {
             data.put("accountId", accountId);
         }
@@ -294,12 +283,10 @@ public class DomainEventPublisher {
             // here until 2026-09-08 and was the join that worked; it is gone because two join keys is
             // two answers to "is this the same clinician", and a login is editable.
             //
-            // CONSEQUENCE, AND IT IS NOT SMALL: this service only learns User.id when a clinician
-            // saves their own profile with a uid-bearing token, so accountId is NULL — and the frame
-            // therefore unjoinable — for every profile written before 2026-09-07 and every one whose
-            // owner has not signed in since. Until those are backfilled, phase 2 announces status for
-            // clinicians hc-admin cannot place. See backlog item 48: the migration it declined is now
-            // required, not optional.
+            // It is no longer usually null: backlog item 50 made Profile.accountId hold this very
+            // value and migrated the stored rows, so a frame carrying no subject now means a profile
+            // that genuinely belongs to no gateway account rather than one this service has not been
+            // told about yet.
             new ProfessionalEvent.Subject(null, accountId),
             data
         );
@@ -308,10 +295,10 @@ public class DomainEventPublisher {
         // each other. Keying on anything else would reintroduce the second identifier space this
         // change exists to remove.
         //
-        // It can be NULL, and a null key is round-robin: no ordering guarantee for that clinician's
-        // frames until the uid is learnt, and a partition move at the moment it is. That is a real
-        // cost and it is the same blocker as the unjoinable subject above — both are paid off by
-        // backfilling User.id rather than by choosing a different key here.
+        // It can still be NULL, and a null key is round-robin: no ordering guarantee for that
+        // clinician's frames. After item 50 that is only reachable for a quarantined profile, which
+        // has no account to order against anyway — not, as before, for every clinician who had not
+        // signed in since 2026-09-07.
         publishShared(ONBOARDING_STATE_BINDING, ProfessionalEventType.PROFILE_STATUS, accountId, event, "profile " + profileId);
     }
 

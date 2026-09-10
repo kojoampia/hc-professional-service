@@ -1,5 +1,7 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.gatewayUser;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -26,6 +28,7 @@ import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.repository.TeamRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,7 +36,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -85,7 +87,7 @@ class OnboardingFlowIT {
         // This fixture exists to exercise the transition chain, so it has to clear that gate — the
         // gate itself is asserted there rather than here, and its shape is CompleteOnboardingFixture's
         // rather than this class's, so a ninth requirement lands on all three at once (item 18).
-        profile = profileRepository.save(CompleteOnboardingFixture.completeProfile(APPLICANT));
+        profile = profileRepository.save(CompleteOnboardingFixture.completeProfile(accountIdFor(APPLICANT)));
     }
 
     @AfterEach
@@ -99,7 +101,7 @@ class OnboardingFlowIT {
     }
 
     @Test
-    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void consentIsRequiredAndApplicationsAreUniquePerAccount() throws Exception {
         restMockMvc
             .perform(
@@ -120,7 +122,7 @@ class OnboardingFlowIT {
     }
 
     @Test
-    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void uploadValidationEnforcesDocumentRules() throws Exception {
         startApplication();
 
@@ -170,7 +172,7 @@ class OnboardingFlowIT {
     }
 
     @Test
-    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void attributionSourcePersistsTruncatedAndOptional() throws Exception {
         String longSource = "web-careers-" + "x".repeat(100);
         restMockMvc
@@ -185,11 +187,11 @@ class OnboardingFlowIT {
         // absent source stays null (graceful degradation for direct visitors)
         applicationRepository.deleteAll();
         startApplication();
-        assertThat(applicationRepository.findByAccountId(APPLICANT).orElseThrow().getSource()).isNull();
+        assertThat(applicationRepository.findByAccountId(accountIdFor(APPLICANT)).orElseThrow().getSource()).isNull();
     }
 
     @Test
-    @WithMockUser(username = "fresh-applicant", authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = "fresh-applicant", authorities = { "ROLE_USER" })
     void applicantUpsertsOwnProfileThroughOnboardingSurface() throws Exception {
         restMockMvc
             .perform(
@@ -198,7 +200,7 @@ class OnboardingFlowIT {
                     .content("{\"firstName\":\"Fresh\",\"lastName\":\"Applicant\",\"accountId\":\"spoofed\",\"title\":\"RN\"}")
             )
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.accountId").value("fresh-applicant"))
+            .andExpect(jsonPath("$.accountId").value(accountIdFor("fresh-applicant")))
             .andExpect(jsonPath("$.title").value("RN"));
         // update keeps the same profile (no duplicate)
         restMockMvc
@@ -209,11 +211,11 @@ class OnboardingFlowIT {
             )
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.firstName").value("Fresher"));
-        assertThat(profileRepository.findByAccountId("fresh-applicant")).isPresent();
+        assertThat(profileRepository.findByAccountId(accountIdFor("fresh-applicant"))).isPresent();
     }
 
     @Test
-    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void applicantListsOwnDocumentsWithoutBytes() throws Exception {
         PersonalDocument doc = doc(DocumentType.CERTIFICATE, null);
         doc.setData("%PDF".getBytes());
@@ -226,7 +228,7 @@ class OnboardingFlowIT {
     }
 
     @Test
-    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void submitRequiresMandatoryDocumentSet() throws Exception {
         startApplication();
         restMockMvc.perform(put("/api/onboarding/applications/me/complete-profile")).andExpect(status().isOk());
@@ -234,7 +236,7 @@ class OnboardingFlowIT {
     }
 
     @Test
-    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void illegalTransitionsAreRejectedWithConflict() throws Exception {
         startApplication();
         // APPLICATION_STARTED -> CREDENTIAL_REVIEW without completing the profile
@@ -250,11 +252,7 @@ class OnboardingFlowIT {
         restMockMvc
             .perform(
                 put("/api/onboarding/applications/" + application.getId() + "/decide")
-                    .with(
-                        org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user(
-                            "nurse"
-                        ).authorities(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_NURSE"))
-                    )
+                    .with(gatewayUser("nurse", "ROLE_NURSE"))
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"decision\":\"APPROVED\"}")
             )
@@ -262,13 +260,15 @@ class OnboardingFlowIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void fullLegalPathWithGuardsAndAuditTrail() throws Exception {
         // Applicant part done directly through the repositories/service guards. consentAcceptedAt comes
         // stamped from the fixture because this test skips the applicant steps that would normally set
         // it, and the transition to ACTIVE counts consent among the eight completion requirements.
         ProfessionalApplication application = applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(APPLICANT, OnboardingStatus.CREDENTIAL_REVIEW).profileId(profile.getId())
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), OnboardingStatus.CREDENTIAL_REVIEW).profileId(
+                profile.getId()
+            )
         );
         seedMandatoryDocuments();
 

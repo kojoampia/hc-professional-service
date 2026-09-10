@@ -107,7 +107,7 @@ public class PatientDirectoryService {
      * such an account genuinely has no patients.
      */
     public Optional<String> callerProfileId() {
-        return SecurityUtils.getCurrentUserLogin().flatMap(profileRepository::findByAccountId).map(net.jojoaddison.domain.Profile::getId);
+        return SecurityUtils.getCurrentAccountId().flatMap(profileRepository::findByAccountId).map(net.jojoaddison.domain.Profile::getId);
     }
 
     /**
@@ -642,7 +642,7 @@ public class PatientDirectoryService {
     private Entitlement requireEntitlement(String patientId) {
         String professionalId = callerProfileId().orElse(null);
         List<ClinicalCase> cases = entitledCases(professionalId, patientId).orElseThrow(() -> new PatientNotInCaseloadException(patientId));
-        String accountId = SecurityUtils.getCurrentUserLogin().orElseThrow(() -> new PatientNotInCaseloadException(patientId));
+        String accountId = SecurityUtils.getCurrentAccountId().orElseThrow(() -> new PatientNotInCaseloadException(patientId));
         return new Entitlement(accountId, cases);
     }
 

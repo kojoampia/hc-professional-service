@@ -30,15 +30,17 @@ import org.springframework.web.server.ResponseStatusException;
  * an append-only {@link OnboardingEvent}; illegal transitions are rejected
  * with 409 CONFLICT.
  *
- * <p><b>Account linkage.</b> {@code accountId} is the gateway login, taken from the JWT subject,
- * and it stays that way. This javadoc said "switch to User.id once the gateway adds a uid claim"
- * from WP1 until 2026-09-07; the gateway now adds the claim, and the switch was <b>deliberately not
- * made</b>. Every identifier in this database is a login — {@code ProfessionalApplication},
- * {@code DeviceToken}, {@code MessageRecipient}, {@code OnboardingEvent.actor}, every
- * {@code createdBy} and {@code lastModifiedBy} — the mapping needed to rewrite them lives in a
- * database this service cannot read, and it is not total, so the result would be a field holding
- * both identifier spaces at once. {@code Profile.accountUid} carries the gateway id <em>beside</em>
- * the login instead, for publication only, and is never a lookup key. See backlog.md item 48.
+ * <p><b>Account linkage.</b> {@code accountId} is the gateway's {@code User.id}, read from the
+ * {@code uid} claim by {@code SecurityUtils.getCurrentAccountId()}. It was the JWT subject — the
+ * login — from WP1 until 2026-09-10, which is what this javadoc's "switch to User.id once the
+ * gateway adds a uid claim" had been waiting for since WP1 and what backlog.md item 50 did.
+ *
+ * <p>Two things about that are easy to get wrong afterwards. <b>The login has not become a
+ * fallback</b>: a caller whose token carries no claim resolves to nobody and is refused, because a
+ * second identifier accepted in the same field is the fork the change removed. And <b>the login is
+ * still the right value for {@code OnboardingEvent.actor}</b> and for every event {@code actor}
+ * field, which name a person in a trail and are never looked up — the two are taken from different
+ * accessors on purpose, and {@code OnboardingResource} keeps them apart.
  */
 @Service
 public class OnboardingService {
@@ -137,8 +139,15 @@ public class OnboardingService {
         this.organizationReferenceValidator = organizationReferenceValidator;
     }
 
+    /**
+     * @param accountId the caller's gateway {@code User.id} — the key this application is found by.
+     * @param login the caller's login, stored beside it as the human-readable name. Until item 50
+     *     both fields were written from one value, because both <em>were</em> the login; they are
+     *     now two identifiers and the caller passes each explicitly.
+     */
     public ProfessionalApplication startApplication(
         String accountId,
+        String login,
         String requestedRole,
         boolean consentAccepted,
         String invitedBy,
@@ -155,7 +164,7 @@ public class OnboardingService {
         ProfessionalApplication application = applicationRepository.save(
             new ProfessionalApplication()
                 .accountId(accountId)
-                .login(accountId)
+                .login(login)
                 .requestedRole(requestedRole)
                 .status(OnboardingStatus.APPLICATION_STARTED)
                 .consentAcceptedAt(Instant.now())
@@ -190,17 +199,9 @@ public class OnboardingService {
         if (created) {
             profile = new Profile();
         }
-        // The one place accountUid is written, and only ever for the caller's own profile — this
-        // method already force-sets accountId to the caller, so the uid claim on the same token
-        // describes the same person. An admin saving somebody else's profile through
-        // ProfileResource must not stamp their own id onto it, which is the mistake that would look
-        // right and be wrong. Absence leaves the stored value alone rather than clearing it: a
-        // clinician still holding a 30-day token minted before the claim existed would otherwise
-        // undo the link on their next save. See Profile.accountUid and backlog.md item 48.
-        String accountUid = net.jojoaddison.security.SecurityUtils.getCurrentUserAccountUid().orElse(null);
-        if (accountUid != null) {
-            profile.accountUid(accountUid);
-        }
+        // accountUid used to be stamped here, beside a login-valued accountId. Item 50 removed the
+        // field: accountId now holds the very value accountUid held, so keeping both would be the
+        // second join key that item exists to remove, spelled twice in one document.
         profile
             .accountId(accountId)
             .firstName(incoming.getFirstName())
@@ -265,12 +266,13 @@ public class OnboardingService {
         }
         try {
             domainEventPublisher.publishProfileStatus(
-                // Off the profile row, never off the caller: three of the four paths into here are
-                // an administrator acting on somebody else's profile, so the calling token's uid
-                // would name the wrong person. Null until that clinician has saved their own profile
-                // with a uid-bearing token, and an unjoinable frame when it is — see Profile.accountUid
-                // and backlog item 50, which makes Profile.accountId hold this value outright.
-                profile.getAccountUid(),
+                // Off the profile row, never off the caller: most paths into here are an
+                // administrator acting on somebody else's profile, so the calling token's uid would
+                // name the wrong person. This read `profile.getAccountUid()` until item 50, beside a
+                // login-valued accountId that the contract's `accountId` did not mean; the two
+                // identifier spaces are now one and the field the contract names is the field the
+                // row holds.
+                profile.getAccountId(),
                 profile.getId(),
                 progressFor(profile.getAccountId()).complete(),
                 allLiveDocumentsVerified(profile.getId()),

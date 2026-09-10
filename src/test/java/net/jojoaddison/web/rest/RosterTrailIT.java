@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -21,6 +22,7 @@ import net.jojoaddison.domain.enumeration.DutyRole;
 import net.jojoaddison.domain.enumeration.ShiftType;
 import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import net.jojoaddison.service.DutyRosterService;
 import net.jojoaddison.service.PatientServiceClient;
 import net.jojoaddison.service.PatientServiceUnavailableException;
@@ -30,7 +32,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -72,7 +73,7 @@ class RosterTrailIT {
     @BeforeEach
     void setUp() {
         cleanup();
-        mine = profileRepository.save(new Profile().accountId(PRO).firstName("Tra").lastName("Il"));
+        mine = profileRepository.save(new Profile().accountId(accountIdFor(PRO)).firstName("Tra").lastName("Il"));
         Profile theirs = profileRepository.save(new Profile().accountId(OTHER_PRO).firstName("Oth").lastName("Er"));
 
         // Mine today; theirs today. Same day, different professionals — the point being that the
@@ -145,7 +146,7 @@ class RosterTrailIT {
     // ------------------------------------------------------------- entitlement
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void readsTheTrailOfACustomerOnTheirOwnRound() throws Exception {
         restMockMvc
             .perform(get(trail(MINE)))
@@ -165,7 +166,7 @@ class RosterTrailIT {
      * Nothing in the response says which of the two happened, so nothing but this assertion can.
      */
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void asksTheSiblingForTHATcustomersActivityRatherThanTheEstates() throws Exception {
         restMockMvc.perform(get(trail(MINE))).andExpect(status().isOk());
 
@@ -174,7 +175,7 @@ class RosterTrailIT {
     }
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void refusesACustomerOnSomeoneElsesRound() throws Exception {
         // The core case. THEIRS is a real customer, rostered today, with activity — everything except
         // being on this clinician's roster.
@@ -182,7 +183,7 @@ class RosterTrailIT {
     }
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void refusesAnUnknownCustomerTheSameWayAsAnUnauthorisedOne() throws Exception {
         // Same status, same shape. Distinguishing the two would turn this endpoint into a way to ask
         // "does this id exist" for every id in the platform.
@@ -190,7 +191,7 @@ class RosterTrailIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void refusesAnAdministratorWithNoRosterOfTheirOwn() throws Exception {
         // ROLE_ADMIN opens the whole-estate roster and every onboarding review screen, and still does
         // not open this: the boundary is the roster, not the role. An administrator who needs a
@@ -199,7 +200,7 @@ class RosterTrailIT {
     }
 
     @Test
-    @WithMockUser(username = "stranger-from-another-stack", authorities = { "ROLE_DOCTOR" })
+    @WithMockGatewayUser(login = "stranger-from-another-stack", authorities = { "ROLE_DOCTOR" })
     void refusesATokenFromASiblingStack() throws Exception {
         // professionalservice accepts tokens minted by the hc-admin and hc-patient gateways — one
         // signing key across three stacks. Such a caller authenticates perfectly well here and has no
@@ -216,7 +217,7 @@ class RosterTrailIT {
     // ------------------------------------------------------------- the window
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void entitlementFollowsTheRosterInAndOutOfTheThirtyDayWindow() throws Exception {
         dutyRosterRepository.deleteAll();
 
@@ -236,7 +237,7 @@ class RosterTrailIT {
     }
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void losingTheRosterEntryRevokesTheTrailImmediately() throws Exception {
         restMockMvc.perform(get(trail(MINE))).andExpect(status().isOk());
 
@@ -258,7 +259,7 @@ class RosterTrailIT {
      * the construction is pinned here rather than left as an argument in a comment.
      */
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void anOffDayGrantsNoTrailEntitlement() throws Exception {
         dutyRosterRepository.deleteAll();
         dutyRosterRepository.save(
@@ -273,7 +274,7 @@ class RosterTrailIT {
     // ------------------------------------------------------------- degradation
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void answersAnEmptyTrailWhenTheCustomerGENUINELYhasNoActivity() throws Exception {
         // A read that worked and found nothing. This is the rendered empty state — "nothing happened
         // this week" — and it must stay a 200, or the outage case below proves nothing.
@@ -297,7 +298,7 @@ class RosterTrailIT {
      * render.
      */
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void answersA503WhenTheTrailCouldNotBeREADratherThanAQuietWeek() throws Exception {
         when(patientServiceClient.activityLogs(anyString())).thenThrow(
             PatientServiceUnavailableException.read(
@@ -315,7 +316,7 @@ class RosterTrailIT {
      * is refused before anything is read across the wire, outage or no outage.
      */
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void anOutageDoesNotTurnAREFUSALintoA503() throws Exception {
         when(patientServiceClient.activityLogs(anyString())).thenThrow(
             PatientServiceUnavailableException.read(
@@ -329,7 +330,7 @@ class RosterTrailIT {
     }
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void toleratesAnActivityEntryWithNoDate() throws Exception {
         when(patientServiceClient.activityLogs(anyString())).thenReturn(
             List.of(
