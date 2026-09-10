@@ -207,6 +207,63 @@ class AccountIdMigrationServiceUnitTest {
 
     // ------------------------------------------------------------------ helpers
 
+    /**
+     * <b>A renamed login is resolved by {@code account_uid} rather than quarantined.</b>
+     *
+     * <p>The case the item 50 review found, and the reason it blocked. {@code account_uid} was only
+     * ever written by {@code upsertOwnProfile} from the caller's own issuer-checked {@code uid}, so
+     * where it is present it holds a {@code User.id} this gateway minted for this profile's owner. If
+     * the login is renamed after the profile's last save, {@code account_id} holds a login the gateway
+     * no longer knows — and before this, the row was quarantined while {@code dropRetiredAccountUid}
+     * deleted the one field that could still have resolved it, with no copy kept anywhere.
+     *
+     * <p>Asserted on the rewrite <em>and</em> on the absence of a quarantine record, because an
+     * implementation that recorded the row and then also rewrote it would look correct in a count.
+     */
+    @Test
+    void aRenamedLoginIsResolvedByTheRetiredAccountUidRatherThanQuarantined() {
+        rowsIn("profile", row("profile-9", "account_id", "renamed.away").append("account_uid", KNOWN_ACCOUNT_ID));
+
+        AccountIdMigrationService.Report report = service.migrate(false);
+
+        Update update = captureUpdateOn("profile");
+        // Asserted before the value is read, so a regression fails saying what it did rather than
+        // throwing a NullPointerException on an absent $set — which is what the mutation produces,
+        // and which tells a reader nothing about why.
+        assertThat(update.getUpdateObject().get("$set", org.bson.Document.class))
+            .as("the row was quarantined rather than resolved by its account_uid: %s", update.getUpdateObject())
+            .isNotNull();
+        assertThat(update.getUpdateObject().get("$set", org.bson.Document.class).getString("account_id")).isEqualTo(KNOWN_ACCOUNT_ID);
+        assertThat(report.totalRewritten()).isEqualTo(1);
+        assertThat(report.totalQuarantined()).isZero();
+        assertThat(report.totalResolvedFromRetiredField()).isEqualTo(1);
+        verify(orphanedRows, never()).save(any());
+    }
+
+    /**
+     * <b>An {@code account_uid} naming an account the gateway no longer has is not a resolution.</b>
+     *
+     * <p>The other half of the finding: trusting a carried value unchecked would be the synthesis item
+     * 50 forbids. It is still recorded on the quarantine row, because the wet run deletes the field
+     * moments later and this is the only place it survives — a stale id names <em>which</em> account,
+     * which the dead login may no longer.
+     */
+    @Test
+    void aStaleAccountUidIsRecordedButDoesNotResolveTheRow() {
+        rowsIn("profile", row("profile-10", "account_id", ORPHAN_LOGIN).append("account_uid", "68bd4e2a91c30d5f7a1e4cff"));
+
+        AccountIdMigrationService.Report report = service.migrate(false);
+
+        assertThat(report.totalQuarantined()).isEqualTo(1);
+        assertThat(report.totalResolvedFromRetiredField()).isZero();
+        ArgumentCaptor<net.jojoaddison.domain.OrphanedAccountRow> saved = ArgumentCaptor.forClass(
+            net.jojoaddison.domain.OrphanedAccountRow.class
+        );
+        verify(orphanedRows).save(saved.capture());
+        assertThat(saved.getValue().getOrphanedValue()).isEqualTo(ORPHAN_LOGIN);
+        assertThat(saved.getValue().getCarriedAccountUid()).isEqualTo("68bd4e2a91c30d5f7a1e4cff");
+    }
+
     private static Document row(String id, String field, String value) {
         return new Document("_id", id).append(field, value);
     }

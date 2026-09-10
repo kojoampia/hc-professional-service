@@ -58,6 +58,16 @@ public class OrphanedAccountRow implements Serializable {
     @Field("detected_at")
     private Instant detectedAt;
 
+    /**
+     * The {@code profile.account_uid} this row carried when it was quarantined, or null.
+     *
+     * <p>Recorded because {@code dropRetiredAccountUid} deletes that field immediately after the
+     * migration, and for a quarantined row this is the only place the value survives. It did not
+     * resolve — a resolving one would have rewritten the row rather than quarantining it — but a
+     * stale id still names <em>which</em> account, which a dead login may no longer.
+     */
+    private String carriedAccountUid;
+
     public String getId() {
         return this.id;
     }
@@ -133,6 +143,19 @@ public class OrphanedAccountRow implements Serializable {
 
     public OrphanedAccountRow detectedAt(Instant detectedAt) {
         this.setDetectedAt(detectedAt);
+        return this;
+    }
+
+    public String getCarriedAccountUid() {
+        return carriedAccountUid;
+    }
+
+    public void setCarriedAccountUid(String carriedAccountUid) {
+        this.carriedAccountUid = carriedAccountUid;
+    }
+
+    public OrphanedAccountRow carriedAccountUid(String carriedAccountUid) {
+        this.carriedAccountUid = carriedAccountUid;
         return this;
     }
 

@@ -102,13 +102,30 @@ public class AccountIdMigrationService {
     static final String RETIRED_ACCOUNT_UID_FIELD = "account_uid";
 
     /** What one call did, or would do. */
-    public record Report(boolean dryRun, int gatewayAccounts, List<CollectionReport> collections) {
+    public record Report(boolean dryRun, int gatewayAccounts, int retiredFieldRows, List<CollectionReport> collections) {
         public int totalRewritten() {
             return collections.stream().mapToInt(CollectionReport::rewritten).sum();
         }
 
         public int totalQuarantined() {
             return collections.stream().mapToInt(CollectionReport::quarantined).sum();
+        }
+
+        /**
+         * How many rows were saved from quarantine by {@code profile.account_uid}.
+         *
+         * <p>Reported because a dry run has to disclose it: the wet run deletes that field from every
+         * profile immediately afterwards, so this is the last moment an operator can see how much the
+         * migration is leaning on a value that is about to stop existing. The item 50 review found the
+         * field being dropped without ever being read, which destroyed a recoverable identity silently.
+         */
+        public int totalResolvedFromRetiredField() {
+            return collections.stream().mapToInt(CollectionReport::resolvedFromRetiredField).sum();
+        }
+
+        /** How many profiles still carry {@code account_uid}, all of which the wet run deletes. */
+        public int retiredFieldRowsPendingDrop() {
+            return retiredFieldRows;
         }
     }
 
@@ -127,6 +144,7 @@ public class AccountIdMigrationService {
         int alreadyMigrated,
         int rewritten,
         int quarantined,
+        int resolvedFromRetiredField,
         List<String> conflicts
     ) {}
 
@@ -158,6 +176,10 @@ public class AccountIdMigrationService {
         Set<String> knownAccountIds = new HashSet<>(loginToAccountId.values());
         LOG.info("accountId migration starting (dryRun={}) against {} gateway accounts", dryRun, loginToAccountId.size());
 
+        // Counted before anything is written, because the wet run deletes this field and a dry run has
+        // to be able to say how many rows are about to lose it. See Report.retiredFieldRowsPendingDrop.
+        int retiredFieldRows = (int) mongoTemplate.count(new Query(Criteria.where(RETIRED_ACCOUNT_UID_FIELD).exists(true)), "profile");
+
         List<CollectionReport> collections = new ArrayList<>();
         for (FieldTarget target : TARGETS) {
             collections.add(migrateOne(target, loginToAccountId, knownAccountIds, dryRun));
@@ -165,12 +187,15 @@ public class AccountIdMigrationService {
         if (!dryRun) {
             dropRetiredAccountUid();
         }
-        Report report = new Report(dryRun, loginToAccountId.size(), collections);
+        Report report = new Report(dryRun, loginToAccountId.size(), retiredFieldRows, collections);
         LOG.info(
-            "accountId migration finished (dryRun={}): {} rewritten, {} quarantined",
+            "accountId migration finished (dryRun={}): {} rewritten ({} of them via the retired account_uid), " +
+            "{} quarantined, {} row(s) carried account_uid and it is dropped on a wet run",
             dryRun,
             report.totalRewritten(),
-            report.totalQuarantined()
+            report.totalResolvedFromRetiredField(),
+            report.totalQuarantined(),
+            report.retiredFieldRowsPendingDrop()
         );
         return report;
     }
@@ -188,6 +213,7 @@ public class AccountIdMigrationService {
         int alreadyMigrated = 0;
         int rewritten = 0;
         int quarantined = 0;
+        int resolvedFromRetiredField = 0;
         List<String> conflicts = new ArrayList<>();
 
         for (Document row : rows) {
@@ -203,6 +229,28 @@ public class AccountIdMigrationService {
                 continue;
             }
             String resolved = loginToAccountId.get(value.toLowerCase(Locale.ROOT));
+            if (resolved == null) {
+                // Before giving up on a row, ask the field item 48 added for exactly this value.
+                // `account_uid` was only ever written by `upsertOwnProfile` from the caller's own
+                // issuer-checked `uid` claim, so where it is present it holds a `User.id` this
+                // gateway minted for this profile's owner — which is what item 50 is looking for.
+                //
+                // It matters in the one case the rest of this method cannot serve: a login renamed
+                // after the profile's last save. Then `account_id` holds a login the gateway no
+                // longer knows, and without this the row is quarantined while `dropRetiredAccountUid`
+                // deletes the only field that could still have resolved it. The item 50 review found
+                // that; it destroyed a recoverable identity and told nobody, which is worse than the
+                // quarantine it looked like.
+                //
+                // Still checked against `knownAccountIds`: a stale `account_uid` naming a deleted
+                // account is not a resolution, and trusting it unchecked would be the synthesis item
+                // 50 forbids.
+                Object carried = row.get(RETIRED_ACCOUNT_UID_FIELD);
+                if (carried instanceof String uid && !uid.isBlank() && knownAccountIds.contains(uid)) {
+                    resolved = uid;
+                    resolvedFromRetiredField++;
+                }
+            }
             String documentId = String.valueOf(row.get("_id"));
             try {
                 if (resolved != null) {
@@ -216,7 +264,12 @@ public class AccountIdMigrationService {
                     rewritten++;
                 } else {
                     if (!dryRun) {
-                        quarantine(target, documentId, value);
+                        quarantine(
+                            target,
+                            row.get("_id"),
+                            value,
+                            row.get(RETIRED_ACCOUNT_UID_FIELD) instanceof String carriedUid ? carriedUid : null
+                        );
                     }
                     quarantined++;
                 }
@@ -228,7 +281,16 @@ public class AccountIdMigrationService {
                 LOG.warn("accountId migration could not move {}/{}", target.collection(), documentId, e);
             }
         }
-        return new CollectionReport(target.collection(), target.javaField(), examined, alreadyMigrated, rewritten, quarantined, conflicts);
+        return new CollectionReport(
+            target.collection(),
+            target.javaField(),
+            examined,
+            alreadyMigrated,
+            rewritten,
+            quarantined,
+            resolvedFromRetiredField,
+            conflicts
+        );
     }
 
     /**
@@ -237,22 +299,41 @@ public class AccountIdMigrationService {
      * <p>In that order in the code and in that order in the argument: the record is written first so
      * a failure between the two leaves the value readable rather than gone.
      */
-    private void quarantine(FieldTarget target, String documentId, String orphanedValue) {
+    private void quarantine(FieldTarget target, Object documentId, String orphanedValue, String carriedAccountUid) {
+        String documentKey = String.valueOf(documentId);
         if (
             orphanedAccountRowRepository
-                .findByCollectionNameAndDocumentIdAndFieldName(target.collection(), documentId, target.javaField())
+                .findByCollectionNameAndDocumentIdAndFieldName(target.collection(), documentKey, target.javaField())
                 .isEmpty()
         ) {
             orphanedAccountRowRepository.save(
                 new OrphanedAccountRow()
                     .collectionName(target.collection())
-                    .documentId(documentId)
+                    .documentId(documentKey)
                     .fieldName(target.javaField())
                     .orphanedValue(orphanedValue)
+                    // Recorded even though it did not resolve, because `dropRetiredAccountUid` is about
+                    // to delete it and this row is the only place it would survive. A stale value naming
+                    // a deleted account is still evidence for whoever reconciles this by hand — it says
+                    // *which* account, which the dead login may no longer.
+                    .carriedAccountUid(carriedAccountUid)
                     .detectedAt(Instant.now())
             );
         }
-        mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(documentId)), new Update().unset(target.field()), target.collection());
+        // The raw `_id`, not its `String` form. Spring's QueryMapper converts a 24-hex string to an
+        // ObjectId for `_id`, which is why the ObjectId case passed — but a document whose `_id` is a
+        // stored String that happens to be 24-hex would be converted, match nothing, and the unset
+        // would report success having changed no row. Found by the item 50 review.
+        var result = mongoTemplate.updateFirst(
+            new Query(Criteria.where("_id").is(documentId)),
+            new Update().unset(target.field()),
+            target.collection()
+        );
+        if (result.getMatchedCount() != 1) {
+            throw new IllegalStateException(
+                "quarantining " + target.collection() + "/" + documentKey + " matched " + result.getMatchedCount() + " rows, not 1"
+            );
+        }
     }
 
     /**
