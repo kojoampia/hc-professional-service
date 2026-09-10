@@ -255,11 +255,17 @@ public class AccountIdMigrationService {
             try {
                 if (resolved != null) {
                     if (!dryRun) {
-                        mongoTemplate.updateFirst(
+                        var rewrite = mongoTemplate.updateFirst(
                             new Query(Criteria.where("_id").is(row.get("_id"))),
                             new Update().set(target.field(), resolved),
                             target.collection()
                         );
+                        // The same guard the quarantine path carries, for the same reason. Without it a
+                        // write that matched no row is counted as `rewritten` — "failing to destroy
+                        // something while reporting that it did", which is the defect this whole item
+                        // family is about. The item 50 delta review found the two identical writes with
+                        // only one of them guarded, which is worse than neither: it reads as considered.
+                        requireOneRowMatched(rewrite.getMatchedCount(), target, row.get("_id"), "rewriting");
                     }
                     rewritten++;
                 } else {
@@ -320,19 +326,35 @@ public class AccountIdMigrationService {
                     .detectedAt(Instant.now())
             );
         }
-        // The raw `_id`, not its `String` form. Spring's QueryMapper converts a 24-hex string to an
-        // ObjectId for `_id`, which is why the ObjectId case passed — but a document whose `_id` is a
-        // stored String that happens to be 24-hex would be converted, match nothing, and the unset
-        // would report success having changed no row. Found by the item 50 review.
+        // The raw `_id`, not its `String` form — but not for the reason an earlier version of this
+        // comment gave. It claimed this fixes a stored-String 24-hex `_id`; it does not. For an
+        // unmapped `updateFirst(query, update, collectionName)`, `QueryMapper` resolves `_id` to
+        // `ObjectId` and `MongoConverter.convertId` converts any String `ObjectId.isValid` accepts,
+        // raw or not — so that case still matches nothing. **The matched-count check below is what
+        // turns that from silent success into a recorded conflict.** What passing the raw value
+        // genuinely fixes is a non-String `_id` — a Long or a UUID — which `String.valueOf` used to
+        // break silently. The item 50 delta review established this against spring-data-mongodb's
+        // own sources; the original comment was confidently wrong.
         var result = mongoTemplate.updateFirst(
             new Query(Criteria.where("_id").is(documentId)),
             new Update().unset(target.field()),
             target.collection()
         );
-        if (result.getMatchedCount() != 1) {
-            throw new IllegalStateException(
-                "quarantining " + target.collection() + "/" + documentKey + " matched " + result.getMatchedCount() + " rows, not 1"
-            );
+        requireOneRowMatched(result.getMatchedCount(), target, documentId, "quarantining");
+    }
+
+    /**
+     * Fails a row whose write matched something other than exactly one document.
+     *
+     * <p>Thrown rather than counted, and deliberately inside {@code migrateOne}'s per-row {@code try}:
+     * it lands in that collection's {@code conflicts} with the id named, the run continues, and the
+     * value survives on the {@code OrphanedAccountRow} already saved. The alternative — counting the
+     * row as done — is the shape every item in this family has been about, and it would be invisible
+     * in a report that added up.
+     */
+    private void requireOneRowMatched(long matched, FieldTarget target, Object documentId, String what) {
+        if (matched != 1) {
+            throw new IllegalStateException(what + " " + target.collection() + "/" + documentId + " matched " + matched + " row(s), not 1");
         }
     }
 

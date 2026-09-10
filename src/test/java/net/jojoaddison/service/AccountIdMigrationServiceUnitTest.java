@@ -264,6 +264,32 @@ class AccountIdMigrationServiceUnitTest {
         assertThat(saved.getValue().getCarriedAccountUid()).isEqualTo("68bd4e2a91c30d5f7a1e4cff");
     }
 
+    /**
+     * <b>A write that matched no row is a conflict, not a success.</b>
+     *
+     * <p>The delta review of item 50 deleted this guard and the suite stayed 10/10 green, which made
+     * it decoration. It is the check that catches the case the raw-{@code _id} change does <em>not</em>
+     * fix: {@code QueryMapper} converts any 24-hex String to an {@code ObjectId}, so a document whose
+     * {@code _id} is a stored String of that shape matches nothing however the value is passed.
+     *
+     * <p>Asserted on both writes, because the review found the two identical {@code updateFirst} calls
+     * with only one of them guarded — worse than neither, since it reads as considered.
+     */
+    @Test
+    void aWriteThatMatchedNoRowIsRecordedAsAConflictRatherThanCounted() {
+        when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), anyString())).thenReturn(
+            UpdateResult.acknowledged(0, 0L, null)
+        );
+        rowsIn("profile", row("profile-11", "account_id", KNOWN_LOGIN));
+
+        AccountIdMigrationService.Report report = service.migrate(false);
+
+        assertThat(report.collections())
+            .as("a rewrite matching no row must land in conflicts rather than be counted")
+            .anySatisfy(collection -> assertThat(collection.conflicts()).isNotEmpty());
+        assertThat(report.totalRewritten()).isZero();
+    }
+
     private static Document row(String id, String field, String value) {
         return new Document("_id", id).append(field, value);
     }

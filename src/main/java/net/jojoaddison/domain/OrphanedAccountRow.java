@@ -66,6 +66,7 @@ public class OrphanedAccountRow implements Serializable {
      * resolve — a resolving one would have rewritten the row rather than quarantining it — but a
      * stale id still names <em>which</em> account, which a dead login may no longer.
      */
+    @Field("carried_account_uid")
     private String carriedAccountUid;
 
     public String getId() {
