@@ -1,5 +1,7 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.gatewayUser;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -10,13 +12,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.DeviceToken;
 import net.jojoaddison.repository.DeviceTokenRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -46,12 +48,12 @@ class DeviceTokenResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void registersADevice() throws Exception {
         restMockMvc
             .perform(post("/api/notifications/devices").contentType(MediaType.APPLICATION_JSON).content(body("tok-1", "ANDROID")))
             .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.accountId").value(NURSE))
+            .andExpect(jsonPath("$.accountId").value(accountIdFor(NURSE)))
             .andExpect(jsonPath("$.platform").value("ANDROID"));
 
         assertThat(deviceTokenRepository.findByToken("tok-1")).isPresent();
@@ -65,7 +67,7 @@ class DeviceTokenResourceIT {
      * 403 registering a device and simply never receive notifications.
      */
     @Test
-    @WithMockUser(username = CARER, authorities = { "ROLE_CARER" })
+    @WithMockGatewayUser(login = CARER, authorities = { "ROLE_CARER" })
     void aReadOnlyRoleCanStillRegisterADevice() throws Exception {
         restMockMvc
             .perform(post("/api/notifications/devices").contentType(MediaType.APPLICATION_JSON).content(body("tok-carer", "IOS")))
@@ -82,7 +84,7 @@ class DeviceTokenResourceIT {
      * authority does not make a caller less authenticated than a role-less applicant.
      */
     @Test
-    @WithMockUser(username = "device-angel", authorities = { "ROLE_ANGEL" })
+    @WithMockGatewayUser(login = "device-angel", authorities = { "ROLE_ANGEL" })
     void soCanACallerHoldingAnAuthorityThisServiceDoesNotKnow() throws Exception {
         restMockMvc
             .perform(post("/api/notifications/devices").contentType(MediaType.APPLICATION_JSON).content(body("tok-angel", "IOS")))
@@ -97,7 +99,7 @@ class DeviceTokenResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void rejectsAnEmptyToken() throws Exception {
         restMockMvc
             .perform(post("/api/notifications/devices").contentType(MediaType.APPLICATION_JSON).content("{\"platform\":\"IOS\"}"))
@@ -105,7 +107,7 @@ class DeviceTokenResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void reRegisteringTheSameTokenUpdatesRatherThanDuplicates() throws Exception {
         restMockMvc.perform(post("/api/notifications/devices").contentType(MediaType.APPLICATION_JSON).content(body("tok-1", "ANDROID")));
         restMockMvc
@@ -129,7 +131,7 @@ class DeviceTokenResourceIT {
                 post("/api/notifications/devices")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(body("shared-handset", "ANDROID"))
-                    .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user(NURSE))
+                    .with(gatewayUser(NURSE))
             )
             .andExpect(status().isCreated());
 
@@ -138,22 +140,22 @@ class DeviceTokenResourceIT {
                 post("/api/notifications/devices")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(body("shared-handset", "ANDROID"))
-                    .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user(CARER))
+                    .with(gatewayUser(CARER))
             )
             .andExpect(status().isCreated());
 
         assertThat(deviceTokenRepository.findAll()).hasSize(1);
-        assertThat(deviceTokenRepository.findByToken("shared-handset").orElseThrow().getAccountId()).isEqualTo(CARER);
+        assertThat(deviceTokenRepository.findByToken("shared-handset").orElseThrow().getAccountId()).isEqualTo(accountIdFor(CARER));
         // The first clinician must no longer be a target for this handset.
-        assertThat(deviceTokenRepository.findAllByAccountIdAndDisabledAtIsNull(NURSE)).isEmpty();
+        assertThat(deviceTokenRepository.findAllByAccountIdAndDisabledAtIsNull(accountIdFor(NURSE))).isEmpty();
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void reRegisteringRevivesATokenPreviouslyPrunedAsDead() throws Exception {
         DeviceToken dead = new DeviceToken();
         dead.setToken("tok-revive");
-        dead.setAccountId(NURSE);
+        dead.setAccountId(accountIdFor(NURSE));
         dead.setDisabledAt(java.time.Instant.now());
         dead.setDisabledReason("UNREGISTERED");
         deviceTokenRepository.save(dead);
@@ -167,7 +169,7 @@ class DeviceTokenResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void deregistersOnSignOut() throws Exception {
         restMockMvc.perform(post("/api/notifications/devices").contentType(MediaType.APPLICATION_JSON).content(body("tok-1", "IOS")));
 
@@ -180,15 +182,11 @@ class DeviceTokenResourceIT {
     void cannotDeregisterSomebodyElsesDevice() throws Exception {
         DeviceToken theirs = new DeviceToken();
         theirs.setToken("not-yours");
-        theirs.setAccountId(CARER);
+        theirs.setAccountId(accountIdFor(CARER));
         deviceTokenRepository.save(theirs);
 
         restMockMvc
-            .perform(
-                delete("/api/notifications/devices/{token}", "not-yours").with(
-                    org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user(NURSE)
-                )
-            )
+            .perform(delete("/api/notifications/devices/{token}", "not-yours").with(gatewayUser(NURSE)))
             .andExpect(status().isNoContent());
 
         // Silent 204 either way so the endpoint cannot be used to probe for tokens — but the
@@ -197,11 +195,11 @@ class DeviceTokenResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void listsOnlyYourOwnDevices() throws Exception {
         DeviceToken theirs = new DeviceToken();
         theirs.setToken("theirs");
-        theirs.setAccountId(CARER);
+        theirs.setAccountId(accountIdFor(CARER));
         deviceTokenRepository.save(theirs);
 
         restMockMvc.perform(post("/api/notifications/devices").contentType(MediaType.APPLICATION_JSON).content(body("mine", "IOS")));

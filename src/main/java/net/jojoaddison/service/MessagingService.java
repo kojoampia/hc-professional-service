@@ -299,6 +299,13 @@ public class MessagingService {
             .toList();
     }
 
+    /**
+     * <b>{@code displayName} is the login and is what a picker search is really for.</b> The
+     * {@code accountId} arm was a second search over the same string until backlog.md item 50 made
+     * that field the gateway's {@code User.id}; it is kept because a caller may legitimately paste an
+     * id they already hold, but nobody types one, so a search that returned nothing for a name would
+     * be the defect — not one that no longer matches an opaque key by substring.
+     */
     private static boolean matches(Recipient recipient, String needle) {
         return (
             (recipient.displayName() != null && recipient.displayName().toLowerCase(java.util.Locale.ROOT).contains(needle)) ||

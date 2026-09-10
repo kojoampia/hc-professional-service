@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -21,6 +22,7 @@ import net.jojoaddison.domain.enumeration.DutyRole;
 import net.jojoaddison.domain.enumeration.ShiftType;
 import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import net.jojoaddison.service.DutyRosterService;
 import net.jojoaddison.service.PatientServiceClient;
 import net.jojoaddison.service.PatientServiceUnavailableException;
@@ -32,7 +34,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -76,7 +77,7 @@ class DutyRosterRoundsIT {
     @BeforeEach
     void setUp() {
         cleanup();
-        profile = profileRepository.save(new Profile().accountId(PRO).firstName("Rou").lastName("Nd"));
+        profile = profileRepository.save(new Profile().accountId(accountIdFor(PRO)).firstName("Rou").lastName("Nd"));
         when(patientServiceClient.profiles()).thenReturn(List.of());
     }
 
@@ -116,7 +117,7 @@ class DutyRosterRoundsIT {
     // ------------------------------------------------------------- write path
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void storesARoundAndSnapshotsEachCustomerFromThePatientStack() throws Exception {
         when(patientServiceClient.profiles()).thenReturn(List.of(patientProfile()));
 
@@ -138,7 +139,7 @@ class DutyRosterRoundsIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void storesTheRoundWithIdsOnlyWhenThePatientStackIsUnreachable() throws Exception {
         // A real outage: since backlog item 24 the client raises rather than answering empty, and
         // DutyRosterService catches it deliberately. The round must still save — an administrator
@@ -167,7 +168,7 @@ class DutyRosterRoundsIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void acceptsARoundWithNoVisits() throws Exception {
         restMockMvc
             .perform(post("/api/duty-roster").contentType(MediaType.APPLICATION_JSON).content(roundJson("DAY", "")))
@@ -181,7 +182,7 @@ class DutyRosterRoundsIT {
      * hc-admin's staffing grid needs three cell states rather than two.
      */
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void acceptsAnOffDayWithNoVisits() throws Exception {
         restMockMvc
             .perform(post("/api/duty-roster").contentType(MediaType.APPLICATION_JSON).content(roundJson("OFF", "")))
@@ -200,7 +201,7 @@ class DutyRosterRoundsIT {
      * sake.
      */
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void rejectsVisitsOnAnOffDayAsFourHundred() throws Exception {
         restMockMvc
             .perform(
@@ -215,7 +216,7 @@ class DutyRosterRoundsIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void rejectsAVisitOutsideTheShiftWindowAsFourHundred() throws Exception {
         restMockMvc
             .perform(
@@ -230,7 +231,7 @@ class DutyRosterRoundsIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void rejectsADoubleBookingAcrossMidnightAgainstARoundOnAnotherDate() throws Exception {
         // This one has to be an integration test, and it caught a real bug. The overlap check reads
         // the neighbouring dates because a NIGHT round runs into the next morning, and the finder
@@ -262,7 +263,7 @@ class DutyRosterRoundsIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void rejectsADoubleBookingAgainstAnAlreadyStoredRound() throws Exception {
         restMockMvc
             .perform(
@@ -286,7 +287,7 @@ class DutyRosterRoundsIT {
     // ----------------------------------------------------------- reassignment
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void movesASingleVisitIntoTheTargetsRoundForTheSameDateAndShift() throws Exception {
         Profile cover = profileRepository.save(new Profile().accountId("cover-nurse").firstName("Co").lastName("Ver"));
         restMockMvc
@@ -319,7 +320,7 @@ class DutyRosterRoundsIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void refusesAReassignmentThatWouldDoubleBookTheTarget() throws Exception {
         Profile busy = profileRepository.save(new Profile().accountId("busy-nurse").firstName("Bu").lastName("Sy"));
         store(TOMORROW, ShiftType.DAY, "Theirs", new Visit().customerId("c-9").startTime(LocalTime.of(9, 0)).endTime(LocalTime.of(12, 0)));
@@ -340,7 +341,7 @@ class DutyRosterRoundsIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void refusesAReassignmentToAProfessionalWhoDoesNotExist() throws Exception {
         store(TOMORROW, ShiftType.DAY, "Mine", new Visit().customerId("c-1").startTime(LocalTime.of(9, 0)).endTime(LocalTime.of(10, 0)));
 
@@ -356,7 +357,7 @@ class DutyRosterRoundsIT {
     }
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void reassignmentIsAdminOnly() throws Exception {
         store(TOMORROW, ShiftType.DAY, "Mine");
 
@@ -368,7 +369,7 @@ class DutyRosterRoundsIT {
     // -------------------------------------------------------------- range read
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void narrowsTheOwnRosterToADateRangeAndReturnsAllOfItWithoutOne() throws Exception {
         store(TOMORROW, ShiftType.DAY, "Early");
         store(TOMORROW.plusDays(5), ShiftType.DAY, "Middle");
@@ -407,7 +408,7 @@ class DutyRosterRoundsIT {
     }
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void rejectsABackwardsRange() throws Exception {
         restMockMvc
             .perform(get("/api/duty-roster").param("from", TOMORROW.plusDays(5).toString()).param("to", TOMORROW.toString()))
@@ -417,7 +418,7 @@ class DutyRosterRoundsIT {
     // ------------------------------------------------------------ year summary
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void summarisesTheYearOneRecordPerRosteredDay() throws Exception {
         LocalDate day = LocalDate.of(2026, 3, 4);
         store(
@@ -444,7 +445,7 @@ class DutyRosterRoundsIT {
     }
 
     @Test
-    @WithMockUser(username = "stranger", authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = "stranger", authorities = { "ROLE_NURSE" })
     void answersEmptyForAnAccountWithNoProfile() throws Exception {
         store(TOMORROW, ShiftType.DAY, "Someone else's");
 
@@ -457,7 +458,7 @@ class DutyRosterRoundsIT {
     // -------------------------------------------------------------- the purge
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void purgesSnapshotsPastRetentionAndKeepsTheCustomerId() throws Exception {
         LocalDate old = LocalDate.now().minusDays(DutyRosterService.SNAPSHOT_RETENTION_DAYS + 1);
         LocalDate recent = LocalDate.now().minusDays(DutyRosterService.SNAPSHOT_RETENTION_DAYS - 1);
@@ -481,7 +482,7 @@ class DutyRosterRoundsIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void purgingIsIdempotent() throws Exception {
         store(LocalDate.now().minusDays(200), ShiftType.DAY, "Ancient", snapshotted("c-1"));
 
@@ -492,7 +493,7 @@ class DutyRosterRoundsIT {
     }
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void purgingIsAdminOnly() throws Exception {
         restMockMvc.perform(post("/api/duty-roster/purge-snapshots")).andExpect(status().isForbidden());
     }
@@ -512,7 +513,7 @@ class DutyRosterRoundsIT {
     // ------------------------------------------------------- day read (DR6)
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void refreshesCustomerSnapshotsWhenADayIsOpened() throws Exception {
         // The gap the write path leaves when hc-patient is down: ids stored, snapshot empty. Opening
         // the day is what heals it (§ 6), and this is the case the write-path test hands over to.
@@ -538,7 +539,7 @@ class DutyRosterRoundsIT {
     }
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void servesTheStoredSnapshotWhenThePatientStackIsUnreachable() throws Exception {
         Visit visit = new Visit().customerId(CUSTOMER).startTime(LocalTime.of(9, 0)).endTime(LocalTime.of(10, 0));
         visit.setCustomerName("Akosua Mensah");
@@ -565,7 +566,7 @@ class DutyRosterRoundsIT {
     }
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void doesNotRewriteARoundWhoseSnapshotIsAlreadyCurrent() throws Exception {
         Visit visit = new Visit().customerId(CUSTOMER).startTime(LocalTime.of(9, 0)).endTime(LocalTime.of(10, 0));
         visit.setCustomerName("Akosua Mensah");
@@ -583,7 +584,7 @@ class DutyRosterRoundsIT {
     }
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void keepsASnapshotForACustomerMissingFromTheProfileCollection() throws Exception {
         Visit known = new Visit().customerId(CUSTOMER).startTime(LocalTime.of(9, 0)).endTime(LocalTime.of(10, 0));
         Visit stranger = new Visit().customerId("patient-unknown").startTime(LocalTime.of(11, 0)).endTime(LocalTime.of(12, 0));
@@ -603,7 +604,7 @@ class DutyRosterRoundsIT {
     }
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void returnsOnlyTheCallersOwnRoundsForThatDate() throws Exception {
         Profile other = profileRepository.save(new Profile().accountId("someone-else").firstName("So").lastName("Else"));
         store(TOMORROW, ShiftType.DAY, "Mine");
@@ -624,7 +625,7 @@ class DutyRosterRoundsIT {
     }
 
     @Test
-    @WithMockUser(username = "no-profile", authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = "no-profile", authorities = { "ROLE_NURSE" })
     void answersAnEmptyDayForAnAccountWithNoProfile() throws Exception {
         // Having no roster is an ordinary state, not a failure — the same treatment the range read
         // gives it.

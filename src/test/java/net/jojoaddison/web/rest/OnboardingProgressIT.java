@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -15,13 +16,13 @@ import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import net.jojoaddison.service.OnboardingService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -73,7 +74,7 @@ class OnboardingProgressIT {
      * page has to render a meter for that person, so this answers rather than 404s.
      */
     @Test
-    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void reportsZeroForAnAccountWithNoApplicationAtAll() throws Exception {
         restMockMvc
             .perform(get("/api/onboarding/progress"))
@@ -91,7 +92,7 @@ class OnboardingProgressIT {
      * long way from ACTIVE, and anything gating on `complete` would treat it as live.
      */
     @Test
-    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void reportsTheApplicationStatusAlongsideCompleteness() throws Exception {
         ProfessionalApplication application = startedApplication();
         Profile saved = profileRepository.save(completeProfile());
@@ -105,7 +106,7 @@ class OnboardingProgressIT {
     }
 
     @Test
-    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void gradesEachRequirementAsItIsSatisfied() throws Exception {
         ProfessionalApplication application = startedApplication();
 
@@ -133,7 +134,7 @@ class OnboardingProgressIT {
 
     /** A licence without an expiry date does not count — the compliance sweep has nothing to sweep. */
     @Test
-    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void doesNotCreditALicenceWithNoExpiryDate() throws Exception {
         startedApplication();
         Profile saved = profileRepository.save(completeProfile());
@@ -155,7 +156,7 @@ class OnboardingProgressIT {
      * missing rather than a working account.
      */
     @Test
-    @WithMockUser(username = ADMIN, authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = ADMIN, authorities = { "ROLE_ADMIN" })
     void refusesToActivateAnIncompleteProfile() throws Exception {
         ProfessionalApplication application = applicationRepository.save(applicationIn(OnboardingStatus.ROSTER_CONFIGURED));
 
@@ -170,7 +171,7 @@ class OnboardingProgressIT {
     }
 
     @Test
-    @WithMockUser(username = ADMIN, authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = ADMIN, authorities = { "ROLE_ADMIN" })
     void activatesOnceEveryRequirementIsSatisfied() throws Exception {
         ProfessionalApplication application = applicationRepository.save(applicationIn(OnboardingStatus.ROSTER_CONFIGURED));
         uploadAllMandatoryDocuments(profileRepository.save(completeProfile()));
@@ -191,11 +192,11 @@ class OnboardingProgressIT {
      * satisfies is the test's own business, and several deliberately satisfy none of them.
      */
     private ProfessionalApplication applicationIn(OnboardingStatus status) {
-        return CompleteOnboardingFixture.consentedApplication(APPLICANT, status).login(APPLICANT).requestedRole("ROLE_NURSE");
+        return CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), status).login(APPLICANT).requestedRole("ROLE_NURSE");
     }
 
     private Profile completeProfile() {
-        return CompleteOnboardingFixture.completeProfile(APPLICANT);
+        return CompleteOnboardingFixture.completeProfile(accountIdFor(APPLICANT));
     }
 
     private void uploadAllMandatoryDocuments(Profile profile) {

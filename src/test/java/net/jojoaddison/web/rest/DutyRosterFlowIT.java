@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -19,13 +20,13 @@ import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -60,7 +61,7 @@ class DutyRosterFlowIT {
     @BeforeEach
     void setUp() {
         cleanup();
-        profile = profileRepository.save(new Profile().accountId(PRO).firstName("Nur").lastName("Se"));
+        profile = profileRepository.save(new Profile().accountId(accountIdFor(PRO)).firstName("Nur").lastName("Se"));
     }
 
     @AfterEach
@@ -82,7 +83,7 @@ class DutyRosterFlowIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void adminAssignsListsAndUnassigns() throws Exception {
         restMockMvc
             .perform(post("/api/duty-roster").contentType(MediaType.APPLICATION_JSON).content(assignmentJson()))
@@ -105,7 +106,7 @@ class DutyRosterFlowIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void dayAndFlexibleShiftsRoundTrip() throws Exception {
         restMockMvc
             .perform(
@@ -141,7 +142,7 @@ class DutyRosterFlowIT {
      * roster or publishing the whole estate's.
      */
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void professionalsCannotAssignOrListAll() throws Exception {
         restMockMvc
             .perform(post("/api/duty-roster").contentType(MediaType.APPLICATION_JSON).content(assignmentJson()))
@@ -150,7 +151,7 @@ class DutyRosterFlowIT {
     }
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void professionalReadsOwnAssignmentsOnly() throws Exception {
         dutyRosterRepository.save(
             new DutyRoster().date(LocalDate.now()).duty(DutyRole.NURSE).professionalId(profile.getId()).shift(ShiftType.DAY).name("Ward 3")
@@ -171,10 +172,10 @@ class DutyRosterFlowIT {
     }
 
     @Test
-    @WithMockUser(username = PRO, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void firstLoginAcknowledgementIsRecordedOnceAsAnEvent() throws Exception {
         ProfessionalApplication application = applicationRepository.save(
-            new ProfessionalApplication().accountId(PRO).status(OnboardingStatus.ACTIVE)
+            new ProfessionalApplication().accountId(accountIdFor(PRO)).status(OnboardingStatus.ACTIVE)
         );
 
         restMockMvc
@@ -192,7 +193,7 @@ class DutyRosterFlowIT {
     }
 
     @Test
-    @WithMockUser(username = "no-application", authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = "no-application", authorities = { "ROLE_USER" })
     void accountsWithoutApplicationsHaveNothingToAcknowledge() throws Exception {
         restMockMvc
             .perform(get("/api/onboarding/acknowledgement"))

@@ -54,6 +54,7 @@ public class OnboardingResource {
         log.debug("REST request to start onboarding application for {}", accountId);
         ProfessionalApplication application = onboardingService.startApplication(
             accountId,
+            currentActor(),
             request.requestedRole(),
             request.consentAccepted(),
             null,
@@ -148,7 +149,7 @@ public class OnboardingResource {
     @PutMapping("/applications/{id}/decide")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ProfessionalApplication decide(@PathVariable String id, @RequestBody DecisionRequest request) {
-        return onboardingService.decide(id, request.decision(), request.reason(), request.correctionNotes(), currentAccountId());
+        return onboardingService.decide(id, request.decision(), request.reason(), request.correctionNotes(), currentActor());
     }
 
     @PutMapping("/applications/{id}/organization")
@@ -159,38 +160,38 @@ public class OnboardingResource {
             request.specialtyCategoryId(),
             request.teamIds(),
             request.supervisorProfileId(),
-            currentAccountId()
+            currentActor()
         );
     }
 
     @PutMapping("/applications/{id}/authority-assigned")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ProfessionalApplication markAuthorityAssigned(@PathVariable String id) {
-        return onboardingService.markStatus(id, OnboardingStatus.AUTHORITY_ASSIGNED, "clinical authority assigned", currentAccountId());
+        return onboardingService.markStatus(id, OnboardingStatus.AUTHORITY_ASSIGNED, "clinical authority assigned", currentActor());
     }
 
     @PutMapping("/applications/{id}/roster-configured")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ProfessionalApplication markRosterConfigured(@PathVariable String id) {
-        return onboardingService.markStatus(id, OnboardingStatus.ROSTER_CONFIGURED, "duty roster configured", currentAccountId());
+        return onboardingService.markStatus(id, OnboardingStatus.ROSTER_CONFIGURED, "duty roster configured", currentActor());
     }
 
     @PutMapping("/applications/{id}/activate")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ProfessionalApplication activate(@PathVariable String id) {
-        return onboardingService.markStatus(id, OnboardingStatus.ACTIVE, "professional access activated", currentAccountId());
+        return onboardingService.markStatus(id, OnboardingStatus.ACTIVE, "professional access activated", currentActor());
     }
 
     @PutMapping("/applications/{id}/suspend")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ProfessionalApplication suspend(@PathVariable String id, @RequestBody StatusRequest request) {
-        return onboardingService.markStatus(id, OnboardingStatus.SUSPENDED, request.reason(), currentAccountId());
+        return onboardingService.markStatus(id, OnboardingStatus.SUSPENDED, request.reason(), currentActor());
     }
 
     @PutMapping("/applications/{id}/deactivate")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ProfessionalApplication deactivate(@PathVariable String id, @RequestBody StatusRequest request) {
-        return onboardingService.markStatus(id, OnboardingStatus.DEACTIVATED, request.reason(), currentAccountId());
+        return onboardingService.markStatus(id, OnboardingStatus.DEACTIVATED, request.reason(), currentActor());
     }
 
     private void assertAdminOrOwner(ProfessionalApplication application) {
@@ -200,8 +201,27 @@ public class OnboardingResource {
         }
     }
 
+    /**
+     * The caller's gateway {@code User.id} — what {@code ProfessionalApplication.accountId} and
+     * {@code Profile.accountId} hold and are looked up by (backlog.md item 50).
+     *
+     * <p>This returned {@code SecurityUtils.getCurrentUserLogin()} until that item, and the two
+     * identifier spaces have been unified onto the id. A token carrying no {@code uid} claim — one
+     * minted before 2026-09-07, or by hc-admin or hc-patient — resolves to nobody and is refused
+     * here rather than falling back to the subject, which would key this database on a value it no
+     * longer stores. Signing in again mints a token that carries the claim.
+     */
     private String currentAccountId() {
-        return SecurityUtils.getCurrentUserLogin()
+        return SecurityUtils.getCurrentAccountId()
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "No authenticated account"));
+    }
+
+    /**
+     * The caller's login, for the {@code actor} on an {@code OnboardingEvent} and on the domain
+     * events a transition publishes. Deliberately not {@link #currentAccountId()}: a trail an
+     * administrator reads should name a person, and nothing is ever looked up by it.
+     */
+    private String currentActor() {
+        return SecurityUtils.getCurrentUserLogin().orElse("system");
     }
 }

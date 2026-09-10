@@ -56,12 +56,16 @@ public class MessagingResource {
     }
 
     /**
-     * The caller's account id. {@code accountId} carries the gateway login today — see
-     * {@code OnboardingService} — which is also what STOMP uses as the principal name, so the
-     * websocket notification and this read path agree on identity.
+     * The caller's account id — the gateway's {@code User.id}, which is what {@code Message.senderId}
+     * and {@code MessageRecipient.recipientId} hold since backlog.md item 50.
+     *
+     * <p>It is also the STOMP principal name, and the two have to stay the same value:
+     * {@code convertAndSendToUser(recipientId, ...)} addresses a frame by principal, so a read path
+     * and a socket that disagreed would deliver notifications to nobody without failing.
+     * {@code WebsocketConfiguration} reads the same claim for the same reason.
      */
     private String caller() {
-        return SecurityUtils.getCurrentUserLogin()
+        return SecurityUtils.getCurrentAccountId()
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "No authenticated user"));
     }
 

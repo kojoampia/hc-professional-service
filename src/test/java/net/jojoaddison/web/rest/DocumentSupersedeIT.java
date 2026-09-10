@@ -1,5 +1,7 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.gatewayUser;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.notNullValue;
@@ -25,6 +27,7 @@ import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,7 +36,6 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder;
@@ -94,7 +96,7 @@ class DocumentSupersedeIT {
     @BeforeEach
     void setUp() {
         cleanup();
-        profile = profileRepository.save(CompleteOnboardingFixture.completeProfile(APPLICANT));
+        profile = profileRepository.save(CompleteOnboardingFixture.completeProfile(accountIdFor(APPLICANT)));
     }
 
     @AfterEach
@@ -106,7 +108,7 @@ class DocumentSupersedeIT {
     }
 
     @Test
-    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void renewingALicenceArchivesTheOldRowAndKeepsEverythingOnIt() throws Exception {
         upload(DocumentType.LICENSE, "licence-2025.pdf", LocalDate.now().minusDays(1), null);
         // The reviewer's verdict on the old licence, recorded before it was replaced. It is the thing
@@ -144,7 +146,7 @@ class DocumentSupersedeIT {
     }
 
     @Test
-    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void anUploadRetiresNothingUnlessItNamesTheRowItReplaces() throws Exception {
         // A second certificate is not a renewed one, and no field in this request distinguishes them.
         // Same-type superseding archived the BSc when the ACLS arrived, which then left
@@ -193,10 +195,12 @@ class DocumentSupersedeIT {
     }
 
     @Test
-    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void theWatchlistTheMetricAndTheSweepAllForgetAnArchivedLicence() throws Exception {
         ProfessionalApplication application = applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(APPLICANT, OnboardingStatus.ACTIVE).login(APPLICANT).profileId(profile.getId())
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), OnboardingStatus.ACTIVE)
+                .login(APPLICANT)
+                .profileId(profile.getId())
         );
         upload(DocumentType.LICENSE, "licence-2025.pdf", LocalDate.now().minusDays(1), null);
         personalDocumentRepository.save(byName("licence-2025.pdf").verificationStatus(VerificationStatus.VERIFIED));
@@ -242,10 +246,10 @@ class DocumentSupersedeIT {
     }
 
     @Test
-    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void aRejectedDocumentThatHasBeenReplacedCannotBlockApprovalForEver() throws Exception {
         ProfessionalApplication application = applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(APPLICANT, OnboardingStatus.CREDENTIAL_REVIEW)
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), OnboardingStatus.CREDENTIAL_REVIEW)
                 .login(APPLICANT)
                 .profileId(profile.getId())
         );
@@ -317,10 +321,12 @@ class DocumentSupersedeIT {
      * refused because a credential is not renewed backwards.
      */
     @Test
-    @WithMockUser(username = APPLICANT, authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void aBackdatedUploadDoesNotRetireAValidLicenceNorSuspendTheClinician() throws Exception {
         ProfessionalApplication application = applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(APPLICANT, OnboardingStatus.ACTIVE).login(APPLICANT).profileId(profile.getId())
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), OnboardingStatus.ACTIVE)
+                .login(APPLICANT)
+                .profileId(profile.getId())
         );
         upload(DocumentType.LICENSE, "licence-2028.pdf", LocalDate.now().plusYears(2), null);
         personalDocumentRepository.save(byName("licence-2028.pdf").verificationStatus(VerificationStatus.VERIFIED));
@@ -352,7 +358,7 @@ class DocumentSupersedeIT {
 
     /** ROLE_ADMIN for the reviewer and compliance calls a test method makes as the applicant. */
     private static RequestPostProcessor admin() {
-        return user("admin").authorities(new SimpleGrantedAuthority("ROLE_ADMIN"));
+        return gatewayUser("admin", "ROLE_ADMIN");
     }
 
     /**

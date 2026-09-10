@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -10,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import net.jojoaddison.service.PatientServiceClient;
 import net.jojoaddison.service.PatientServiceUnavailableException;
 import org.junit.jupiter.api.AfterEach;
@@ -18,7 +20,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -66,7 +67,7 @@ class PatientResourceIT {
         cleanup();
         // The nurse needs a profile, or every read short-circuits before the sibling is consulted and
         // the outage cases below would pass for the wrong reason.
-        profileRepository.save(new Profile().accountId(NURSE).firstName("Pat").lastName("Nurse"));
+        profileRepository.save(new Profile().accountId(accountIdFor(NURSE)).firstName("Pat").lastName("Nurse"));
     }
 
     @AfterEach
@@ -75,7 +76,7 @@ class PatientResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void aPageCarriesTheJHipsterPagingHeaders() throws Exception {
         // X-Total-Count used to be list.size(), which agreed with the body by construction. It is
         // now the match count, and Link comes with it — the same pair ProfileResource emits.
@@ -87,7 +88,7 @@ class PatientResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void anUnsortablePropertyIs400_andSaysWhatIsSortable() throws Exception {
         restMockMvc
             .perform(get("/api/patients?sort=dropTable,asc"))
@@ -99,7 +100,7 @@ class PatientResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void aWhitelistedSortIsAccepted() throws Exception {
         restMockMvc.perform(get("/api/patients?sort=lastActivityAt,desc")).andExpect(status().isOk());
     }
@@ -112,7 +113,7 @@ class PatientResourceIT {
      * what lets a carer see their own caseload while still being refused clinical writes.
      */
     @Test
-    @WithMockUser(username = "patients-carer", authorities = { "ROLE_CARER" })
+    @WithMockGatewayUser(login = "patients-carer", authorities = { "ROLE_CARER" })
     void aReadOnlyRoleCanReadTheDirectory() throws Exception {
         restMockMvc.perform(get("/api/patients")).andExpect(status().isOk());
     }
@@ -136,7 +137,7 @@ class PatientResourceIT {
      * Same status, entirely different reason, which is why the carer case below matters.
      */
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void aClinicianReachesTheActivityHandlerAndIsRefusedOnlyByTheCaseload() throws Exception {
         restMockMvc
             .perform(post("/api/patients/not-my-patient/activities").contentType(MediaType.APPLICATION_JSON).content(ACTIVITY))
@@ -144,7 +145,7 @@ class PatientResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void aClinicianReachesTheReportHandlerToo() throws Exception {
         restMockMvc
             .perform(post("/api/patients/not-my-patient/reports").contentType(MediaType.APPLICATION_JSON).content(REPORT))
@@ -160,7 +161,7 @@ class PatientResourceIT {
      * observation IS one. If someone hoists this prefix "for consistency", these two fail.
      */
     @Test
-    @WithMockUser(username = "patients-carer", authorities = { "ROLE_CARER" })
+    @WithMockGatewayUser(login = "patients-carer", authorities = { "ROLE_CARER" })
     void aREADONLYroleCannotFileAnActivity() throws Exception {
         restMockMvc
             .perform(post("/api/patients/any/activities").contentType(MediaType.APPLICATION_JSON).content(ACTIVITY))
@@ -168,7 +169,7 @@ class PatientResourceIT {
     }
 
     @Test
-    @WithMockUser(username = "patients-carer", authorities = { "ROLE_CARER" })
+    @WithMockGatewayUser(login = "patients-carer", authorities = { "ROLE_CARER" })
     void aREADONLYroleCannotFileAReport() throws Exception {
         restMockMvc
             .perform(post("/api/patients/any/reports").contentType(MediaType.APPLICATION_JSON).content(REPORT))
@@ -205,7 +206,7 @@ class PatientResourceIT {
      * {@code catch} in {@link PatientResource} would put the 404 back with nothing else failing.
      */
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void readingAPatientDuringAnOutageIs503_notNotFound() throws Exception {
         // The scoped read, because a patient record asks about one patient since backlog item 23. The
         // directory case below still stages the estate-wide one, and the pair is worth reading
@@ -221,13 +222,13 @@ class PatientResourceIT {
      * statuses differ.
      */
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void readingAPatientTrulyOutsideTheCaseloadIsStill404() throws Exception {
         restMockMvc.perform(get("/api/patients/some-patient")).andExpect(status().isNotFound());
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void theDirectoryDuringAnOutageIs503_notAnEmptyCaseload() throws Exception {
         // An empty page with X-Total-Count: 0 reads as "you have no patients", which is a statement
         // this service cannot make while it cannot see half of the union it computes.
@@ -244,7 +245,7 @@ class PatientResourceIT {
      * blamed the patient.
      */
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void filingAnActivityDuringAnOutageIs503_notNotFound() throws Exception {
         when(patientServiceClient.clinicalCases(anyString())).thenThrow(outage());
 

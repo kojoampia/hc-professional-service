@@ -63,6 +63,14 @@ class TokenOriginValidationEnabledIT {
      */
     private static final String COLLIDING_LOGIN = "nurse-jane";
 
+    /**
+     * The gateway {@code User.id} behind that login, and what {@code Profile.accountId} holds since
+     * backlog.md item 50. Kept unlike the login on purpose: the collision this class is about is a
+     * collision of <em>logins</em>, and the fixture has to be found by something else for the control
+     * below to mean anything.
+     */
+    private static final String LOCAL_ACCOUNT_ID = "uid-nurse-jane";
+
     private static final String OUR_ISSUER = "hc-professional-gateway";
     private static final String OUR_AUDIENCE = "hc-professional";
 
@@ -81,7 +89,7 @@ class TokenOriginValidationEnabledIT {
     @BeforeEach
     void seedTheProfileThatCanBeCollidedWith() {
         Profile profile = new Profile();
-        profile.setAccountId(COLLIDING_LOGIN);
+        profile.setAccountId(LOCAL_ACCOUNT_ID);
         profile.setFirstName("Jane");
         profile.setLastName("Doe");
         profileRepository.save(profile);
@@ -89,7 +97,7 @@ class TokenOriginValidationEnabledIT {
 
     @AfterEach
     void cleanup() {
-        profileRepository.findByAccountId(COLLIDING_LOGIN).ifPresent(profileRepository::delete);
+        profileRepository.findByAccountId(LOCAL_ACCOUNT_ID).ifPresent(profileRepository::delete);
     }
 
     @Test
@@ -100,7 +108,7 @@ class TokenOriginValidationEnabledIT {
                 get("/api/onboarding/profile").header("Authorization", "Bearer " + token(OUR_ISSUER, OUR_AUDIENCE, COLLIDING_LOGIN, 3600))
             )
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.accountId").value(COLLIDING_LOGIN));
+            .andExpect(jsonPath("$.accountId").value(LOCAL_ACCOUNT_ID));
     }
 
     @Test
@@ -189,7 +197,11 @@ class TokenOriginValidationEnabledIT {
             // ROLE_USER and nothing else: what an applicant holds here, and what hc-patient hands every patient
             // alongside ROLE_PATIENT. Rejecting ROLE_PATIENT is deliberately NOT the fix — which authorities the
             // sibling stacks mint is theirs to change.
-            .claim(SecurityUtils.AUTHORITIES_KEY, "ROLE_USER");
+            .claim(SecurityUtils.AUTHORITIES_KEY, "ROLE_USER")
+            // Every token minted anywhere in the estate carries this since 2026-09-07, so the sibling
+            // cases below carry it too — the point being that its ISSUER, not its absence, is what
+            // makes it worthless here (item 50).
+            .claim(SecurityUtils.UID_KEY, LOCAL_ACCOUNT_ID);
         if (issuer != null) {
             claims.issuer(issuer);
         }

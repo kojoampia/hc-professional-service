@@ -91,8 +91,9 @@ public class DeviceTokenResource {
         return deviceTokenRepository.findAllByAccountId(currentAccount());
     }
 
+    /** The caller's gateway {@code User.id} — what {@code DeviceToken.accountId} holds (item 50). */
     private String currentAccount() {
-        return SecurityUtils.getCurrentUserLogin()
+        return SecurityUtils.getCurrentAccountId()
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "No authenticated account"));
     }
 

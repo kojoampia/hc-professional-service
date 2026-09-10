@@ -62,8 +62,9 @@ public class NotificationPreferenceResource {
         return profileService.updatePushPreferences(currentAccount(), preferences);
     }
 
+    /** The caller's gateway {@code User.id} — what {@code Profile.accountId} holds (item 50). */
     private String currentAccount() {
-        return SecurityUtils.getCurrentUserLogin()
+        return SecurityUtils.getCurrentAccountId()
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "No authenticated account"));
     }
 }

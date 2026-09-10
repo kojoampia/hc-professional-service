@@ -284,7 +284,7 @@ public class AbsenceService {
     }
 
     public Optional<String> callerProfileId() {
-        return SecurityUtils.getCurrentUserLogin().flatMap(profileRepository::findByAccountId).map(net.jojoaddison.domain.Profile::getId);
+        return SecurityUtils.getCurrentAccountId().flatMap(profileRepository::findByAccountId).map(net.jojoaddison.domain.Profile::getId);
     }
 
     private boolean isAdmin() {

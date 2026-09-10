@@ -16,6 +16,7 @@ import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.Task;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.repository.TaskRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import net.jojoaddison.service.PatientDirectoryService.DirectoryFilter;
 import net.jojoaddison.service.dto.PatientDtos.CreateActivity;
 import net.jojoaddison.service.dto.PatientDtos.CreateReport;
@@ -37,7 +38,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 /**
@@ -53,6 +53,13 @@ import org.springframework.security.core.context.SecurityContextHolder;
 class PatientDirectoryServiceUnitTest {
 
     private static final String LOGIN = "dr.who";
+
+    /**
+     * The caller's gateway {@code User.id} — deliberately not the login, so a regression to
+     * resolving the caller by {@code sub} fails here rather than passing (backlog.md item 50).
+     */
+    private static final String ACCOUNT_ID = "uid-dr.who";
+
     private static final String PROFESSIONAL_ID = "professional-1";
 
     @Mock
@@ -69,11 +76,11 @@ class PatientDirectoryServiceUnitTest {
 
     @BeforeEach
     void setUp() {
-        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(LOGIN, "token"));
+        SecurityContextHolder.getContext().setAuthentication(WithMockGatewayUser.Factory.authenticationFor(LOGIN, ACCOUNT_ID));
         Profile mine = new Profile();
         mine.setId(PROFESSIONAL_ID);
-        mine.setAccountId(LOGIN);
-        when(profileRepository.findByAccountId(LOGIN)).thenReturn(Optional.of(mine));
+        mine.setAccountId(ACCOUNT_ID);
+        when(profileRepository.findByAccountId(ACCOUNT_ID)).thenReturn(Optional.of(mine));
         when(taskRepository.findByAttendantId(anyString())).thenReturn(List.of());
         when(patientService.clinicalCases()).thenReturn(List.of());
         when(patientService.profiles()).thenReturn(List.of());
@@ -221,7 +228,7 @@ class PatientDirectoryServiceUnitTest {
     @Test
     void anAccountWithNoProfileHasAnEmptyDirectoryRatherThanAnError() {
         // A registered account before onboarding completes. It genuinely has no patients.
-        when(profileRepository.findByAccountId(LOGIN)).thenReturn(Optional.empty());
+        when(profileRepository.findByAccountId(ACCOUNT_ID)).thenReturn(Optional.empty());
 
         assertThat(service.directory()).isEmpty();
         assertThat(service.summary().patients()).isZero();

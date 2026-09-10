@@ -383,8 +383,8 @@ public class DutyRosterResource {
 
     /** The caller's profile id, or empty when the account has no profile — an ordinary state. */
     private Optional<String> ownProfileId() {
-        String login = SecurityUtils.getCurrentUserLogin()
+        String accountId = SecurityUtils.getCurrentAccountId()
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "No authenticated account"));
-        return profileRepository.findByAccountId(login).map(profile -> profile.getId());
+        return profileRepository.findByAccountId(accountId).map(profile -> profile.getId());
     }
 }

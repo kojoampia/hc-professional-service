@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -13,11 +14,11 @@ import net.jojoaddison.domain.enumeration.DutyRole;
 import net.jojoaddison.domain.enumeration.ShiftType;
 import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -51,7 +52,7 @@ class ConditionalGetIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void anUnchangedPatientDirectoryCostsHeadersRatherThanAPayload() throws Exception {
         String etag = etagOf("/api/patients?page=0&size=20");
         assertThat(etag).as("the filter must be registered on /api/patients").isNotBlank();
@@ -63,7 +64,7 @@ class ConditionalGetIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void theDashboardSummaryRevalidatesToo() throws Exception {
         String etag = etagOf("/api/dashboard/summary");
         assertThat(etag).isNotBlank();
@@ -72,7 +73,7 @@ class ConditionalGetIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void theOwnRosterRevalidates() throws Exception {
         String etag = etagOf("/api/duty-roster");
         assertThat(etag).isNotBlank();
@@ -89,7 +90,7 @@ class ConditionalGetIT {
      * {@code /api/duty-roster/*}, this fails.
      */
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void theDayViewIsNOTcacheable_becauseItWritesOnTheReadPath() throws Exception {
         MvcResult result = restMockMvc.perform(get("/api/duty-roster/day/2026-08-22")).andExpect(status().isOk()).andReturn();
 
@@ -110,9 +111,9 @@ class ConditionalGetIT {
      * one changes the data and compares two validators.
      */
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void rosteringAnOffDayInvalidatesTheCachedRoster() throws Exception {
-        Profile profile = profileRepository.save(new Profile().accountId(NURSE).firstName("Eta").lastName("Gee"));
+        Profile profile = profileRepository.save(new Profile().accountId(accountIdFor(NURSE)).firstName("Eta").lastName("Gee"));
         try {
             String before = etagOf("/api/duty-roster");
             assertThat(before).isNotBlank();
@@ -141,7 +142,7 @@ class ConditionalGetIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void aStaleValidatorGetsTheBodyRatherThanA304() throws Exception {
         restMockMvc
             .perform(get("/api/patients").header(HttpHeaders.IF_NONE_MATCH, "\"not-the-current-etag\""))

@@ -43,21 +43,25 @@ public final class SecurityUtils {
      * that survives a login being edited, and the value the gateway keys its account events on.
      *
      * <p>Added on 2026-09-07 ({@code backlog.md} item 48) to close the fork that made the two
-     * producers on {@code hc.professional.registration} name one clinician differently. Read here
-     * for exactly one purpose: to stamp {@code Profile.accountUid} on a clinician's own write, so
-     * that {@code ProfileStatus} can publish an identifier the account half also names.
+     * producers on {@code hc.professional.registration} name one clinician differently. <b>Since
+     * item 50 it is this service's notion of who is calling</b> — the value behind
+     * {@code Profile.accountId}, {@code ProfessionalApplication.accountId},
+     * {@code DeviceToken.accountId}, {@code Message.senderId} and
+     * {@code MessageRecipient.recipientId}, and the only identifier any of them is looked up by.
      *
-     * <p><b>It is not this service's notion of who is calling and must not become one.</b> Three
-     * things stand in the way of that and all three are permanent. Every stored identifier in this
-     * database — {@code Profile.accountId}, {@code DeviceToken.accountId},
-     * {@code MessageRecipient.recipientId}, {@code OnboardingEvent.actor}, every {@code createdBy}
-     * and {@code lastModifiedBy} — holds the login, so a lookup by {@code uid} would resolve to
-     * nothing. The three gateways share one signing key and {@code TokenOriginValidator} is off, so
-     * a token reaching here may have been minted by hc-admin or hc-patient, whose {@code uid} names
-     * a row in <em>their</em> user store and is meaningless against ours. And the claim is absent
-     * from every token minted before it existed, for up to the thirty-day remember-me window.
+     * <p>The javadoc here used to argue the opposite, on three grounds. Two of them were true and
+     * have been dealt with rather than disproved: the stored values were logins, which is what
+     * {@code AccountIdMigrationService} moves; and the claim is absent from tokens minted before it
+     * existed, which the owner answered on 2026-09-10 by directing a direct cutover — the product
+     * launches in February 2027, no professional is on the platform, and a token with no claim is
+     * meant to fail and be replaced by signing in again. The third is not a problem but the
+     * mechanism: a {@code uid} minted by hc-admin or hc-patient names a row in <em>their</em> user
+     * store, so {@link #MINTING_ISSUER} discards it and such a caller resolves to nobody here.
      *
-     * @see #getCurrentUserAccountUid()
+     * <p><b>Do not add a fallback to the login.</b> That is the second join key this decision exists
+     * to remove, reintroduced under the first one's name — {@code backlog.md} item 50, § Do not.
+     *
+     * @see #getCurrentAccountId()
      */
     public static final String UID_KEY = "uid";
 
@@ -82,21 +86,27 @@ public final class SecurityUtils {
     private SecurityUtils() {}
 
     /**
-     * The gateway {@code User.id} on the caller's token, when there is one.
+     * <b>Who is calling.</b> The gateway {@code User.id} on the caller's token — the value every
+     * {@code accountId} in this database holds, and the estate's correlation key for a professional.
      *
-     * <p><b>{@link Optional#empty()} is the ordinary case, not an error.</b> It means one of: a
-     * token minted before 2026-09-07 and still inside its lifetime; a token from hc-admin or
-     * hc-patient; or a machine path with no token at all. Every caller must treat absence as "not
-     * known" and carry on with the login — never synthesise a value, and never take absence as a
-     * reason to clear an id that is already stored, which would undo the cutover on every stale
-     * token that arrived during it.
+     * <p><b>{@link Optional#empty()} means nobody, and a caller that resolves to nobody is refused.</b>
+     * It is reachable three ways: a token minted before 2026-09-07, which carries no such claim; a
+     * token minted by hc-admin or hc-patient, whose {@code uid} names a row in their user store and
+     * is discarded by the {@link #MINTING_ISSUER} filter; and a machine path with no token at all.
+     * The first is the direct cutover working as directed — signing in again mints a token that
+     * carries the claim. The second is the correct answer for a caller with no account here.
+     *
+     * <p><b>Never substitute {@link #getCurrentUserLogin()} when this is empty.</b> The login is a
+     * second identifier in a second space; falling back to it is precisely what {@code backlog.md}
+     * item 50 removed, and it would resolve against migrated rows to nothing anyway — or, worse, to
+     * a row belonging to whoever most recently took that login, since JHipster frees a login when
+     * an account is deleted.
      *
      * <p>A blank claim is empty rather than an empty string, for the reason
      * {@link #getCurrentUserEmail()} gives: an empty string compared against stored data is a value
-     * that could match something. A claim from any issuer but {@link #MINTING_ISSUER} is empty for a
-     * stronger reason — it names a row in somebody else's user store.
+     * that could match something.
      */
-    public static Optional<String> getCurrentUserAccountUid() {
+    public static Optional<String> getCurrentAccountId() {
         SecurityContext securityContext = SecurityContextHolder.getContext();
         return Optional.ofNullable(securityContext.getAuthentication())
             .map(Authentication::getPrincipal)
@@ -125,7 +135,15 @@ public final class SecurityUtils {
     }
 
     /**
-     * Get the login of the current user.
+     * The login of the current user — <b>for the audit trail and for display, never as a key.</b>
+     *
+     * <p>Since {@code backlog.md} item 50 this is not who is calling; {@link #getCurrentAccountId()}
+     * is. The login remains the right value for {@code createdBy}, {@code lastModifiedBy},
+     * {@code OnboardingEvent.actor} and every event {@code actor} field, because a human reading a
+     * trail needs a name rather than a Mongo id, and because those fields are never looked up.
+     *
+     * <p>The line between the two is worth stating in one place: <b>anything compared against stored
+     * data uses the account id; anything written down for a person to read uses the login.</b>
      *
      * @return the login of the current user.
      */

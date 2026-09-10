@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -24,13 +25,13 @@ import net.jojoaddison.domain.enumeration.ShiftType;
 import net.jojoaddison.repository.AbsenceRepository;
 import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -74,8 +75,8 @@ class AbsenceResourceIT {
     @BeforeEach
     void setUp() {
         cleanup();
-        nurse = profileRepository.save(new Profile().accountId(NURSE).firstName("Ab").lastName("Sent"));
-        carer = profileRepository.save(new Profile().accountId(CARER).firstName("Ca").lastName("Rer"));
+        nurse = profileRepository.save(new Profile().accountId(accountIdFor(NURSE)).firstName("Ab").lastName("Sent"));
+        carer = profileRepository.save(new Profile().accountId(accountIdFor(CARER)).firstName("Ca").lastName("Rer"));
     }
 
     @AfterEach
@@ -110,7 +111,7 @@ class AbsenceResourceIT {
     // ------------------------------------------------------------ requesting
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void aProfessionalRequestsTheirOwnLeaveAsRequested() throws Exception {
         restMockMvc
             .perform(post("/api/absences").contentType(MediaType.APPLICATION_JSON).content(absenceJson(FROM, TO, "HOLIDAY")))
@@ -120,7 +121,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = CARER, authorities = { "ROLE_CARER" })
+    @WithMockGatewayUser(login = CARER, authorities = { "ROLE_CARER" })
     void aReadOnlyClinicalRoleCanStillAskForTimeOff() throws Exception {
         // The security-config trap, asserted. CLINICAL_MUTATION is admin/doctor/nurse/paramedic/
         // pharmacist/therapist, so under the bare POST /api/** rule a carer, chemist or technician
@@ -133,7 +134,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void aProfessionalCannotBackdate() throws Exception {
         restMockMvc
             .perform(
@@ -143,7 +144,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void anAdministratorRecordsRetrospectiveSickness() throws Exception {
         // The path that has to exist. Sickness is reported after it begins — usually by phone, at
         // 06:00 — so somebody must be able to enter a day that has already started, and grant it in
@@ -166,7 +167,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void aProfessionalCannotFileLeaveForSomebodyElseOrPreApproveTheirOwn() throws Exception {
         // Both fields are ignored rather than rejected: the absence is forced onto the caller and to
         // REQUESTED, the same way OnboardingService force-sets accountId. A client does not get to
@@ -189,7 +190,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void rejectsARangeThatEndsBeforeItStarts() throws Exception {
         restMockMvc
             .perform(post("/api/absences").contentType(MediaType.APPLICATION_JSON).content(absenceJson(TO, FROM, "HOLIDAY")))
@@ -199,7 +200,7 @@ class AbsenceResourceIT {
     // ------------------------------------------------------------- approving
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void approvesWhenTheDaysAreFree() throws Exception {
         Absence absence = stored(nurse, FROM, TO, AbsenceStatus.REQUESTED);
 
@@ -210,7 +211,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void refusesApprovalWhileTheDaysAreStillRosteredAndNamesTheRounds() throws Exception {
         Absence absence = stored(nurse, FROM, TO, AbsenceStatus.REQUESTED);
         roster(nurse, FROM.plusDays(1));
@@ -226,7 +227,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void reassigningTheRoundUnblocksApproval() throws Exception {
         // The whole loop, which is what the 409 exists to make possible: refused, cover arranged,
         // the same request retried unchanged and granted.
@@ -250,7 +251,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void refusesApprovalForANightRoundStartingTheDayBefore() throws Exception {
         // The wrap, in the one place a date range meets a shift outside the overlap validator. A
         // NIGHT round dated the eve of the absence runs 23:00 until 07:00 on its first day, so it is
@@ -273,7 +274,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void aDayRoundTheDayBeforeDoesNotBlockApproval() throws Exception {
         // The other half of the same rule, and the reason it is a filter rather than a wider range:
         // a DAY round on the eve finishes at 15:00, before the leave begins, and blocking on it
@@ -288,7 +289,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void anOffDayInsideTheLeaveDoesNotBlockApproval() throws Exception {
         // The conflict rule counts rounds rather than visits, because a shift with no visits is still
         // a shift somebody has to cover. OFF is where that stops being true: a rostered rest day is
@@ -307,7 +308,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void anOffDayDoesNotHideARealRoundInTheSameRange() throws Exception {
         // The other half, and the one an over-broad exclusion would break: filtering OFF must drop
         // that row and nothing else. A rest day on the first absent day beside a DAY round on the
@@ -325,7 +326,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void approvingTwiceIsNotAnError() throws Exception {
         Absence absence = stored(nurse, FROM, TO, AbsenceStatus.APPROVED);
 
@@ -336,7 +337,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void aProfessionalCannotApproveTheirOwnLeave() throws Exception {
         Absence absence = stored(nurse, FROM, TO, AbsenceStatus.REQUESTED);
 
@@ -346,7 +347,7 @@ class AbsenceResourceIT {
     // ------------------------------------------------------------ visibility
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void seesOnlyTheirOwnAbsences() throws Exception {
         stored(nurse, FROM, TO, AbsenceStatus.REQUESTED);
         stored(carer, FROM, TO, AbsenceStatus.APPROVED);
@@ -357,7 +358,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void cannotReadAColleaguesAbsenceById() throws Exception {
         Absence theirs = stored(carer, FROM, TO, AbsenceStatus.APPROVED);
 
@@ -369,7 +370,7 @@ class AbsenceResourceIT {
     // ----------------------------------------------------------- range read
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void theRangeReadReturnsAnAbsenceThatMerelyOverlapsIt() throws Exception {
         // Starts well before the window and runs into it. "fromDate inside the range" would drop it
         // silently, and the calendar would draw an ordinary working week over granted leave.
@@ -383,7 +384,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void anOpenEndedRangeIsOpenRatherThanEmpty() throws Exception {
         // The MIN/MAX sentinel trap, asserted from the outside. BSON cannot compare those years, so
         // substituting them and reusing the two-sided query returns nothing at all — an empty
@@ -402,7 +403,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void cannotReadAColleaguesAbsencesByNamingThem() throws Exception {
         stored(carer, FROM, TO, AbsenceStatus.APPROVED);
 
@@ -414,7 +415,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void anAdministratorReadsAnothersAbsencesForTheApprovalQueue() throws Exception {
         stored(nurse, FROM, TO, AbsenceStatus.REQUESTED);
 
@@ -425,7 +426,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void anAdministratorSeesTheWholeEstate() throws Exception {
         stored(nurse, FROM, TO, AbsenceStatus.REQUESTED);
         stored(carer, FROM, TO, AbsenceStatus.APPROVED);
@@ -436,7 +437,7 @@ class AbsenceResourceIT {
     // ------------------------------------------------------------ withdrawal
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void withdrawsTheirOwnPendingRequestButNotAGrantedOne() throws Exception {
         Absence pending = stored(nurse, FROM, TO, AbsenceStatus.REQUESTED);
         restMockMvc.perform(delete("/api/absences/" + pending.getId())).andExpect(status().isNoContent());
@@ -448,7 +449,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void cannotWithdrawAColleaguesRequest() throws Exception {
         Absence theirs = stored(carer, FROM, TO, AbsenceStatus.REQUESTED);
 
@@ -457,7 +458,7 @@ class AbsenceResourceIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void anAdministratorDeclinesByDeleting() throws Exception {
         // There is no REJECTED status: a declined absence goes, so the calendar never shows a day
         // nobody can read. See AbsenceStatus.
@@ -470,7 +471,7 @@ class AbsenceResourceIT {
     // ---------------------------------------------------------- year summary
 
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void theYearSummaryCarriesAbsenceAndSurvivesADayThatIsBoth() throws Exception {
         LocalDate day = LocalDate.of(2026, 3, 4);
         absenceRepository.save(

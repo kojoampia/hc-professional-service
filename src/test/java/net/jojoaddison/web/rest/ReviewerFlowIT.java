@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -17,13 +18,13 @@ import net.jojoaddison.domain.enumeration.VerificationStatus;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -54,10 +55,10 @@ class ReviewerFlowIT {
     @BeforeEach
     void setUp() {
         cleanup();
-        Profile profile = profileRepository.save(new Profile().accountId("candidate").firstName("Can").lastName("Didate"));
+        Profile profile = profileRepository.save(new Profile().accountId(accountIdFor("candidate")).firstName("Can").lastName("Didate"));
         application = applicationRepository.save(
             new ProfessionalApplication()
-                .accountId("candidate")
+                .accountId(accountIdFor("candidate"))
                 .login("candidate")
                 .profileId(profile.getId())
                 .requestedRole("ROLE_NURSE")
@@ -82,7 +83,7 @@ class ReviewerFlowIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void adminListsApplicationsWithAttributionAndFilters() throws Exception {
         applicationRepository.save(new ProfessionalApplication().accountId("other").status(OnboardingStatus.APPLICATION_STARTED));
         restMockMvc.perform(get("/api/onboarding/applications")).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
@@ -95,13 +96,13 @@ class ReviewerFlowIT {
     }
 
     @Test
-    @WithMockUser(username = "nurse", authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = "nurse", authorities = { "ROLE_NURSE" })
     void listingIsAdminOnly() throws Exception {
         restMockMvc.perform(get("/api/onboarding/applications")).andExpect(status().isForbidden());
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void adminReadsApplicantDocumentsWithoutBytes() throws Exception {
         restMockMvc
             .perform(get("/api/onboarding/applications/" + application.getId() + "/documents"))
@@ -111,13 +112,13 @@ class ReviewerFlowIT {
     }
 
     @Test
-    @WithMockUser(username = "stranger", authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = "stranger", authorities = { "ROLE_USER" })
     void strangersCannotReadAnotherApplicantsDocuments() throws Exception {
         restMockMvc.perform(get("/api/onboarding/applications/" + application.getId() + "/documents")).andExpect(status().isForbidden());
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void adminVerifiesAndRejectsDocumentsWithAudit() throws Exception {
         restMockMvc
             .perform(put("/api/onboarding/documents/" + document.getId() + "/verify"))
@@ -143,7 +144,7 @@ class ReviewerFlowIT {
     }
 
     @Test
-    @WithMockUser(username = "candidate", authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = "candidate", authorities = { "ROLE_USER" })
     void applicantsCannotVerifyTheirOwnDocuments() throws Exception {
         restMockMvc.perform(put("/api/onboarding/documents/" + document.getId() + "/verify")).andExpect(status().isForbidden());
     }

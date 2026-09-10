@@ -145,7 +145,7 @@ public class RosterTrailService {
 
     /** The caller's permitted customer set, or empty when they have no profile here. */
     public Set<String> ownRosterCustomers(LocalDate today) {
-        Optional<String> professionalId = SecurityUtils.getCurrentUserLogin()
+        Optional<String> professionalId = SecurityUtils.getCurrentAccountId()
             .flatMap(profileRepository::findByAccountId)
             .map(net.jojoaddison.domain.Profile::getId);
         return professionalId.map(id -> dutyRosterService.trailCustomerIds(id, today)).orElseGet(Set::of);

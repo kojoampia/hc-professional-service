@@ -21,12 +21,12 @@ import net.jojoaddison.domain.Address;
 import net.jojoaddison.domain.EmergencyContact;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -62,7 +62,7 @@ import org.springframework.test.web.servlet.MockMvc;
  */
 @AutoConfigureMockMvc
 @IntegrationTest
-@WithMockUser(authorities = { "ROLE_DOCTOR" })
+@WithMockGatewayUser(authorities = { "ROLE_DOCTOR" })
 class ProfilePatchFieldCoverageIT {
 
     private static final String ENTITY_API_URL_ID = "/api/profiles/{id}";
@@ -70,20 +70,15 @@ class ProfilePatchFieldCoverageIT {
     /**
      * Fields no merge-patch is expected to reach, each for a reason that predates this item.
      *
-     * <p>{@code id} is the path key. {@code accountId} and {@code accountUid} are
-     * {@code READ_ONLY} over HTTP — {@code accountId} became so in item 54, where it was a live
-     * account takeover, and {@code accountUid} in item 48's review — so a caller cannot send either
-     * and {@link #everyProfileFieldIsEitherAppliedOrRefused} would otherwise demand this endpoint
-     * make them writable. The last three are audit fields written by Mongo auditing.
+     * <p>{@code id} is the path key. {@code accountId} is {@code READ_ONLY} over HTTP — it became so
+     * in item 54, where it was a live account takeover — so a caller cannot send it and
+     * {@link #everyProfileFieldIsEitherAppliedOrRefused} would otherwise demand this endpoint make it
+     * writable. The last three are audit fields written by Mongo auditing.
+     *
+     * <p>{@code accountUid} was a fifth entry until item 50 deleted the field; the reflection below
+     * enumerates the entity, so it left this list by itself.
      */
-    private static final Set<String> NOT_A_PATCHABLE_FIELD = Set.of(
-        "id",
-        "accountId",
-        "accountUid",
-        "createdDate",
-        "modifiedDate",
-        "lastModifiedBy"
-    );
+    private static final Set<String> NOT_A_PATCHABLE_FIELD = Set.of("id", "accountId", "createdDate", "modifiedDate", "lastModifiedBy");
 
     @Autowired
     private MockMvc restMockMvc;
@@ -348,13 +343,15 @@ class ProfilePatchFieldCoverageIT {
     /**
      * Item 54's account takeover stays closed through this endpoint too.
      *
-     * <p>{@code accountId} and {@code accountUid} are {@code READ_ONLY}, so Jackson drops them before
-     * anything here sees them. Asserted rather than assumed, because this change is the one that
-     * started reading the raw JSON document, and a future author reaching for the raw node to "just
-     * apply what the caller named" would reopen it.
+     * <p>{@code accountId} is {@code READ_ONLY}, so Jackson drops it before anything here sees it.
+     * Asserted rather than assumed, because this change is the one that started reading the raw JSON
+     * document, and a future author reaching for the raw node to "just apply what the caller named"
+     * would reopen it. The request still sends {@code accountUid} — the field item 48 added and item
+     * 50 deleted — so that an author who reinstates a second account identifier finds a test that
+     * already names it.
      */
     @Test
-    void accountIdAndAccountUidRemainUnwritable() throws Exception {
+    void accountIdRemainsUnwritable() throws Exception {
         Profile stored = storedClinician();
 
         patchWith(
@@ -366,7 +363,6 @@ class ProfilePatchFieldCoverageIT {
         assertThat(after.getAccountId())
             .as("item 54 — a patch must not repoint a profile at another account")
             .isEqualTo("item60-clinician");
-        assertThat(after.getAccountUid()).isNull();
         assertThat(after.getFirstName()).as("the control: the request did land").isEqualTo("Adwoa");
     }
 

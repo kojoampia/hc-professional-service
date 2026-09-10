@@ -16,6 +16,7 @@ import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtClaimNames;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
@@ -35,11 +36,18 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
  * the same {@link JwtDecoder} the HTTP side uses. An unauthenticated CONNECT is rejected, so the
  * open handshake buys nothing on its own.
  *
- * <p>The principal name is the JWT subject — the gateway login — which is also what
- * {@code accountId} holds today (see {@code OnboardingService}). That equality is what lets
- * {@code convertAndSendToUser(recipientId, ...)} work without a lookup table. <b>If accountId ever
- * becomes a real user id, this routing breaks silently</b>: frames would be addressed to a principal
- * nobody is connected as, and the symptom is missing notifications rather than an error.
+ * <p><b>The principal name is the {@code uid} claim — the gateway's {@code User.id}</b> — which is
+ * what {@code MessageRecipient.recipientId} holds since backlog.md item 50. That equality is what
+ * lets {@code convertAndSendToUser(recipientId, ...)} work without a lookup table, and it is the
+ * whole reason this file changed with that item: the paragraph here used to warn that "if accountId
+ * ever becomes a real user id, this routing breaks silently", because frames would be addressed to a
+ * principal nobody is connected as and the symptom is missing notifications rather than an error.
+ * That is now a live constraint rather than a prediction — <b>the claim this reads and the accessor
+ * {@code MessagingResource} reads must go on being the same value.</b>
+ *
+ * <p>A CONNECT whose token carries no {@code uid}, or one minted by hc-admin or hc-patient, is
+ * rejected rather than falling back to the subject. Before item 50 such a token connected as a login
+ * and simply received nothing; refusing says so at the handshake instead.
  */
 @Configuration
 @EnableWebSocketMessageBroker
@@ -106,13 +114,19 @@ public class WebsocketConfiguration implements WebSocketMessageBrokerConfigurer 
         String token = value.startsWith("Bearer ") ? value.substring(7) : value;
         try {
             Jwt jwt = jwtDecoder.decode(token);
-            String login = jwt.getSubject();
-            if (login == null || login.isBlank()) {
+            // The account id, not the subject: the per-user destination is addressed by
+            // MessageRecipient.recipientId, and that has been the gateway's User.id since item 50.
+            // Read straight off the decoded token rather than through SecurityUtils, which resolves
+            // from the SecurityContext — there is none on a STOMP frame.
+            String accountId = SecurityUtils.MINTING_ISSUER.equals(jwt.getClaimAsString(JwtClaimNames.ISS))
+                ? jwt.getClaimAsString(SecurityUtils.UID_KEY)
+                : null;
+            if (accountId == null || accountId.isBlank()) {
                 return null;
             }
             // No authorities are attached: this channel grants no access to anything. Everything the
             // client can act on is fetched over HTTP, where its authorities are checked properly.
-            return new UsernamePasswordAuthenticationToken(login, null, List.of());
+            return new UsernamePasswordAuthenticationToken(accountId, null, List.of());
         } catch (JwtException e) {
             log.debug("Rejected STOMP CONNECT: {}", e.getMessage());
             return null;
@@ -120,7 +134,7 @@ public class WebsocketConfiguration implements WebSocketMessageBrokerConfigurer 
     }
 
     /** Kept for symmetry with the HTTP side; unused today but the obvious place to look. */
-    public static String currentLoginOrNull() {
-        return SecurityUtils.getCurrentUserLogin().orElse(null);
+    public static String currentAccountIdOrNull() {
+        return SecurityUtils.getCurrentAccountId().orElse(null);
     }
 }

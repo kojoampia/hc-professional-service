@@ -28,78 +28,36 @@ public class Profile implements Serializable {
     /**
      * The clinician's account, and <b>the correlation key this service publishes to the estate</b>.
      *
-     * <p><b>It is the gateway <em>login</em>, not the gateway's {@code User.id}, and that matters
-     * outside this repository.</b> It is set from {@code OnboardingResource.currentAccountId()},
-     * which returns {@code SecurityUtils.getCurrentUserLogin()} — the JWT subject, which the gateway
-     * fills with {@code authentication.getName()}. The gateway meanwhile keys
-     * {@code registration.created} and its account events on {@code User.id}. So the two producers
-     * on {@code hc.professional.registration} have never named one clinician the same way under
-     * that name, and a consumer joining the account half to the profile half on {@code accountId}
-     * matches nothing.
+     * <p><b>It is the gateway's {@code User.id}</b>, read from the {@code uid} claim by
+     * {@code SecurityUtils.getCurrentAccountId()}. It held the gateway <em>login</em> — the JWT
+     * subject — from WP1 until backlog.md item 50 on 2026-09-10, and that is why so much of this
+     * repository's history is about one field: the gateway keys its own account events on
+     * {@code User.id}, so the two producers on {@code hc.professional.registration} named one
+     * clinician differently and a consumer joining the account half to the profile half on
+     * {@code accountId} matched nothing. hc-admin's {@code SiblingDomainEvent} has always specified
+     * this value; the code has only recently agreed with it.
      *
-     * <p><b>Two things changed on 2026-09-07 (backlog.md item 48) and neither is this field.</b> The
-     * gateway's token now carries a {@code uid} claim, and {@link #accountUid} beside this holds it
-     * for publication; and {@code ProfileStatus} now fills {@code subject.login}, which is the field
-     * the two halves have always agreed on and is therefore the join that works. <b>This field
-     * remains the login and remains the only identity this service resolves a caller by</b> — see
-     * {@link #accountUid} for why rewriting it was rejected rather than deferred.
+     * <p><b>There is no second identifier and no fallback.</b> A sibling field {@code accountUid}
+     * carried the {@code User.id} beside a login-valued {@code accountId} between items 48 and 50,
+     * and was deleted with the migration that made them the same value —
+     * {@code AccountIdMigrationService} unsets the stored key. A caller whose token carries no
+     * {@code uid} resolves to nobody rather than to their login.
      *
      * <p><b>READ_ONLY over HTTP, and that is a security control rather than a modelling preference.</b>
-     * This field is the ownership check — {@code findByAccountId(login)} is what decides whose identity
+     * This field is the ownership check — {@code findByAccountId} is what decides whose identity
      * documents, roster, absences and patient directory a caller may read
-     * ({@code OnboardingDocumentResource:173}, {@code DutyRosterResource:388}, {@code AbsenceService:287},
-     * {@code PatientDirectoryService:109}, {@code RosterTrailService:139}). It was writable from the
+     * ({@code OnboardingDocumentResource}, {@code DutyRosterResource}, {@code AbsenceService},
+     * {@code PatientDirectoryService}, {@code RosterTrailService}). It was writable from the
      * request body until 2026-09-08 while {@code PUT /api/profiles/{id}} is a whole-document replace
      * open to all six {@code CLINICAL_MUTATION} roles, so any nurse could point another clinician's
-     * profile at their own login in two writes and inherit it. Found by the item 53 review.
+     * profile at their own account in two writes and inherit it. Found by the item 53 review, and a
+     * precondition for item 50: a field cannot become the estate's correlation key while any nurse
+     * can rewrite it.
      */
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     @Indexed(unique = true, sparse = true)
     @Field("account_id")
     private String accountId;
-
-    /**
-     * The gateway's {@code User.id} for the same account, when the clinician has signed in since the
-     * token started carrying it — <b>the identifier the estate's account half is keyed by</b>.
-     *
-     * <p>Added on 2026-09-07 (backlog.md item 48) beside {@link #accountId} rather than instead of
-     * it. The alternative was to migrate: rewrite every stored login in this database to a
-     * {@code User.id}. That was rejected and the reasons are worth keeping, because they do not
-     * expire. The mapping lives in the gateway's {@code hcProfessionalGateway} database, which this
-     * service cannot read. It is not total — {@code "system"}, an account since deleted, and a login
-     * arriving on a token minted by hc-admin or hc-patient (the three share a signing key and
-     * {@code TokenOriginValidator} is off) all have no {@code User.id} here — so the migrated field
-     * would hold a <em>mixture</em> of the two identifier spaces, which is strictly worse than one
-     * that consistently holds logins. And it is not two collections: {@code professional_application},
-     * {@code device_token}, {@code message}, {@code message_recipient}, {@code patient_write_receipt},
-     * {@code onboarding_event} and every {@code created_by} / {@code last_modified_by} in the
-     * database hold the same string and would all have to move with it.
-     *
-     * <p>So this is <b>additive, nullable and never a lookup key</b>. Nothing resolves a caller by
-     * it; {@link #accountId} remains the one identity this service reads and writes by. It exists to
-     * be <em>published</em>, on {@code ProfileStatus}, so a directory holding the account half has
-     * the id it already knows the clinician by.
-     *
-     * <p>Null means "not known yet", never "no account". It is filled only by
-     * {@code OnboardingService.upsertOwnProfile}, from the caller's own {@code uid} claim on their
-     * own profile, and <b>is never cleared once set</b> — a clinician whose 30-day token predates
-     * the claim would otherwise wipe it on their next save and take the join down again.
-     *
-     * <p><b>READ-ONLY over HTTP, and that is not decoration.</b> This field asserts to another stack
-     * which gateway account a clinician is, so a value a caller can choose is a value a caller can
-     * forge. Without {@code READ_ONLY} any holder of {@code CLINICAL_MUTATION} — six roles — could
-     * {@code PUT /api/profiles/&#123;someone-else&#125;} with their own {@code uid} in the body, and
-     * this service would publish it to {@code hc.professional.registration} as that clinician's
-     * account identifier; hc-admin keys {@code DirectoryLink.external_key} on exactly that value and
-     * would link the wrong account. The service goes to lengths to stop an administrator's uid
-     * reaching a clinician's row through the <em>token</em> — see
-     * {@code OnboardingService.upsertOwnProfile} — and this closes the same door on the request body.
-     * Found by the review of backlog item 48.
-     */
-    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
-    @Indexed(sparse = true)
-    @Field("account_uid")
-    private String accountUid;
 
     /**
      * Push notification preferences (MOB9).
@@ -254,19 +212,6 @@ public class Profile implements Serializable {
 
     public void setAccountId(String accountId) {
         this.accountId = accountId;
-    }
-
-    public String getAccountUid() {
-        return this.accountUid;
-    }
-
-    public Profile accountUid(String accountUid) {
-        this.setAccountUid(accountUid);
-        return this;
-    }
-
-    public void setAccountUid(String accountUid) {
-        this.accountUid = accountUid;
     }
 
     public String getFirstName() {

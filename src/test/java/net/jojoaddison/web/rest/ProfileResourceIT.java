@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -21,12 +22,12 @@ import net.jojoaddison.domain.Address;
 import net.jojoaddison.domain.AddressTestSamples;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -34,7 +35,7 @@ import org.springframework.test.web.servlet.MockMvc;
  */
 @IntegrationTest
 @AutoConfigureMockMvc
-@WithMockUser(authorities = { "ROLE_DOCTOR" })
+@WithMockGatewayUser(authorities = { "ROLE_DOCTOR" })
 class ProfileResourceIT {
 
     private static final String DEFAULT_FIRST_NAME = "AAAAAAAAAA";
@@ -240,7 +241,7 @@ class ProfileResourceIT {
      * change breaks the path the refusal names.
      */
     @Test
-    @WithMockUser(username = "item66.applicant", authorities = { "ROLE_USER" })
+    @WithMockGatewayUser(login = "item66.applicant", authorities = { "ROLE_USER" })
     void theApplicantPathIsWhatLinksAProfileToAnAccount() throws Exception {
         restProfileMockMvc
             .perform(
@@ -250,9 +251,11 @@ class ProfileResourceIT {
             )
             .andExpect(status().isOk());
 
-        Profile linked = profileRepository.findByAccountId("item66.applicant").orElseThrow();
+        Profile linked = profileRepository.findByAccountId(accountIdFor("item66.applicant")).orElseThrow();
         assertThat(linked.getFirstName()).isEqualTo("Kofi");
-        assertThat(linked.getAccountId()).isEqualTo("item66.applicant");
+        assertThat(linked.getAccountId())
+            .as("the gateway User.id from the uid claim, not the subject — backlog.md item 50")
+            .isEqualTo(accountIdFor("item66.applicant"));
     }
 
     @Test

@@ -79,7 +79,7 @@ class ProfileStatusPublicationUnitTest {
         when(applicationRepository.findByAccountId(anyString())).thenReturn(Optional.empty());
         when(personalDocumentRepository.findByProfileId(anyString())).thenReturn(List.of());
         when(profileRepository.findById("profile-7")).thenReturn(Optional.of(existingProfile()));
-        when(profileRepository.findByAccountId("ama.serwaa")).thenReturn(Optional.of(existingProfile()));
+        when(profileRepository.findByAccountId("user-42")).thenReturn(Optional.of(existingProfile()));
     }
 
     @AfterEach
@@ -154,7 +154,9 @@ class ProfileStatusPublicationUnitTest {
     @Test
     void savingAnApplicationAnnouncesTheProfileItsConsentCounts() {
         ProfessionalApplication application = new ProfessionalApplication()
-            .accountId("ama.serwaa")
+            // The gateway User.id, as every accountId in this database has held since item 50.
+            // "ama.serwaa" survives below as lastModifiedBy, which is an audit value and stays a login.
+            .accountId("user-42")
             .profileId("profile-7")
             .status(OnboardingStatus.APPLICATION_STARTED)
             .consentAcceptedAt(Instant.now());
@@ -262,7 +264,7 @@ class ProfileStatusPublicationUnitTest {
     }
 
     private Profile existingProfile() {
-        Profile profile = new Profile().accountId("ama.serwaa").accountUid("user-42");
+        Profile profile = new Profile().accountId("user-42");
         profile.setId("profile-7");
         profile.setCreatedDate(CREATED);
         profile.setModifiedDate(MODIFIED);

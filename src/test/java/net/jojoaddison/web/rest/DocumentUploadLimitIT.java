@@ -81,6 +81,14 @@ class DocumentUploadLimitIT {
 
     private static final String APPLICANT = "upload-limit-applicant";
 
+    /**
+     * The gateway {@code User.id} for that login. {@code Profile.accountId} holds this since
+     * backlog.md item 50, and {@link #tokenFor} puts it on the token — the only class here that mints
+     * a real one over a real transport, so it is also the only one that would notice if the claim set
+     * drifted from what the gateway issues.
+     */
+    private static final String ACCOUNT_ID = "uid-upload-limit-applicant";
+
     /** Between Spring's 1 MB default and the application's own 5 MB check — the broken range. */
     private static final int TWO_MEGABYTES = 2 * 1024 * 1024;
 
@@ -111,7 +119,7 @@ class DocumentUploadLimitIT {
 
     @BeforeEach
     void seedProfile() {
-        profileRepository.save(new Profile().accountId(APPLICANT).firstName("Upload").lastName("Limit"));
+        profileRepository.save(new Profile().accountId(ACCOUNT_ID).firstName("Upload").lastName("Limit"));
     }
 
     @AfterEach
@@ -225,13 +233,23 @@ class DocumentUploadLimitIT {
         );
     }
 
-    /** Mints a token with the same claim set the gateway issues: sub + space-delimited auth. */
+    /**
+     * Mints a token with the same claim set the gateway issues: sub, iss, the {@code uid} carrying
+     * {@code User.id}, and space-delimited authorities.
+     *
+     * <p>{@code iss} and {@code uid} are not decoration here. Since backlog.md item 50 the service
+     * resolves its caller from {@code uid}, and only from a token this stack's own gateway minted —
+     * so a claim set without them authenticates and then resolves to nobody, and every request in
+     * this class 401s before reaching the multipart handling it is about.
+     */
     private String tokenFor(String login) {
         Instant now = Instant.now();
         JwtClaimsSet claims = JwtClaimsSet.builder()
             .issuedAt(now)
             .expiresAt(now.plus(5, ChronoUnit.MINUTES))
             .subject(login)
+            .issuer(net.jojoaddison.security.SecurityUtils.MINTING_ISSUER)
+            .claim(net.jojoaddison.security.SecurityUtils.UID_KEY, ACCOUNT_ID)
             .claim(AUTHORITIES_KEY, "ROLE_USER")
             .build();
         return jwtEncoder.encode(JwtEncoderParameters.from(JwsHeader.with(JWT_ALGORITHM).build(), claims)).getTokenValue();

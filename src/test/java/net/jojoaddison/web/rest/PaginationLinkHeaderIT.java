@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.jojoaddison.IntegrationTest;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.FieldSource;
@@ -15,7 +16,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -92,7 +92,7 @@ class PaginationLinkHeaderIT {
      */
     @ParameterizedTest
     @FieldSource("PAGINATED_READS")
-    @WithMockUser(username = ADMIN, authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = ADMIN, authorities = { "ROLE_ADMIN" })
     void behindTheGatewayEveryLinkCarriesTheStrippedPrefix(String path) throws Exception {
         MvcResult result = restMockMvc.perform(asRelayedByTheGateway(path)).andExpect(status().isOk()).andReturn();
 
@@ -109,7 +109,7 @@ class PaginationLinkHeaderIT {
      * and {@code /api/patients} is genuinely the path the caller used.
      */
     @Test
-    @WithMockUser(username = ADMIN, authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = ADMIN, authorities = { "ROLE_ADMIN" })
     void aDirectCallStillAdvertisesTheBarePath() throws Exception {
         MvcResult result = restMockMvc.perform(get("/api/patients?page=0&size=20")).andExpect(status().isOk()).andReturn();
 
@@ -125,7 +125,7 @@ class PaginationLinkHeaderIT {
      * is HTTP, and therefore exactly the kind of thing that ships.
      */
     @Test
-    @WithMockUser(username = ADMIN, authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = ADMIN, authorities = { "ROLE_ADMIN" })
     void theSchemeIsTheEdgesRatherThanTheHop() throws Exception {
         MvcResult result = restMockMvc
             .perform(get("/api/profiles").header("X-Forwarded-Proto", "https").header("X-Forwarded-Host", EXTERNAL_HOST))

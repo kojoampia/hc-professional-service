@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -17,6 +18,7 @@ import net.jojoaddison.repository.CategoryRepository;
 import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.repository.TeamRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -25,7 +27,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -182,7 +183,7 @@ class LocationHeaderIT {
      */
     @ParameterizedTest
     @FieldSource("SIMPLE_CREATES")
-    @WithMockUser(username = "location-header-admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "location-header-admin", authorities = { "ROLE_ADMIN" })
     void behindTheGatewayEveryLocationCarriesTheStrippedPrefix(String path) throws Exception {
         Created created = createdBy(asRelayedByTheGateway(create(path, "{}")));
 
@@ -201,7 +202,7 @@ class LocationHeaderIT {
      */
     @ParameterizedTest
     @FieldSource("SIMPLE_CREATES")
-    @WithMockUser(username = "location-header-admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "location-header-admin", authorities = { "ROLE_ADMIN" })
     void aDirectCallAdvertisesTheBarePath(String path) throws Exception {
         Created created = createdBy(create(path, "{}"));
 
@@ -254,9 +255,9 @@ class LocationHeaderIT {
      * same way, which is the point — the defect was not a generator artefact.
      */
     @Test
-    @WithMockUser(username = NURSE, authorities = { "ROLE_NURSE" })
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
     void requestingLeaveAdvertisesAFollowableLocation() throws Exception {
-        profileRepository.save(new Profile().accountId(NURSE).firstName("Ab").lastName("Sent"));
+        profileRepository.save(new Profile().accountId(accountIdFor(NURSE)).firstName("Ab").lastName("Sent"));
         String body =
             "{\"fromDate\":\"%s\",\"toDate\":\"%s\",\"type\":\"HOLIDAY\"}".formatted(
                     LocalDate.now().plusDays(10),
@@ -278,9 +279,9 @@ class LocationHeaderIT {
      * is a live production defect for the same reason (see {@code web-mobile-port.md} § Phase 0).
      */
     @Test
-    @WithMockUser(username = "location-header-admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "location-header-admin", authorities = { "ROLE_ADMIN" })
     void assigningAShiftAdvertisesAFollowableLocation() throws Exception {
-        Profile nurse = profileRepository.save(new Profile().accountId(NURSE).firstName("On").lastName("Duty"));
+        Profile nurse = profileRepository.save(new Profile().accountId(accountIdFor(NURSE)).firstName("On").lastName("Duty"));
         String body =
             "{\"date\":\"%s\",\"duty\":\"NURSE\",\"professionalId\":\"%s\",\"shift\":\"DAY\",\"name\":\"Ward 3\"}".formatted(
                     LocalDate.now().plusDays(3),
@@ -303,7 +304,7 @@ class LocationHeaderIT {
      * characters and either compiles.
      */
     @Test
-    @WithMockUser(username = "location-header-admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "location-header-admin", authorities = { "ROLE_ADMIN" })
     void aQueryStringOnTheCreateIsNotCarriedIntoTheLocation() throws Exception {
         Created created = createdBy(asRelayedByTheGateway(create("/api/teams?notify=true", "{}")));
 

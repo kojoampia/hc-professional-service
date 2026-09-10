@@ -25,6 +25,17 @@ import org.springframework.stereotype.Component;
  * through {@code Profile.findByAccountId}, so without a profile for the {@code doctor} account the
  * directory is empty no matter what else exists.
  *
+ * <p><strong>It seeds the login, and since backlog.md item 50 that is not what a caller resolves
+ * to.</strong> {@code Profile.accountId} now holds the gateway's {@code User.id}, and this runner
+ * cannot know it: the gateway's {@code InitialSetupMigration} gives each seeded professional a fresh
+ * {@code UUID.randomUUID()}, so there is no constant to seed against and no way to ask — this class
+ * runs at startup with no caller and therefore no token to read the gateway's user table with. The
+ * login is seeded deliberately, and one call to
+ * {@code POST /api/admin/account-id-migration?dryRun=false} as an administrator moves it onto the
+ * real id, exactly as it does for a real deployment's stored rows. Until that call the demo
+ * clinician's directory is empty — which is the same symptom as a missing profile and is worth
+ * knowing before debugging it as one.
+ *
  * <p><strong>Gated on not-production rather than an allow-list of dev and test</strong>, matching
  * {@code InitialSetupMigration} in the gateway and for the same reason: this project's tests run
  * under the profile {@code testdev}, which {@code @Profile({"dev","test"})} would silently exclude —

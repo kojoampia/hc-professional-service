@@ -13,6 +13,7 @@ import java.util.Properties;
 import java.util.UUID;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.config.KafkaTestContainer;
+import net.jojoaddison.security.WithMockGatewayUser;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -22,7 +23,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -45,7 +45,7 @@ class DomainEventsKafkaIT {
     private KafkaTestContainer kafkaTestContainer;
 
     @Test
-    @WithMockUser(username = "doctor", authorities = { "ROLE_DOCTOR" })
+    @WithMockGatewayUser(login = "doctor", authorities = { "ROLE_DOCTOR" })
     void entityCreationPublishesEnvelopeWithoutPii() throws Exception {
         try (KafkaConsumer<String, String> consumer = consumer()) {
             consumer.subscribe(List.of("hc.professional.entity"));

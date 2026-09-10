@@ -15,13 +15,13 @@ import net.jojoaddison.domain.enumeration.DutyRole;
 import net.jojoaddison.domain.enumeration.ShiftType;
 import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.WithMockGatewayUser;
 import net.jojoaddison.service.PatientServiceClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -155,7 +155,7 @@ class DutyRosterEstateOrderIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void putsTheRoundJustCreatedOnTheFirstPageInsteadOfMonthsOfHistory() throws Exception {
         // The concrete failure: 25 historic rounds, an administrator creates one for tomorrow, and the
         // list refreshes onto page 0. Ascending, page 0 is 20 rounds from a month ago and the new one
@@ -170,7 +170,7 @@ class DutyRosterEstateOrderIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void ordersEveryPageNewestDateFirst() throws Exception {
         storeHistory(10);
         store("brand-new", TOMORROW, "Ward 3");
@@ -184,7 +184,7 @@ class DutyRosterEstateOrderIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void pagesATieGroupInAStableOrderRatherThanWhicheverOrderMongoHasToday() throws Exception {
         // Five rounds sharing a date and a shift, stored in reverse id order. With no tiebreaker the
         // response is whatever the collection happens to yield — here, the order they went in.
@@ -194,7 +194,7 @@ class DutyRosterEstateOrderIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void neverRepeatsOrSkipsARowAcrossAPageBoundaryInsideATieGroup() throws Exception {
         // A page size that cannot help but split the tie group: 5 tied rounds at 2 a page, so the
         // boundary falls inside it twice.
@@ -211,7 +211,7 @@ class DutyRosterEstateOrderIT {
     }
 
     @Test
-    @WithMockUser(username = "admin", authorities = { "ROLE_ADMIN" })
+    @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void keepsACallerNamedSortAndStillBreaksItsTiesById() throws Exception {
         // The default is not the only non-unique ordering an administrator can ask for; `name` is one
         // they might. The caller's key still decides, and id only decides what it left undecided.

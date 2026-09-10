@@ -14,10 +14,6 @@
       "fieldValidateRules": ["unique"]
     },
     {
-      "fieldName": "accountUid",
-      "fieldType": "String"
-    },
-    {
       "fieldName": "firstName",
       "fieldType": "String"
     },
