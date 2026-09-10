@@ -12,6 +12,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "application", ignoreUnknownFields = false)
 public class ApplicationProperties {
 
+    private final Gateway gateway = new Gateway();
     private final Kafka kafka = new Kafka();
     private final Notifications notifications = new Notifications();
     private final Security security = new Security();
@@ -46,6 +47,54 @@ public class ApplicationProperties {
      * handle its absence. The flag lives inside the publisher instead, which keeps the decision in
      * one place.
      */
+    public Gateway getGateway() {
+        return gateway;
+    }
+
+    /**
+     * Where this service reaches {@code hcProfessionalGateway}, for the one read it makes of it.
+     *
+     * <p><b>This class exists because the keys existed without it and the service would not start.</b>
+     * Item 50 added {@code application.gateway.base-url} and {@code .timeout-seconds} to
+     * {@code application.yml} and read them with {@code @Value} defaults, which works on its own — but
+     * this class is {@code @ConfigurationProperties(prefix = "application", ignoreUnknownFields =
+     * false)}, so a key under {@code application.} that nothing here declares fails the bind, and a
+     * failed bind fails the whole {@code ApplicationContext}. Every request answered 500 because there
+     * was no application to answer it.
+     *
+     * <p><b>The unit and integration tests could not see it</b>: they load
+     * {@code src/test/resources/config/application.yml}, which does not carry these keys, so 453 green
+     * tests coexisted with a service that could not start in a container. `quality/`'s `start` job is
+     * what caught it — the thing that runs a published image behind a hostname, exactly as the
+     * workspace guide says it exists to do. See backlog.md item 86.
+     */
+    public static class Gateway {
+
+        /**
+         * Default matches the compose service name, so a deployed stack needs no override. A local
+         * developer running the gateway on the host wants {@code http://localhost:5505}.
+         */
+        private String baseUrl = "http://gateway:5505";
+
+        private int timeoutSeconds = 10;
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public int getTimeoutSeconds() {
+            return timeoutSeconds;
+        }
+
+        public void setTimeoutSeconds(int timeoutSeconds) {
+            this.timeoutSeconds = timeoutSeconds;
+        }
+    }
+
     public static class Kafka {
 
         /**
