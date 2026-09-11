@@ -62,6 +62,18 @@ import org.springframework.stereotype.Component;
  * deleted through {@code TaskResource} comes back on the next start. That is the right trade for a
  * fixture gated on not-production, and the wrong one for anything a clinician authored — which is why
  * nothing here overwrites a row it did not write.
+ *
+ * <p><strong>One terminal state, recorded so nobody has to rediscover it.</strong> If
+ * {@code AccountIdMigrationService} ever <em>quarantines</em> this row — which happens when the
+ * gateway's user store no longer knows the login {@code doctor}, say after it is rebuilt — the key is
+ * cleared and the old value goes to {@code OrphanedAccountRow}. From then on the migration skips the
+ * row for ever, because it selects on {@code account_id ne null}, and this seeder skips it for ever
+ * too, because {@code _id} is occupied. The row stays ownerless until somebody reconciles it by hand.
+ * That is arguably the correct reading — a profile whose account does not exist belongs to nobody —
+ * but it is not covered by the argument below for seeding the login rather than {@code null}, which is
+ * about a row this seeder writes, not about one the migration has since emptied. Under the old shape
+ * the next boot put the login back and the state was invisible; it is now stable and visible, which
+ * is the improvement, not a repair.
  */
 @Component
 @Profile("!prod")
@@ -130,10 +142,27 @@ public class DemoRelationSeeder implements ApplicationRunner {
      * login, because {@code AccountIdMigrationService} only walks rows whose key is non-null: an
      * ownerless row is one nothing can ever repair, whereas a login is a value the migration resolves.
      *
+     * <p><b>The second clause is a suppressor, not an identity lookup, and the distinction is the
+     * whole of why it is allowed to name the login.</b> {@code DatabaseConfiguration}'s
+     * {@code onboardingIndexInitializer} builds a <em>unique sparse</em> index on
+     * {@code profile.account_id} at every boot. So if some row at another {@code _id} already holds
+     * the literal {@code "doctor"} while {@code professional-doctor} is absent, the insert below is
+     * refused, the {@code DuplicateKeyException} escapes {@link ApplicationRunner#run}, and the
+     * context fails — <b>the service does not start</b>. The old accountId-keyed guard returned early
+     * in exactly that state, so on this one path the {@code _id} guard alone was a regression, and a
+     * service that will not boot is a worse outcome than the readability cost of the literal.
+     *
+     * <p>It <b>cannot</b> reintroduce backlog.md item 118, and the reason is structural rather than
+     * careful: the clause is joined with {@code ||} to a guard that already returns, so it can only
+     * ever make this method write <em>less</em>, never more. Nothing downstream of it reads the value,
+     * compares it against a caller, or stores it. That is the difference from the guard item 50
+     * deleted, which used the login to decide <em>which row belongs to whom</em>. Reachability is low
+     * — a hand-edited development database or a partial restore — and the blast radius is total.
+     *
      * @return whether a profile was created.
      */
     private boolean seedProfile() {
-        if (profileRepository.existsById(DEMO_PROFESSIONAL_ID)) {
+        if (profileRepository.existsById(DEMO_PROFESSIONAL_ID) || profileRepository.findByAccountId(DEMO_ACCOUNT).isPresent()) {
             return false;
         }
         net.jojoaddison.domain.Profile clinician = new net.jojoaddison.domain.Profile();

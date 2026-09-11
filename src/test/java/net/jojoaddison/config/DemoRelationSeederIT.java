@@ -12,7 +12,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.index.Index;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -69,9 +71,18 @@ class DemoRelationSeederIT {
         removeDemoRows();
     }
 
-    /** Scoped to this seeder's own rows — the two collections belong to the rest of the suite too. */
+    /**
+     * Scoped to this seeder's own rows — the two collections belong to the rest of the suite too.
+     *
+     * <p>The {@code findByAccountId} sweep is for the row
+     * {@link #doesNotAbortStartupWhenAnotherRowAlreadyHoldsTheDemoLogin} plants at a generated id: it
+     * would otherwise survive into the next test and suppress the seed there, turning one test's
+     * fixture into another's silent failure. It runs after the delete by id so it can only ever match
+     * such a stray.
+     */
     private void removeDemoRows() {
         profileRepository.deleteById(DEMO_PROFESSIONAL_ID);
+        profileRepository.findByAccountId(DEMO_ACCOUNT).ifPresent(profileRepository::delete);
         taskRepository.deleteAll(taskRepository.findByAttendantId(DEMO_PROFESSIONAL_ID));
     }
 
@@ -127,9 +138,18 @@ class DemoRelationSeederIT {
         assertThat(demoTasks()).hasSize(3);
     }
 
-    /** The first-boot path, unchanged: an empty database still gets the demo clinician and its links. */
+    /**
+     * The first-boot path, unchanged: an empty database gets the demo clinician and its links — and
+     * the second start is a fixpoint.
+     *
+     * <p>The second run is asserted by identity rather than by shape. Counting three links again would
+     * pass a seeder that deleted its own rows and wrote them afresh, which is a different behaviour
+     * that happens to produce the same census; comparing the stored ids proves the rows were left
+     * alone. It is also what keeps this class's opening claim — that every test here runs the seeder
+     * at least twice — true of every test, including the one about an empty database.
+     */
     @Test
-    void createsTheDemoClinicianAndItsLinksOnAnEmptyDatabase() {
+    void createsTheDemoClinicianAndItsLinksOnAnEmptyDatabaseAndTheSecondStartIsAFixpoint() {
         seeder.run(null);
 
         Profile seeded = profileRepository.findById(DEMO_PROFESSIONAL_ID).orElse(null);
@@ -137,6 +157,14 @@ class DemoRelationSeederIT {
         assertThat(seeded.getAccountId()).isEqualTo(DEMO_ACCOUNT);
         assertThat(seeded.getEmail()).isEqualTo("doctor@localhost");
         assertThat(demoTasks()).extracting(Task::getPatientId).containsExactlyInAnyOrder("patient-kojo", "patient-ophelia", "patient-nana");
+        List<String> linkIdsAfterFirstStart = demoTasks().stream().map(Task::getId).sorted().toList();
+
+        seeder.run(null);
+
+        assertThat(demoTasks().stream().map(Task::getId).sorted().toList())
+            .as("a second start must leave the very rows the first one wrote, not equivalent ones")
+            .isEqualTo(linkIdsAfterFirstStart);
+        assertThat(storedAccountId()).isEqualTo(DEMO_ACCOUNT);
     }
 
     /**
@@ -185,5 +213,45 @@ class DemoRelationSeederIT {
         assertThat(after.getFirstName()).isEqualTo("Kwesi");
         assertThat(after.getAccountId()).isEqualTo(MIGRATED_ACCOUNT_ID);
         assertThat(demoTasks()).as("links attach to the id, and two runs still produce one set").hasSize(3);
+    }
+
+    /**
+     * A row elsewhere already holding the literal {@code doctor} must not stop the service booting.
+     *
+     * <p>This is the one state where keying the guard on {@code _id} alone was a <em>regression</em>.
+     * {@code profile.account_id} carries a unique sparse index, so an insert carrying a login another
+     * row already holds is refused; the {@code DuplicateKeyException} would escape
+     * {@code ApplicationRunner.run} and fail the context, and a service that will not start is worse
+     * than anything the accountId literal costs in readability. The old guard returned early here by
+     * accident, which is why the regression was invisible until it was looked for.
+     *
+     * <p><b>The index has to be built by the test.</b> {@code DatabaseConfiguration}'s
+     * {@code onboardingIndexInitializer} is itself an {@code ApplicationRunner}, and Spring Boot does
+     * not invoke those under {@code @SpringBootTest} — so the constraint this test is about is absent
+     * from the test database unless it is created here, exactly as that bean creates it. Built and
+     * dropped inside the test rather than in {@code setUp}: the Mongo instance is shared with the rest
+     * of the suite, and a uniqueness constraint nothing else expects is not a thing to leave behind.
+     */
+    @Test
+    void doesNotAbortStartupWhenAnotherRowAlreadyHoldsTheDemoLogin() {
+        // The name comes back from createIndex rather than being written out: Mongo derives it from
+        // the key ("account_id_1", not "account_id"), and guessing it made the drop below fail with
+        // IndexNotFound while the assertions themselves had already passed.
+        String indexName = mongoTemplate.indexOps(Profile.class).createIndex(new Index("account_id", Sort.Direction.ASC).unique().sparse());
+        try {
+            Profile elsewhere = new Profile();
+            elsewhere.setAccountId(DEMO_ACCOUNT);
+            elsewhere.setFirstName("Ama");
+            profileRepository.save(elsewhere);
+
+            seeder.run(null);
+            seeder.run(null);
+
+            assertThat(profileRepository.existsById(DEMO_PROFESSIONAL_ID))
+                .as("the login is already spoken for, so there is nothing this seeder can legally insert")
+                .isFalse();
+        } finally {
+            mongoTemplate.indexOps(Profile.class).dropIndex(indexName);
+        }
     }
 }
