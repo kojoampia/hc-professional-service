@@ -190,6 +190,13 @@ public class PatientResource {
      * text. Carrying them on every row of a page would put kilobytes of clinical prose on the wire
      * to render a summary line of it — the wrong trade on a phone, and the reason
      * {@link net.jojoaddison.service.dto.PatientDtos.CaseSummary} stays lean.
+     *
+     * <p><b>This is the one case endpoint that serves an archived case, since 2026-09-11</b> (backlog
+     * item 82). The lists above exclude them and still do; a case retired while a clinician had it open
+     * renders here rather than 404ing, which is what this method promised from the day it was written
+     * and did not do for three weeks. The refusal is unchanged for anyone outside the caseload, and the
+     * response carries {@code archivedAt} so a client can say on screen that the case is retired —
+     * {@link net.jojoaddison.service.PatientDirectoryService#caseDetail} argues both halves.
      */
     @GetMapping("/{id}/cases/{caseId}")
     public ResponseEntity<CaseDetail> caseDetail(@PathVariable String id, @PathVariable String caseId) {

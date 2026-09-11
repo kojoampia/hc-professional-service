@@ -560,41 +560,112 @@ public class PatientDirectoryService {
     }
 
     /**
-     * One case in full, for the detail screen.
+     * One case in full, for the detail screen — <b>archived cases included</b>.
      *
      * <p>Entitlement-checked against the patient, not the case: holding a case id is not authority
      * over it, which is the same reason the PATCH path carries the patient too.
      *
-     * <p>Archived cases are excluded from every list here — and, since the sibling's own
-     * {@code includeArchived} defaults to false and this service does not override it, they never
-     * reach this method either. This paragraph claimed the opposite until 2026-09-10; the claim is
-     * older than the sibling's default and was not made false by backlog item 23, which changed which
-     * rows are fetched and not which rows exist. Filed as backlog item 82.
+     * <h3>Why this one read asks for archived rows (backlog item 82)</h3>
+     * Archived cases are excluded from every <em>list</em> here and that is right: retiring a case is
+     * precisely the act of taking it out of the working queue. It was never right for reading one back,
+     * and this method promised from the day it was written (2026-08-22) that <em>"a case archived while
+     * a clinician had it open should render rather than 404 — they are being shown something that
+     * exists, and the alternative reads as data loss"</em>. <b>The promise was never kept</b>: the
+     * sibling's {@code includeArchived} defaults to false, this service did not override it, and so the
+     * row never arrived. Item 23 corrected the comment to describe the code; this change does the
+     * opposite, and the reasons it is the promise that survives rather than the comment are three.
+     *
+     * <p><b>hc-patient, which owns archiving, decided this on its own endpoint.</b> Its
+     * {@code ClinicalCaseResource} says in place: <em>"They are excluded from the list, not hidden:
+     * GET /&#123;id&#125; still returns an archived case, so a link or a bookmark to one keeps working
+     * and nothing has to be un-archived merely to be read."</em> Every client in the estate that reads
+     * a case by id gets one. This service reads cases as a list and so was the only place where
+     * archiving behaved like deletion.
+     *
+     * <p><b>Archiving is a clinical act, not a records one.</b> patientservice gates {@code /archive}
+     * on doctor and excludes {@code ROLE_ADMIN} deliberately — the inverse of the usual rule here. A
+     * permission shaped like that says the act means "this episode of care is finished", not "withdraw
+     * this data"; patient data is never deleted in this estate, and a read that 404s is the one
+     * behaviour indistinguishable from deletion by the person looking at it. The clinician who retires
+     * a case is the one role permitted to, and was the one most likely to lose it.
+     *
+     * <p><b>And the clinician had it on screen.</b> {@code mobile/}'s queue deliberately leaves an
+     * archived row in place until the next refresh, so tapping it in that window is ordinary use; it
+     * answered "this case could not be opened".
+     *
+     * <h3>What it does not widen, which is the part to keep</h3>
+     * The caseload rule is unchanged and is still computed over <b>live</b> rows: a clinician outside
+     * it gets the same 404 as before, so this cannot be used to read an arbitrary case by guessing an
+     * id. One entitlement is added and it is deliberately the narrowest one that keeps the promise —
+     * <b>a case that names the caller as its assigned professional may be read back by them</b>, live
+     * or archived. A clinician does not lose the record of their own work because the episode closed.
+     *
+     * <p>What was rejected is the wider reading of the same idea: computing the ordinary
+     * patient-level entitlement over archived rows too. That would let a clinician whose last case with
+     * a patient was archived go on reading that patient's <em>current</em> cases, written by whoever
+     * has them now — continuing access to a record after involvement ended, which is a product decision
+     * nobody has taken and not one to smuggle in under a javadoc correction. Nothing else moves either:
+     * {@link #record}, {@link #casesFor}, {@link #updateCase} and both writes keep the live-only read,
+     * so an archived case is readable and is not editable, and its patient's record does not open.
      */
     public CaseDetail caseDetail(String patientId, String caseId) {
-        // As in updateCase: a failed read raises inside requireEntitlement rather than reaching the
-        // orElseThrow below, so a 503 is never dressed up as "no such case for this clinician" (item 24).
-        return requireEntitlement(patientId)
-            .cases()
+        String professionalId = callerProfileId().orElse(null);
+        if (professionalId == null || patientId == null || patientId.isBlank()) {
+            // Same refusal entitledCases makes without reading anything: there is no caseload question
+            // to ask, and a scoped read with no id would be an estate-wide one.
+            throw new PatientNotInCaseloadException(patientId);
+        }
+        // The read comes first, as in requireEntitlement: it raises on a failure, so a 503 is never
+        // dressed up as "no such case for this clinician" (item 24). The in-memory patientId filter is
+        // load-bearing here for the same reason it is there — these rows decide an entitlement, and a
+        // sibling that ignored the parameter would otherwise hand back the estate.
+        List<ClinicalCase> cases = patientService
+            .casesIncludingArchived(patientId)
             .stream()
-            .filter(c -> caseId.equals(c.id()) && patientId.equals(c.patientId()))
+            .filter(c -> patientId.equals(c.patientId()))
+            .toList();
+        ClinicalCase found = cases
+            .stream()
+            .filter(c -> caseId.equals(c.id()))
             .findFirst()
-            .map(
-                c ->
-                    new CaseDetail(
-                        c.id(),
-                        c.patientId(),
-                        c.caseNumber(),
-                        c.title(),
-                        text(c.openedAt()),
-                        text(c.closedAt()),
-                        c.brief(),
-                        c.status() == null ? null : c.status().toLowerCase(java.util.Locale.ROOT),
-                        c.symptoms(),
-                        c.diagnosis()
-                    )
-            )
             .orElseThrow(() -> new PatientNotInCaseloadException(patientId));
+        if (!mayRead(professionalId, patientId, found, cases)) {
+            throw new PatientNotInCaseloadException(patientId);
+        }
+        return new CaseDetail(
+            found.id(),
+            found.patientId(),
+            found.caseNumber(),
+            found.title(),
+            text(found.openedAt()),
+            text(found.closedAt()),
+            found.brief(),
+            found.status() == null ? null : found.status().toLowerCase(java.util.Locale.ROOT),
+            found.symptoms(),
+            found.diagnosis(),
+            text(found.archivedAt())
+        );
+    }
+
+    /**
+     * Whether this caller may read this one case (backlog item 82).
+     *
+     * <p>Two rules, and the first is the ordinary one: the caller is in the caseload for this patient.
+     * It is evaluated over <b>live rows only</b>, which is what {@link #entitledCases} evaluates —
+     * fetching archived rows above changes which case can be <em>found</em>, and deliberately not who
+     * is entitled to the patient.
+     *
+     * <p>The second is the narrow addition: the case itself names the caller as its assigned
+     * professional. For a live case that is already covered by the first rule, so this only ever grants
+     * an archived case to the clinician it was assigned to — which is the whole of the promise this
+     * method's javadoc makes, and nothing beyond it.
+     */
+    private boolean mayRead(String professionalId, String patientId, ClinicalCase found, List<ClinicalCase> cases) {
+        boolean assignedToMeLive = cases
+            .stream()
+            .anyMatch(c -> c.archivedAt() == null && professionalId.equals(c.assignedProfessionalId()));
+        boolean thisCaseIsMine = professionalId.equals(found.assignedProfessionalId());
+        return assignedToMeLive || thisCaseIsMine || scheduledWith(professionalId, patientId);
     }
 
     /** The clinical fields a clinician may edit. Everything else on a case is somebody else's. */
@@ -638,6 +709,14 @@ public class PatientDirectoryService {
      * about by everyone who later adds a read — for a saving that is one parameter and one return type
      * in the place where the duplication actually is. The two callers that want only the login pay one
      * scoped read they did not before, and it replaces an estate-wide one.
+     *
+     * <p><b>Four callers now, not five.</b> {@link #caseDetail} left this path in backlog item 82: it
+     * needs the patient's cases <em>including archived ones</em>, which no other caller wants and which
+     * this method must not start fetching — the rows it returns decide an entitlement and are served as
+     * a list by two of the callers above. It makes the same single scoped read, checks the same
+     * caseload rule over the same live rows, and adds one narrower grant of its own; the shape here is
+     * deliberately duplicated rather than parameterised, because a boolean on this method would put
+     * "may I see retired cases" and "am I entitled to this patient" in one signature.
      */
     private Entitlement requireEntitlement(String patientId) {
         String professionalId = callerProfileId().orElse(null);
@@ -685,11 +764,12 @@ public class PatientDirectoryService {
         }
         List<ClinicalCase> cases = patientService.clinicalCases(patientId).stream().filter(c -> patientId.equals(c.patientId())).toList();
         boolean assignedToMe = cases.stream().anyMatch(c -> professionalId.equals(c.assignedProfessionalId()));
-        boolean scheduledWithMe = taskRepository
-            .findByAttendantId(professionalId)
-            .stream()
-            .anyMatch(task -> patientId.equals(task.getPatientId()));
-        return assignedToMe || scheduledWithMe ? Optional.of(cases) : Optional.empty();
+        return assignedToMe || scheduledWith(professionalId, patientId) ? Optional.of(cases) : Optional.empty();
+    }
+
+    /** The task half of the caseload union: a visit in this service naming the caller for this patient. */
+    private boolean scheduledWith(String professionalId, String patientId) {
+        return taskRepository.findByAttendantId(professionalId).stream().anyMatch(task -> patientId.equals(task.getPatientId()));
     }
 
     /**

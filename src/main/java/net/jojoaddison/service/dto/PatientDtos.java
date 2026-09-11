@@ -76,6 +76,14 @@ public final class PatientDtos {
      * {@code ClinicalCase}. The dashboard migration plan describes a recommendation checklist; it
      * was never given anywhere to live. Adding one here would mean this service storing clinical
      * content it does not own, so the gap is left visible instead.
+     *
+     * <p><b>{@code archivedAt} is here because this is the one surface that serves archived cases</b>
+     * (backlog item 82). {@code null} on a live case, and the instant it was retired on an archived
+     * one. It is not decoration and it is not for a client to ignore: the queue and the patient's case
+     * list exclude archived cases, so a case that arrives on this screen and says nothing about being
+     * retired is indistinguishable from current clinical prose — and a retired diagnosis rendered as
+     * current is a worse answer than the 404 that used to be given. Rendering the difference is
+     * {@code web/}'s and {@code mobile/}'s to do; offering it to them is this record's.
      */
     public record CaseDetail(
         String id,
@@ -87,7 +95,8 @@ public final class PatientDtos {
         String brief,
         String status,
         String symptoms,
-        String diagnosis
+        String diagnosis,
+        String archivedAt
     ) {}
 
     /**

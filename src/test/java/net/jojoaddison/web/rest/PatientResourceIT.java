@@ -6,14 +6,18 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Instant;
+import java.util.List;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.security.WithMockGatewayUser;
 import net.jojoaddison.service.PatientServiceClient;
 import net.jojoaddison.service.PatientServiceUnavailableException;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -181,6 +185,64 @@ class PatientResourceIT {
         restMockMvc
             .perform(post("/api/patients/any/activities").contentType(MediaType.APPLICATION_JSON).content(ACTIVITY))
             .andExpect(status().isUnauthorized());
+    }
+
+    // --- An archived case is readable through the detail endpoint (backlog.md item 82) ----------
+
+    /**
+     * The promise, through the HTTP layer: 200, the clinical prose, and {@code archivedAt} on the wire.
+     *
+     * <p>Asserted here as well as in the unit test because two things only this layer can show. The
+     * resource catches {@code PatientNotInCaseloadException} and answers {@code notFound()} with no
+     * body, so anything that reintroduces the refusal reads as a 404 to a client and as nothing at all
+     * to a log. And {@code archivedAt} is a field a client cannot use unless it is serialised — a
+     * record component that Jackson never emits would satisfy every assertion in the unit test.
+     */
+    @Test
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
+    void anARCHIVEDcaseIsServedByTheDetailEndpoint() throws Exception {
+        String professionalId = profileRepository.findByAccountId(accountIdFor(NURSE)).orElseThrow().getId();
+        when(patientServiceClient.casesIncludingArchived("p-1")).thenReturn(List.of(archivedCase("c-old", "p-1", professionalId)));
+
+        restMockMvc
+            .perform(get("/api/patients/p-1/cases/c-old"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value("c-old"))
+            .andExpect(jsonPath("$.diagnosis").value("a diagnosis"))
+            .andExpect(jsonPath("$.archivedAt").value("2026-08-21T09:00:00Z"));
+    }
+
+    /**
+     * And the refusal it must not become: the same archived case, a caller with no tie to the patient.
+     *
+     * <p>Staged with the case assigned to somebody else, so the read succeeded and the row exists —
+     * the only thing standing between this endpoint and any archived case in the estate is the
+     * entitlement rule.
+     */
+    @Test
+    @WithMockGatewayUser(login = NURSE, authorities = { "ROLE_NURSE" })
+    void anARCHIVEDcaseIsStill404ForACallerOutsideTheCaseload() throws Exception {
+        when(patientServiceClient.casesIncludingArchived("p-1")).thenReturn(List.of(archivedCase("c-old", "p-1", "another-professional")));
+
+        restMockMvc.perform(get("/api/patients/p-1/cases/c-old")).andExpect(status().isNotFound());
+    }
+
+    private static ClinicalCase archivedCase(String id, String patientId, String assignedTo) {
+        return new ClinicalCase(
+            id,
+            patientId,
+            1,
+            "Title",
+            Instant.parse("2026-08-20T09:00:00Z"),
+            null,
+            "brief",
+            "CLOSED",
+            "symptoms",
+            "a diagnosis",
+            assignedTo,
+            null,
+            Instant.parse("2026-08-21T09:00:00Z")
+        );
     }
 
     // --- An outage is a 503, not a caseload decision (backlog.md item 24) ---------------------
