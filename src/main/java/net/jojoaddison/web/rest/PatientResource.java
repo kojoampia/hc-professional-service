@@ -1,6 +1,7 @@
 package net.jojoaddison.web.rest;
 
 import java.util.List;
+import java.util.stream.Collectors;
 import net.jojoaddison.service.PatientDirectoryService;
 import net.jojoaddison.service.dto.PatientDtos.ActivityLogEntry;
 import net.jojoaddison.service.dto.PatientDtos.CaseDetail;
@@ -53,6 +54,29 @@ import tech.jhipster.web.util.PaginationUtil;
 @RequestMapping("/api/patients")
 public class PatientResource {
 
+    /**
+     * Names the composed parts of the directory the caller's discipline may not read (backlog item 107).
+     *
+     * <p><b>A header rather than a wider body, and that was the trade.</b> {@code web/} and
+     * {@code mobile/} both consume this endpoint's body as a bare JSON array, so an envelope naming the
+     * restriction would have broken two deployed clients on the release that shipped it — and neither
+     * is this item's to change. The cost is the honest one: a header can be ignored, and a client that
+     * ignores it renders a blank recency column exactly as it renders a caseload nobody has touched.
+     * That is the conflation this item exists to remove, and closing it needs the two frontends to read
+     * the header; the value here is what makes that possible rather than what completes it.
+     *
+     * <p>Absent entirely when nothing was restricted — the ordinary case, and the one that should pay
+     * nothing. Values are {@link PatientDirectoryService.RestrictedPart#token()}, comma-separated, in
+     * enum declaration order so the header is byte-stable between requests.
+     *
+     * <p><b>Same-origin only, as it stands.</b> A browser cannot read a response header that is not in
+     * {@code Access-Control-Expose-Headers}; {@code web/} reaches this through nginx and the webpack
+     * proxy, so it is same-origin in both deployments and the question does not arise. It would arise
+     * for any cross-origin consumer, and the gateway's CORS configuration is where it would be
+     * answered — not here.
+     */
+    static final String RESTRICTED_PARTS = "X-Restricted-Parts";
+
     private final PatientDirectoryService patientDirectoryService;
 
     public PatientResource(PatientDirectoryService patientDirectoryService) {
@@ -87,16 +111,25 @@ public class PatientResource {
         @RequestParam(required = false) String sex,
         @RequestParam(required = false) Boolean childrenOnly
     ) {
-        Page<PatientListItem> page;
+        PatientDirectoryService.Directory directory;
         try {
-            page = patientDirectoryService.directory(pageable, new PatientDirectoryService.DirectoryFilter(query, sex, childrenOnly));
+            directory = patientDirectoryService.directory(pageable, new PatientDirectoryService.DirectoryFilter(query, sex, childrenOnly));
         } catch (IllegalArgumentException e) {
             // An unsortable property. 400 rather than a silently unsorted page: the latter looks like
             // a backend that lost the clinician's ordering, and nobody reports that as a bug.
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
         }
-        HttpHeaders headers = PaginationUtil.generatePaginationHttpHeaders(ServletUriComponentsBuilder.fromCurrentRequest(), page);
-        return ResponseEntity.ok().headers(headers).body(page.getContent());
+        HttpHeaders headers = PaginationUtil.generatePaginationHttpHeaders(
+            ServletUriComponentsBuilder.fromCurrentRequest(),
+            directory.page()
+        );
+        if (!directory.restrictions().isEmpty()) {
+            headers.add(
+                RESTRICTED_PARTS,
+                directory.restrictions().stream().map(PatientDirectoryService.RestrictedPart::token).collect(Collectors.joining(","))
+            );
+        }
+        return ResponseEntity.ok().headers(headers).body(directory.page().getContent());
     }
 
     /**

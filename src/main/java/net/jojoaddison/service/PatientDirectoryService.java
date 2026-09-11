@@ -4,7 +4,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.Period;
 import java.time.ZoneOffset;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -73,6 +75,35 @@ import org.springframework.stereotype.Service;
  * {@link #record(String)} and {@link #requireEntitlement(String)} may never be reached on a failed
  * read. {@code DutyRosterService} answers the same signal differently and is equally right — it has
  * stored snapshots to serve; this service has nothing to serve but the answer it could not get.
+ *
+ * <p><strong>A read the caller's discipline may never make is not an outage, and answering 503 for it
+ * is the same conflation one step out</strong> (backlog item 107). The paragraph above is about a read
+ * that <em>failed</em>; hc-patient also answers reads that <em>succeed at refusing</em>. It owns the
+ * scope-of-practice matrix, and a pharmacist, a chemist or a technician asking it for
+ * {@code /api/activity-logs} gets a deliberate, permanent 403 — measured on the quality stack, all
+ * eight disciplines, 2026-09-11. This service composed that read unconditionally, so three of the
+ * eight disciplines lost <em>the whole patient directory</em> — their first screen — over one panel of
+ * it they were never entitled to, under a message telling the operator it might clear on retry. Two
+ * rules follow and they are stated where they are applied:
+ *
+ * <ul>
+ *   <li><b>A refused part is named, never silently emptied.</b> "No activity" and "not yours to see"
+ *       are different sentences, which is the distinction backlog items 78, 87 and 92 each drew at a
+ *       different site; degrading a refusal to an empty panel would reintroduce it here. See
+ *       {@link RestrictedPart} and {@link Directory}.
+ *   <li><b>Only a read that <em>supplies</em> the directory degrades; a read that <em>decides</em>
+ *       something still raises.</b> {@link #directory(Pageable, DirectoryFilter)} tolerates a refusal
+ *       and marks it. {@link #record}, {@link #casesFor}, {@link #caseDetail}, {@link #myCases},
+ *       {@link #summary} and both writes do not, and are unchanged: their answers are entitlements,
+ *       counts and case lists, and a number computed over a collection the caller was refused is a
+ *       wrong number presented as a fact. What changes for them is only that the 503 now says <em>will
+ *       NOT clear on retry</em>, which is true.
+ * </ul>
+ *
+ * <p><strong>Degrading cannot widen anything, and that is why it is safe here.</strong> The case half
+ * of the caseload union only ever <em>adds</em> patients, so losing it yields a strictly smaller
+ * directory — the same direction as having no cases at all. It is not the same as reading a refusal as
+ * an entitlement answer, which is what {@link #entitledCases} must never do and does not.
  */
 @Service
 public class PatientDirectoryService {
@@ -140,6 +171,88 @@ public class PatientDirectoryService {
             .filter(id -> id != null && !id.isBlank())
             .collect(Collectors.toCollection(LinkedHashSet::new));
     }
+
+    /**
+     * The task half of the union alone — this service's own answer to "whose patients are these".
+     *
+     * <p>Extracted from {@link #patientIdsFor} rather than copied, because
+     * {@link #patientIdsWithinScope} is exactly "the union without the half the caller was refused"
+     * and a second copy of this three-line stream is how the two would stop agreeing about blank ids.
+     */
+    private Set<String> patientIdsFromTasks(String professionalId) {
+        return taskRepository
+            .findByAttendantId(professionalId)
+            .stream()
+            .map(Task::getPatientId)
+            .filter(id -> id != null && !id.isBlank())
+            .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    /**
+     * A composed part of the directory the caller's discipline may not read (backlog item 107).
+     *
+     * <p><b>The two differ in what their absence costs, and a client needs to know which.</b>
+     * {@link #LAST_ACTIVITY} blanks a column on rows that are all present; {@link #CASE_ASSIGNMENTS}
+     * means rows are <em>missing</em>, which nothing in the body can express — no per-row field can
+     * describe a patient that is not there. That asymmetry is why the marker is collection-level.
+     *
+     * <p>{@link #token()} is what reaches the wire, so the enum can be renamed without breaking a
+     * client and a client-facing name never has to be spelled twice.
+     *
+     * <p><b>These name what was refused <em>during this read</em>, not what the caller may never
+     * see.</b> The difference is reachable and worth knowing before building anything on it:
+     * {@link #withinScope} returns early when the caller has no patients at all, before the activity
+     * log is ever asked for — so a technician with no tasks is answered {@code caseAssignments} alone,
+     * while the same technician with one task is answered both, although their discipline is refused
+     * the activity log in either case. The set therefore varies with caseload as well as with
+     * discipline. It is the honest report of one read and it is deliberately not a capability list:
+     * a client rendering a per-discipline badge from it would watch the badge change when a shift was
+     * assigned. Asking hc-patient what a discipline may read is a different question, and nothing in
+     * this stack can answer it — the scope-of-practice matrix lives over there.
+     */
+    public enum RestrictedPart {
+        /**
+         * patientservice's {@code /api/clinical-cases}. The case half of the caseload union is
+         * unreadable, so a patient reached <em>only</em> through an assigned case is absent from the
+         * directory. The task half is unaffected and is what is listed.
+         */
+        CASE_ASSIGNMENTS("caseAssignments"),
+        /**
+         * patientservice's {@code /api/activity-logs}. Every patient is listed; {@code lastActivityAt}
+         * is {@code null} on all of them and the default ordering falls back to that null, so the list
+         * is not in recency order. Without this marker a client cannot tell that from a caseload
+         * nobody has touched.
+         */
+        LAST_ACTIVITY("lastActivity");
+
+        private final String token;
+
+        RestrictedPart(String token) {
+            this.token = token;
+        }
+
+        /** The stable name a client sees. */
+        public String token() {
+            return token;
+        }
+    }
+
+    /**
+     * One page of the directory, and whatever the caller's discipline was not allowed to see in it.
+     *
+     * <p><b>A second value beside the page rather than a wider {@code PatientListItem}</b>, for two
+     * reasons that both had to hold. A restriction is a fact about the <em>read</em>, not about any
+     * row — repeating it on every row would state a global fact n times and still could not state the
+     * one that matters, that rows are missing. And {@code web/} and {@code mobile/} both consume the
+     * body of {@code GET /api/patients} as a bare JSON array today; wrapping it in an envelope would
+     * break both on the deploy that shipped it, and neither is this item's to change.
+     *
+     * @param restrictions empty for the five disciplines that may read every part, which is the
+     *     ordinary case and the one nothing should pay for. <b>Iterates in {@link RestrictedPart}
+     *     declaration order</b>, which the header rendered from it is a contract about — see the
+     *     comment where it is built, and do not pass a general-purpose {@code Set} in here.
+     */
+    public record Directory(Page<PatientListItem> page, Set<RestrictedPart> restrictions) {}
 
     /**
      * How a caller may narrow the directory. Every field is optional; all present fields must match.
@@ -212,19 +325,119 @@ public class PatientDirectoryService {
      * <p>What it buys is real all the same: a phone on mobile data receives twenty rows instead of
      * the whole caseload, and {@code X-Total-Count} finally means the number of matches rather than
      * the number of rows in the body.
+     *
+     * <h3>The one read here that tolerates a refusal (backlog item 107)</h3>
+     * <b>This is the clinician's first screen, and it is the method that must answer.</b> Three of the
+     * eight disciplines are refused a part of what it composes, permanently and by hc-patient's design,
+     * and until 2026-09-11 each of them got a 503 for the whole directory. So this method — alone among
+     * the reads in this class — catches a refusal, leaves the part out, and <em>names</em> it in the
+     * {@link Directory} it returns. It still raises for everything else: an outage, a schema drift, a
+     * budget, a page guard and a missing token are all failures to read something the caller is
+     * entitled to, and serving a partial directory for one of those is item 24's defect returning by
+     * the door this change opened. The two are told apart by
+     * {@link PatientServiceUnavailableException.Fault#isAuthorisationRefusal()} and by nothing else —
+     * never by a status, a message or a path.
+     *
+     * <p><b>The profile read is deliberately not in the tolerant set.</b> {@code /api/profiles} is
+     * where every row's substance comes from, so a caller refused it has no directory to be served a
+     * degraded version of — the honest answer is the refusal, not an empty list with a note attached.
+     * It is 200 for all eight disciplines today; the rule is stated because that is a fact about
+     * hc-patient's matrix and not a property of this code.
+     *
+     * @return the page, and the parts of it the caller's discipline may not read
      */
-    public Page<PatientListItem> directory(Pageable pageable, DirectoryFilter filter) {
+    public Directory directory(Pageable pageable, DirectoryFilter filter) {
         DirectoryFilter effective = filter == null ? DirectoryFilter.NONE : filter;
-        List<PatientListItem> matches = directory().stream().filter(effective::matches).toList();
+        // EnumSet, and declared as one rather than as a Set, which is load-bearing twice over.
+        //
+        // Iteration is declaration order, which is what makes the header byte-stable. And the static
+        // type selects EnumSet.copyOf(EnumSet) at the bottom of this method — the overload that cannot
+        // throw. Its Collection sibling rejects an empty argument it cannot infer an element type
+        // from, which is exactly the no-restrictions case, i.e. almost every request.
+        EnumSet<RestrictedPart> restrictions = EnumSet.noneOf(RestrictedPart.class);
+        List<PatientListItem> matches = withinScope(restrictions).stream().filter(effective::matches).toList();
 
+        // Sorting is validated before anything is sliced, and it throws — an unsortable property is a
+        // 400 whether or not a part was refused.
         List<PatientListItem> ordered = sort(matches, pageable.getSort());
+        Page<PatientListItem> page;
         if (pageable.isUnpaged()) {
-            return new PageImpl<>(ordered, pageable, ordered.size());
+            page = new PageImpl<>(ordered, pageable, ordered.size());
+        } else {
+            int from = (int) Math.min(pageable.getOffset(), ordered.size());
+            int to = Math.min(from + pageable.getPageSize(), ordered.size());
+            page = new PageImpl<>(ordered.subList(from, to), pageable, ordered.size());
         }
+        // NOT Set.copyOf, which was here until the review of this item and does NOT preserve order:
+        // for two elements it yields an ImmutableCollections.Set12 whose iteration order is decided by
+        // a per-JVM SALT. Measured on this project's JDK, ten JVM starts: six "caseAssignments,
+        // lastActivity" and four the other way, while EnumSet.copyOf held in all ten. The value would
+        // therefore have flipped between restarts of the api container and between replicas, under a
+        // javadoc promising it was stable — and the only input that reaches it is a technician with at
+        // least one task, who is refused both parts at once.
+        return new Directory(page, Collections.unmodifiableSet(EnumSet.copyOf(restrictions)));
+    }
 
-        int from = (int) Math.min(pageable.getOffset(), ordered.size());
-        int to = Math.min(from + pageable.getPageSize(), ordered.size());
-        return new PageImpl<>(ordered.subList(from, to), pageable, ordered.size());
+    /**
+     * The directory as far as the caller's discipline is permitted to see it, recording what it was not.
+     *
+     * <p>The mirror of {@link #directory()} — same composition, same order, same {@code isChild}
+     * arithmetic — differing only in that the two reads whose absence the list can survive are allowed
+     * to be refused. Both are expressed as a catch around the strict helper rather than as a second
+     * code path, so a change to how the directory is assembled cannot apply to one and miss the other.
+     */
+    private List<PatientListItem> withinScope(Set<RestrictedPart> restrictions) {
+        String professionalId = callerProfileId().orElse(null);
+        if (professionalId == null) {
+            return List.of();
+        }
+        Set<String> patientIds = patientIdsWithinScope(professionalId, restrictions);
+        if (patientIds.isEmpty()) {
+            return List.of();
+        }
+        return compose(patientIds, lastActivityWithinScope(restrictions));
+    }
+
+    /**
+     * The caseload union, or the task half of it when the sibling refuses the caller the case half.
+     *
+     * <p><b>Refusing to compute this is what took the directory down</b> (backlog item 107): a
+     * technician is refused {@code /api/clinical-cases} outright, so {@link #patientIdsFor} raised
+     * before a single row was composed. The fallback is strictly narrower than the union — dropping the
+     * case half can only remove patients — so it cannot be used to reach anybody, which is the whole
+     * reason it is admissible here and would not be in {@link #entitledCases}.
+     *
+     * <p>An outage is rethrown untouched. {@link #patientIdsFor}'s own javadoc argues why a partial
+     * entitlement set is not an entitlement set, and that argument is about a half that <em>exists and
+     * could not be read</em>; it does not transfer to a half the caller may never read, where the
+     * alternative is not "wait five minutes" but "no directory, ever".
+     */
+    private Set<String> patientIdsWithinScope(String professionalId, Set<RestrictedPart> restrictions) {
+        try {
+            return patientIdsFor(professionalId);
+        } catch (PatientServiceUnavailableException e) {
+            if (!e.fault().isAuthorisationRefusal()) {
+                throw e;
+            }
+            log.debug("Composing the directory without the case half: {}", e.getMessage());
+            restrictions.add(RestrictedPart.CASE_ASSIGNMENTS);
+            return patientIdsFromTasks(professionalId);
+        }
+    }
+
+    /** The recency ordering, or none of it when the caller may not read the activity log. See above. */
+    private Map<String, String> lastActivityWithinScope(Set<RestrictedPart> restrictions) {
+        try {
+            return lastActivityByPatient();
+        } catch (PatientServiceUnavailableException e) {
+            if (!e.fault().isAuthorisationRefusal()) {
+                throw e;
+            }
+            log.debug("Composing the directory without last-activity: {}", e.getMessage());
+            restrictions.add(RestrictedPart.LAST_ACTIVITY);
+            // Empty, and the marker above is what stops it being read as "nobody has been seen".
+            return Map.of();
+        }
     }
 
     /** Applies a whitelisted sort, or leaves the default newest-activity-first order in place. */
@@ -248,7 +461,14 @@ public class PatientDirectoryService {
         return patients.stream().sorted(comparator).toList();
     }
 
-    /** The clinician's patient directory, newest activity first. */
+    /**
+     * The clinician's patient directory, newest activity first — <b>the strict form</b>.
+     *
+     * <p>Every read it makes must succeed: a refusal raises here exactly as an outage does. That is
+     * what {@link #summary()} needs, because a count computed over a collection the caller was refused
+     * is a wrong number wearing the clothes of a fact (backlog item 107). The endpoint's form is
+     * {@link #directory(Pageable, DirectoryFilter)}, which tolerates a refusal and says so.
+     */
     public List<PatientListItem> directory() {
         String professionalId = callerProfileId().orElse(null);
         if (professionalId == null) {
@@ -258,7 +478,16 @@ public class PatientDirectoryService {
         if (patientIds.isEmpty()) {
             return List.of();
         }
-        Map<String, String> lastActivity = lastActivityByPatient();
+        return compose(patientIds, lastActivityByPatient());
+    }
+
+    /**
+     * Profiles plus recency into list rows, shared by the strict and the scoped forms.
+     *
+     * <p>One body rather than two so that the two directories cannot drift in what they show; they
+     * differ only in which reads they are willing to lose, which is decided before this is called.
+     */
+    private List<PatientListItem> compose(Set<String> patientIds, Map<String, String> lastActivity) {
         return profilesByPatientId(patientIds)
             .values()
             .stream()
@@ -902,6 +1131,14 @@ public class PatientDirectoryService {
     /**
      * The figures this service can answer alone: how many patients the clinician has, split by sex
      * and by child/adult. Case counts are patientservice's and are composed in the browser.
+     *
+     * <p><b>On the strict {@link #directory()}, deliberately, and so still a 503 for a discipline
+     * refused one of its parts</b> (backlog item 107). Every field here is a <em>count</em>, and
+     * {@code DashboardSummary} has nowhere to say that one is partial — so degrading would turn
+     * "your caseload could not be counted" into "you have three patients" when there are five, which
+     * is the conflation this item is about, in the one shape where nothing on screen could reveal it.
+     * The directory tolerates a refusal because it can name what is missing; this cannot, so it does
+     * not. That is a deliberate limit of this change rather than an oversight.
      */
     public DashboardSummary summary() {
         List<PatientListItem> directory = directory();

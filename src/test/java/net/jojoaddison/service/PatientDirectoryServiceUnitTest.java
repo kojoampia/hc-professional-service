@@ -387,6 +387,165 @@ class PatientDirectoryServiceUnitTest {
         assertThat(summary.kids()).isEqualTo(1);
     }
 
+    // --- A refusal is not an outage, and not an empty panel (backlog.md item 107) -------------
+
+    /**
+     * hc-patient answering <b>403</b>, which is what a pharmacist, a chemist or a technician gets from
+     * {@code /api/activity-logs} and a technician also gets from {@code /api/clinical-cases}.
+     *
+     * <p>Deliberately built from the {@code Fault} and not from a status, because that is the only
+     * thing the service under test is allowed to key on: classifying the status is
+     * {@code PatientServiceClient}'s job and is held by {@code PatientServiceFaultTest}, so a test here
+     * that constructed a 403 would be asserting two decisions through one another.
+     */
+    private static PatientServiceUnavailableException refused(String path) {
+        return PatientServiceUnavailableException.read(path, PatientServiceUnavailableException.Fault.UPSTREAM_FORBIDDEN, "Forbidden");
+    }
+
+    private static ActivityLog loggedFor(String id, String patientId) {
+        return new ActivityLog(
+            id,
+            patientId,
+            null,
+            Instant.parse("2026-09-10T08:00:00Z"),
+            "seen",
+            "detail",
+            "OBSERVATION",
+            "CLINICIAN",
+            PROFESSIONAL_ID,
+            LocalDate.of(2026, 9, 10)
+        );
+    }
+
+    /** One patient reached only by a task, one reached only by a case, and an activity for each. */
+    private void onePatientByTaskAndOneByCase() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task("p-task")));
+        when(patientService.clinicalCases()).thenReturn(List.of(aCase("c-1", "p-case", "OPEN", PROFESSIONAL_ID)));
+        when(patientService.profiles()).thenReturn(
+            List.of(
+                profile("p-task", "Task", "Patient", "female", LocalDate.of(1990, 1, 1)),
+                profile("p-case", "Case", "Patient", "male", LocalDate.of(1980, 1, 1))
+            )
+        );
+        when(patientService.activityLogs()).thenReturn(List.of(loggedFor("al-task", "p-task"), loggedFor("al-case", "p-case")));
+    }
+
+    /**
+     * <b>The positive control.</b> Five of the eight disciplines may read every part, and without this
+     * case a change that emptied the directory for everybody would look exactly like a pass on the two
+     * cases below — both of which assert that <em>something</em> survived a refusal, and both of which
+     * an always-empty directory would satisfy for the rows it no longer had to produce.
+     */
+    @Test
+    void aDisciplineEntitledToEveryPartGetsTheWholeDirectory() {
+        onePatientByTaskAndOneByCase();
+
+        PatientDirectoryService.Directory directory = service.directory(PageRequest.of(0, 20), DirectoryFilter.NONE);
+
+        assertThat(directory.page().getContent()).extracting(PatientListItem::id).containsExactlyInAnyOrder("p-task", "p-case");
+        assertThat(directory.page().getContent()).extracting(PatientListItem::lastActivityAt).doesNotContainNull();
+        assertThat(directory.restrictions()).isEmpty();
+    }
+
+    /**
+     * A pharmacist or a chemist: the activity log is refused, every patient is still theirs.
+     *
+     * <p>The restriction is asserted <em>beside</em> the rows, because a directory that came back
+     * without saying what was missing is the conflation this item exists to close — "no activity" and
+     * "not yours to see" are not the same sentence, and a null {@code lastActivityAt} alone says the
+     * first one.
+     */
+    @Test
+    void aDisciplineREFUSEDoneComposedPartStillGetsTheDirectory() {
+        onePatientByTaskAndOneByCase();
+        when(patientService.activityLogs()).thenThrow(refused("/api/activity-logs"));
+
+        PatientDirectoryService.Directory directory = service.directory(PageRequest.of(0, 20), DirectoryFilter.NONE);
+
+        assertThat(directory.page().getContent()).extracting(PatientListItem::id).containsExactlyInAnyOrder("p-task", "p-case");
+        assertThat(directory.restrictions()).containsExactly(PatientDirectoryService.RestrictedPart.LAST_ACTIVITY);
+        assertThat(directory.page().getContent()).extracting(PatientListItem::lastActivityAt).containsOnlyNulls();
+    }
+
+    /**
+     * A technician: the case collection itself is refused, so the caseload union loses a whole half.
+     *
+     * <p>Two assertions and the second matters as much as the first. The task half is served — that is
+     * the directory the item is about. The case-only patient is <b>absent</b>, because degrading may
+     * only ever make this list smaller: a fallback that invented an entitlement would be a far worse
+     * defect than the 503 it replaced.
+     */
+    @Test
+    void aREFUSEDcaseCollectionLeavesTheTASKhalfOfTheDirectory() {
+        onePatientByTaskAndOneByCase();
+        when(patientService.clinicalCases()).thenThrow(refused("/api/clinical-cases"));
+
+        PatientDirectoryService.Directory directory = service.directory(PageRequest.of(0, 20), DirectoryFilter.NONE);
+
+        assertThat(directory.page().getContent()).extracting(PatientListItem::id).containsExactly("p-task");
+        assertThat(directory.restrictions()).containsExactly(PatientDirectoryService.RestrictedPart.CASE_ASSIGNMENTS);
+    }
+
+    /**
+     * <b>The thing most at risk from this change.</b> A sibling that is genuinely broken must still be
+     * a 503 — the class javadoc's whole argument is that a clinician told "this patient is not yours"
+     * during an outage is worse off than one told to wait, and tolerating a refusal must not become
+     * tolerating that.
+     *
+     * <p>Both reads are exercised separately rather than together: one tolerant catch left too wide
+     * would be caught by either, but one of the two left wide would not.
+     */
+    @Test
+    void anOUTAGEonTheActivityLogIsStillA503_notADegradedDirectory() {
+        onePatientByTaskAndOneByCase();
+        when(patientService.activityLogs()).thenThrow(outage());
+
+        assertThatThrownBy(() -> service.directory(PageRequest.of(0, 20), DirectoryFilter.NONE)).isInstanceOf(
+            PatientServiceUnavailableException.class
+        );
+    }
+
+    @Test
+    void anOUTAGEonTheCaseCollectionIsStillA503_notATaskOnlyDirectory() {
+        onePatientByTaskAndOneByCase();
+        when(patientService.clinicalCases()).thenThrow(outage());
+
+        assertThatThrownBy(() -> service.directory(PageRequest.of(0, 20), DirectoryFilter.NONE)).isInstanceOf(
+            PatientServiceUnavailableException.class
+        );
+    }
+
+    /**
+     * The profile read is not in the tolerant set, and the rule is stated here rather than only in a
+     * javadoc: it supplies every row's substance, so a caller refused it has no directory to be handed
+     * a degraded version of. An empty list with a note attached would be the worse answer.
+     */
+    @Test
+    void aREFUSEDprofileReadIsStillA503_becauseThereIsNoDirectoryWithoutIt() {
+        onePatientByTaskAndOneByCase();
+        when(patientService.profiles()).thenThrow(refused("/api/profiles"));
+
+        assertThatThrownBy(() -> service.directory(PageRequest.of(0, 20), DirectoryFilter.NONE)).isInstanceOf(
+            PatientServiceUnavailableException.class
+        );
+    }
+
+    /**
+     * The summary does <b>not</b> degrade, and that is a decision rather than an omission.
+     *
+     * <p>Every field of {@code DashboardSummary} is a count and it has nowhere to say that one is
+     * partial, so tolerating a refusal there would turn "your caseload could not be counted" into a
+     * confident wrong number — the same conflation, in the one shape where nothing on screen could
+     * reveal it. Asserted so that a later change cannot route it through the tolerant path by accident.
+     */
+    @Test
+    void theSummaryDoesNOTdegradeOnARefusal() {
+        onePatientByTaskAndOneByCase();
+        when(patientService.activityLogs()).thenThrow(refused("/api/activity-logs"));
+
+        assertThatThrownBy(() -> service.summary()).isInstanceOf(PatientServiceUnavailableException.class);
+    }
+
     // --- Paging, filtering and sorting (web-mobile-port.md § Phase 1.1) -----------------------
 
     /** Three patients, deterministic names and demographics, for the paging tests below. */
@@ -407,7 +566,7 @@ class PatientDirectoryServiceUnitTest {
         // construction and could never tell a client there was another page.
         threePatients();
 
-        Page<PatientListItem> page = service.directory(PageRequest.of(0, 2), DirectoryFilter.NONE);
+        Page<PatientListItem> page = service.directory(PageRequest.of(0, 2), DirectoryFilter.NONE).page();
 
         assertThat(page.getContent()).hasSize(2);
         assertThat(page.getTotalElements()).isEqualTo(3);
@@ -418,7 +577,7 @@ class PatientDirectoryServiceUnitTest {
     void thePastTheEndPageIsEmptyRatherThanOutOfBounds() {
         threePatients();
 
-        Page<PatientListItem> page = service.directory(PageRequest.of(9, 2), DirectoryFilter.NONE);
+        Page<PatientListItem> page = service.directory(PageRequest.of(9, 2), DirectoryFilter.NONE).page();
 
         assertThat(page.getContent()).isEmpty();
         assertThat(page.getTotalElements()).isEqualTo(3);
@@ -429,7 +588,7 @@ class PatientDirectoryServiceUnitTest {
         // Otherwise the client pages through a phantom: 3 total, 1 row, no second page to fetch.
         threePatients();
 
-        Page<PatientListItem> page = service.directory(PageRequest.of(0, 20), new DirectoryFilter(null, "male", null));
+        Page<PatientListItem> page = service.directory(PageRequest.of(0, 20), new DirectoryFilter(null, "male", null)).page();
 
         assertThat(page.getContent()).extracting(PatientListItem::id).containsExactly("p-b");
         assertThat(page.getTotalElements()).isEqualTo(1);
@@ -439,10 +598,10 @@ class PatientDirectoryServiceUnitTest {
     void theQueryMatchesNameOrId_becauseAWristbandCarriesTheId() {
         threePatients();
 
-        assertThat(service.directory(PageRequest.of(0, 20), new DirectoryFilter("mensah", null, null)).getContent())
+        assertThat(service.directory(PageRequest.of(0, 20), new DirectoryFilter("mensah", null, null)).page().getContent())
             .extracting(PatientListItem::id)
             .containsExactly("p-a");
-        assertThat(service.directory(PageRequest.of(0, 20), new DirectoryFilter("P-C", null, null)).getContent())
+        assertThat(service.directory(PageRequest.of(0, 20), new DirectoryFilter("P-C", null, null)).page().getContent())
             .extracting(PatientListItem::id)
             .containsExactly("p-c");
     }
@@ -451,7 +610,7 @@ class PatientDirectoryServiceUnitTest {
     void childrenOnlyUsesTheAgeComputedPerRead() {
         threePatients();
 
-        Page<PatientListItem> page = service.directory(PageRequest.of(0, 20), new DirectoryFilter(null, null, true));
+        Page<PatientListItem> page = service.directory(PageRequest.of(0, 20), new DirectoryFilter(null, null, true)).page();
 
         assertThat(page.getContent()).extracting(PatientListItem::id).containsExactly("p-c");
     }
@@ -460,7 +619,7 @@ class PatientDirectoryServiceUnitTest {
     void filtersCOMBINE_theyDoNotWiden() {
         threePatients();
 
-        Page<PatientListItem> page = service.directory(PageRequest.of(0, 20), new DirectoryFilter("akosua", "male", null));
+        Page<PatientListItem> page = service.directory(PageRequest.of(0, 20), new DirectoryFilter("akosua", "male", null)).page();
 
         assertThat(page.getContent()).isEmpty();
     }
@@ -469,7 +628,7 @@ class PatientDirectoryServiceUnitTest {
     void aWhitelistedSortIsApplied() {
         threePatients();
 
-        Page<PatientListItem> page = service.directory(PageRequest.of(0, 20, Sort.by("patientName")), DirectoryFilter.NONE);
+        Page<PatientListItem> page = service.directory(PageRequest.of(0, 20, Sort.by("patientName")), DirectoryFilter.NONE).page();
 
         assertThat(page.getContent()).extracting(PatientListItem::patientName).isSorted();
     }
@@ -492,7 +651,7 @@ class PatientDirectoryServiceUnitTest {
         // summary() and any internal caller must not silently receive page 0 of 20.
         threePatients();
 
-        Page<PatientListItem> page = service.directory(Pageable.unpaged(), DirectoryFilter.NONE);
+        Page<PatientListItem> page = service.directory(Pageable.unpaged(), DirectoryFilter.NONE).page();
 
         assertThat(page.getContent()).hasSize(3);
         assertThat(page.getTotalElements()).isEqualTo(3);
@@ -502,7 +661,7 @@ class PatientDirectoryServiceUnitTest {
     void aNullFilterMeansNoFilter() {
         threePatients();
 
-        assertThat(service.directory(PageRequest.of(0, 20), null).getTotalElements()).isEqualTo(3);
+        assertThat(service.directory(PageRequest.of(0, 20), null).page().getTotalElements()).isEqualTo(3);
     }
 
     // --- Writes (web-mobile-port.md § Phase 1.3) ----------------------------------------------
