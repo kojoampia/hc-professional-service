@@ -32,6 +32,9 @@
       "fieldType": "String"
     }
   ],
+  "fieldsThisFormatCannotExpress": {
+    "members": "Team.members is a List<String>. JDL has no collection-of-scalar field type at all (generator-jhipster/jdl/jhipster/field-types.js, CommonDBTypes), so the String above understates it by one dimension rather than describing it. Regenerating Team emits String and a team stops being able to hold more than one person."
+  },
   "microserviceName": "hcprofessionalService",
   "name": "Team",
   "pagination": "no",

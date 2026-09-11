@@ -42,6 +42,9 @@
       "fieldType": "String"
     }
   ],
+  "fieldsThisFormatCannotExpress": {
+    "visits": "DutyRoster.visits is a List<Visit> — the round DR2 added, with the customer snapshot docs/duty-roster.md § 6 governs. It is absent from the fields above rather than approximated, because there is nothing to approximate it with: JDL's field vocabulary (generator-jhipster/jdl/jhipster/field-types.js, CommonDBTypes) is scalar only, Visit is an embedded value type with no @Document and no repository, and a MongoDB relationship would emit a DBRef into a collection that does not exist. Regenerating DutyRoster drops the round entirely, along with the customer_date_idx index that serves the patient day plan."
+  },
   "microserviceName": "professionalService",
   "name": "DutyRoster",
   "pagination": "pagination",
