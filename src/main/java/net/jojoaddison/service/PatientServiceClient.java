@@ -682,7 +682,19 @@ public class PatientServiceClient {
      */
     private PatientServiceUnavailableException failedRead(String path, int rowsSeen, Exception failure) {
         PatientServiceUnavailableException.Fault fault = PatientServiceUnavailableException.Fault.of(failure);
-        if (fault.clearsOnRetry()) {
+        if (fault.isAuthorisationRefusal()) {
+            // Routine, and nobody's fault: the sibling's scope of practice does not admit this
+            // caller's discipline, and it will not admit it tomorrow either. Logged at INFO without
+            // the throwable — ERROR is what the `clearsOnRetry() == false` arm below would have given
+            // it, which would page an operator once per request per pharmacist about a rule working
+            // exactly as designed. Backlog item 107.
+            LOG.info(
+                "patientservice refused this caller's role on {} [{}]; not an outage and not a defect — the composed read decides " +
+                "whether it can answer without this part",
+                path,
+                fault
+            );
+        } else if (fault.clearsOnRetry()) {
             LOG.warn(
                 "patientservice read of {} failed after {} row(s) [{}]; the caller decides what that means",
                 path,
@@ -735,7 +747,11 @@ public class PatientServiceClient {
      */
     private RuntimeException failedWrite(String path, RestClientException failure) {
         PatientServiceUnavailableException.Fault fault = PatientServiceUnavailableException.Fault.of(failure);
-        if (fault.clearsOnRetry()) {
+        if (fault.isAuthorisationRefusal()) {
+            // Same reasoning as failedRead: a refusal is a rule, not a fault. The 403 itself still
+            // travels to the caller intact through the pass-through below — only the log level moves.
+            LOG.info("patientservice refused this caller's role on a write to {} [{}]", path, fault);
+        } else if (fault.clearsOnRetry()) {
             LOG.warn("patientservice write to {} failed [{}]", path, fault, failure);
         } else {
             LOG.error("patientservice write to {} failed [{}: {}]; this does NOT clear itself", path, fault, fault.description(), failure);

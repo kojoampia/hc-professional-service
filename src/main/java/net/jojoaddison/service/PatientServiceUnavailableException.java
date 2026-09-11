@@ -53,15 +53,42 @@ public class PatientServiceUnavailableException extends RuntimeException {
     /**
      * Why the call did not happen — and, above all, whether waiting is the remedy.
      *
-     * <p>Every value is a 503 to the caller. The distinction is for whoever is paged: {@link #SCHEMA}
-     * and {@link #NO_TOKEN} do not clear on their own and want a change to this service or its
-     * configuration, while the rest are the sibling or the network being temporarily unhappy.
+     * <p>Every value is a 503 to the caller. The distinction is for whoever is paged: {@link #SCHEMA},
+     * {@link #NO_TOKEN} and {@link #UPSTREAM_FORBIDDEN} do not clear on their own, while the rest are
+     * the sibling or the network being temporarily unhappy.
+     *
+     * <p><strong>The three that do not clear are not three of a kind, which is why
+     * {@link #isAuthorisationRefusal()} exists beside {@link #clearsOnRetry()}</strong> (backlog item
+     * 107). {@code SCHEMA} and {@code NO_TOKEN} want a change to <em>this</em> service before the read
+     * can ever work; {@code UPSTREAM_FORBIDDEN} wants no change at all, because nothing is broken — the
+     * sibling read the request, understood it, and refused this caller's discipline. Reporting it the
+     * way the other two are reported would page somebody about a rule working as designed.
      */
     public enum Fault {
         /** The request never got an answer: DNS, connection refused, a read timeout on one page. */
         TRANSPORT("the sibling could not be reached", true),
         /** The sibling answered, with a status this client cannot use. */
         UPSTREAM_STATUS("the sibling answered an error status", true),
+        /**
+         * The sibling answered <b>403</b>: its scope of practice does not admit this caller's role.
+         *
+         * <p><b>Split out of {@link #UPSTREAM_STATUS} by backlog item 107</b>, which found it live:
+         * {@code GET /api/patients} answered 503 for a pharmacist, a chemist and a technician with the
+         * body <em>"UPSTREAM_STATUS - the sibling answered an error status; may clear on retry
+         * [Forbidden]"</em>. Every clause of that was misleading. hc-patient owns the scope-of-practice
+         * matrix and those three disciplines have no scope over its activity-log domain, so the 403 is
+         * correct, deliberate, permanent, and identical on every retry for ever. An operator handed
+         * <em>"may clear on retry"</em> retries, then checks the network, then the sibling's health —
+         * three places, none of them the answer.
+         *
+         * <p><b>401 is deliberately not this.</b> It does not mean the caller's role was refused — this
+         * service already authenticated them — it means the token this service <em>relayed</em> was not
+         * accepted over there, which in practice is the shared signing key having drifted between the
+         * stacks. That is an estate fault and stays {@link #UPSTREAM_STATUS}; see
+         * {@code PatientServiceClient.failedWrite}, which has treated 401 as the exception to its own
+         * pass-through rule since 2026-09-07 for the same reason.
+         */
+        UPSTREAM_FORBIDDEN("the sibling's scope of practice does not admit this caller's role", false),
         /** The whole-collection wall-clock deadline ran out mid-read. */
         BUDGET_EXHAUSTED("the read budget was exhausted", true),
         /** The runaway page guard tripped: the collection is larger than this client will read. */
@@ -97,6 +124,23 @@ public class PatientServiceUnavailableException extends RuntimeException {
         }
 
         /**
+         * Whether the sibling <em>refused</em> this caller rather than failing to answer them.
+         *
+         * <p>Two callers ask. {@code PatientServiceClient.failedRead} and {@code failedWrite} ask so
+         * that a rule working as designed is not logged as a fault of anybody's; and
+         * {@code PatientDirectoryService} asks so that a part of a composed read the caller may never
+         * see can be reported as not-permitted instead of taking the whole read down with it. Both
+         * want <em>this</em> question and not {@link #clearsOnRetry()}, which a refusal shares with
+         * {@link #SCHEMA} while meaning something else entirely.
+         *
+         * <p>A predicate rather than an equality test at each site, so that a second refusal-shaped
+         * status can join it here rather than in two {@code if}s and a service.
+         */
+        public boolean isAuthorisationRefusal() {
+            return this == UPSTREAM_FORBIDDEN;
+        }
+
+        /**
          * What a throwable from {@code RestClient} actually was.
          *
          * <p>Walks the cause chain rather than switching on the top type, because the one that
@@ -108,6 +152,14 @@ public class PatientServiceUnavailableException extends RuntimeException {
          *
          * <p>The depth cap is not paranoia about this client's own exceptions; it is what makes a
          * self-referencing cause chain from any library below impossible to hang on.
+         *
+         * <p><b>An answered status is read for which status it was</b> (backlog item 107). Every one
+         * of them classified as {@link #UPSTREAM_STATUS} until 2026-09-11, so a 403 — a permanent
+         * decision about who is asking — carried the same retryability as a 502. The one status split
+         * out is 403, deliberately: it is the only one that means <em>the sibling understood the
+         * request and will not serve this caller</em>. A 400 or a 404 is also unlikely to clear on its
+         * own, but both mean this client is asking wrongly, which is a defect to find rather than a
+         * rule to report, and neither has been observed here.
          */
         public static Fault of(Throwable failure) {
             Throwable current = failure;
@@ -118,8 +170,8 @@ public class PatientServiceUnavailableException extends RuntimeException {
                 if (current instanceof ResourceAccessException) {
                     return TRANSPORT;
                 }
-                if (current instanceof RestClientResponseException) {
-                    return UPSTREAM_STATUS;
+                if (current instanceof RestClientResponseException answered) {
+                    return HttpStatus.FORBIDDEN.isSameCodeAs(answered.getStatusCode()) ? UPSTREAM_FORBIDDEN : UPSTREAM_STATUS;
                 }
                 if (current instanceof IOException) {
                     return TRANSPORT;
