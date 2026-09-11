@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.Period;
 import java.time.ZoneOffset;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashSet;
@@ -197,6 +198,17 @@ public class PatientDirectoryService {
      *
      * <p>{@link #token()} is what reaches the wire, so the enum can be renamed without breaking a
      * client and a client-facing name never has to be spelled twice.
+     *
+     * <p><b>These name what was refused <em>during this read</em>, not what the caller may never
+     * see.</b> The difference is reachable and worth knowing before building anything on it:
+     * {@link #withinScope} returns early when the caller has no patients at all, before the activity
+     * log is ever asked for — so a technician with no tasks is answered {@code caseAssignments} alone,
+     * while the same technician with one task is answered both, although their discipline is refused
+     * the activity log in either case. The set therefore varies with caseload as well as with
+     * discipline. It is the honest report of one read and it is deliberately not a capability list:
+     * a client rendering a per-discipline badge from it would watch the badge change when a shift was
+     * assigned. Asking hc-patient what a discipline may read is a different question, and nothing in
+     * this stack can answer it — the scope-of-practice matrix lives over there.
      */
     public enum RestrictedPart {
         /**
@@ -236,7 +248,9 @@ public class PatientDirectoryService {
      * break both on the deploy that shipped it, and neither is this item's to change.
      *
      * @param restrictions empty for the five disciplines that may read every part, which is the
-     *     ordinary case and the one nothing should pay for.
+     *     ordinary case and the one nothing should pay for. <b>Iterates in {@link RestrictedPart}
+     *     declaration order</b>, which the header rendered from it is a contract about — see the
+     *     comment where it is built, and do not pass a general-purpose {@code Set} in here.
      */
     public record Directory(Page<PatientListItem> page, Set<RestrictedPart> restrictions) {}
 
@@ -334,9 +348,13 @@ public class PatientDirectoryService {
      */
     public Directory directory(Pageable pageable, DirectoryFilter filter) {
         DirectoryFilter effective = filter == null ? DirectoryFilter.NONE : filter;
-        // EnumSet: iteration is declaration order, so the header a client reads is stable rather than
-        // reshuffling per request the way a HashSet of two values eventually would.
-        Set<RestrictedPart> restrictions = EnumSet.noneOf(RestrictedPart.class);
+        // EnumSet, and declared as one rather than as a Set, which is load-bearing twice over.
+        //
+        // Iteration is declaration order, which is what makes the header byte-stable. And the static
+        // type selects EnumSet.copyOf(EnumSet) at the bottom of this method — the overload that cannot
+        // throw. Its Collection sibling rejects an empty argument it cannot infer an element type
+        // from, which is exactly the no-restrictions case, i.e. almost every request.
+        EnumSet<RestrictedPart> restrictions = EnumSet.noneOf(RestrictedPart.class);
         List<PatientListItem> matches = withinScope(restrictions).stream().filter(effective::matches).toList();
 
         // Sorting is validated before anything is sliced, and it throws — an unsortable property is a
@@ -350,7 +368,14 @@ public class PatientDirectoryService {
             int to = Math.min(from + pageable.getPageSize(), ordered.size());
             page = new PageImpl<>(ordered.subList(from, to), pageable, ordered.size());
         }
-        return new Directory(page, Set.copyOf(restrictions));
+        // NOT Set.copyOf, which was here until the review of this item and does NOT preserve order:
+        // for two elements it yields an ImmutableCollections.Set12 whose iteration order is decided by
+        // a per-JVM SALT. Measured on this project's JDK, ten JVM starts: six "caseAssignments,
+        // lastActivity" and four the other way, while EnumSet.copyOf held in all ten. The value would
+        // therefore have flipped between restarts of the api container and between replicas, under a
+        // javadoc promising it was stable — and the only input that reaches it is a technician with at
+        // least one task, who is refused both parts at once.
+        return new Directory(page, Collections.unmodifiableSet(EnumSet.copyOf(restrictions)));
     }
 
     /**
