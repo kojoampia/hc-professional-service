@@ -1079,15 +1079,30 @@ class PatientDirectoryServiceUnitTest {
      *
      * <p>Staged by stubbing the scoped call with a row belonging to somebody else, which is precisely
      * what an ignored parameter looks like from this side.
+     *
+     * <p><b>The third arm is {@code caseDetail}, added after review.</b> Backlog item 82 moved that
+     * path onto its own read and its own copy of the rule, and its in-method {@code patientId} filter
+     * carried a comment claiming it was load-bearing "for the same reason it is there" — while this
+     * test, the one holding that reason, covered only the two calls above. Deleting the filter from
+     * {@code caseDetail} reddened nothing. Without it, a sibling that ignored {@code patientId} would
+     * have {@code assignedToMeLive} computed over the <em>estate's</em> cases, and any clinician
+     * holding one live case anywhere could read any case by naming any patient id.
      */
     @Test
     void aSIBLINGthatIGNOREDtheFilterCouldNotWidenTheCaseload() {
         when(patientService.clinicalCases(anyString())).thenReturn(List.of(aCase("c-mine", MINE, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.casesIncludingArchived(anyString())).thenReturn(List.of(aCase("c-mine", MINE, "OPEN", PROFESSIONAL_ID)));
 
         assertThatThrownBy(() -> service.casesFor("p-not-mine", PageRequest.of(0, 20))).isInstanceOf(
             PatientDirectoryService.PatientNotInCaseloadException.class
         );
         assertThatThrownBy(() -> service.appendActivity("p-not-mine", new CreateActivity("s", "d", null, null))).isInstanceOf(
+            PatientDirectoryService.PatientNotInCaseloadException.class
+        );
+        // The case really is readable — under its own patient. What must not happen is it answering
+        // for a patient the caller named and has no tie to.
+        assertThat(service.caseDetail(MINE, "c-mine").id()).isEqualTo("c-mine");
+        assertThatThrownBy(() -> service.caseDetail("p-not-mine", "c-mine")).isInstanceOf(
             PatientDirectoryService.PatientNotInCaseloadException.class
         );
         verify(patientService, org.mockito.Mockito.never()).createActivityLog(any());
@@ -1199,6 +1214,49 @@ class PatientDirectoryServiceUnitTest {
         assertThatThrownBy(() -> service.caseDetail("p-other", "c-theirs")).isInstanceOf(
             PatientDirectoryService.PatientNotInCaseloadException.class
         );
+    }
+
+    /**
+     * <b>G1: entitled by a live case of my own, reading this patient's OTHER archived case.</b>
+     *
+     * <p>The case belongs to a different clinician, so {@code thisCaseIsMine} is false and only the
+     * {@code assignedToMeLive} arm can serve this — which is the point. This grant is not incidental:
+     * patientservice gates {@code /archive} on doctor alone, so the clinician who retires a case is
+     * frequently not its assignee, and without this arm the motivating scenario 404s for the very
+     * person who archived it.
+     *
+     * <p><b>Added after review.</b> {@code caseDetail} no longer routes through
+     * {@code requireEntitlement}, so its copy of the caseload rule is exercised only from here.
+     * Deleting <em>both</em> caseload arms — leaving {@code return thisCaseIsMine} — left the whole
+     * suite green at 57/57 before this test and the one below existed.
+     */
+    @Test
+    void aCallerEntitledByTheirOwnLIVEcaseReadsThePatientsOTHERarchivedCase() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of());
+        when(patientService.casesIncludingArchived(MINE)).thenReturn(
+            List.of(aCase("c-mine-live", MINE, "OPEN", PROFESSIONAL_ID), anArchivedCase("c-theirs-old", MINE, "another-doctor"))
+        );
+
+        assertThat(service.caseDetail(MINE, "c-theirs-old").id()).isEqualTo("c-theirs-old");
+    }
+
+    /**
+     * <b>G2: entitled by a TASK alone — no case of mine at all, live or archived.</b>
+     *
+     * <p>The caseload union has two halves and a clinician can be scheduled against a patient who has
+     * no case assigned to them. The live case here belongs to someone else, so neither
+     * {@code assignedToMeLive} nor {@code thisCaseIsMine} can serve it: only {@code scheduledWith} can.
+     *
+     * <p>Paired with the case above so that the two caseload arms are covered <em>separately</em> —
+     * one test covering both would go green again the moment somebody deleted the other arm, which is
+     * precisely the silent drift this pair exists to catch.
+     */
+    @Test
+    void aCallerEntitledByATASKaloneReadsThePatientsCase() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task(MINE)));
+        when(patientService.casesIncludingArchived(MINE)).thenReturn(List.of(aCase("c-theirs-live", MINE, "OPEN", "another-doctor")));
+
+        assertThat(service.caseDetail(MINE, "c-theirs-live").id()).isEqualTo("c-theirs-live");
     }
 
     /**

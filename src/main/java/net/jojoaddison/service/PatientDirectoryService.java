@@ -593,20 +593,44 @@ public class PatientDirectoryService {
      * archived row in place until the next refresh, so tapping it in that window is ordinary use; it
      * answered "this case could not be opened".
      *
-     * <h3>What it does not widen, which is the part to keep</h3>
-     * The caseload rule is unchanged and is still computed over <b>live</b> rows: a clinician outside
-     * it gets the same 404 as before, so this cannot be used to read an arbitrary case by guessing an
-     * id. One entitlement is added and it is deliberately the narrowest one that keeps the promise —
-     * <b>a case that names the caller as its assigned professional may be read back by them</b>, live
-     * or archived. A clinician does not lose the record of their own work because the episode closed.
+     * <h3>Exactly what is now readable that was not — three grants, not one</h3>
+     * An earlier draft of this paragraph said "one entitlement is added and it is deliberately the
+     * narrowest one". <b>That understated it, and on a permission change the javadoc is the record.</b>
+     * The caseload rule is unchanged in its own terms, but it is now evaluated against a list that
+     * <em>contains archived rows</em>, so what a caller who passes it can reach has grown too:
      *
-     * <p>What was rejected is the wider reading of the same idea: computing the ordinary
-     * patient-level entitlement over archived rows too. That would let a clinician whose last case with
-     * a patient was archived go on reading that patient's <em>current</em> cases, written by whoever
-     * has them now — continuing access to a record after involvement ended, which is a product decision
-     * nobody has taken and not one to smuggle in under a javadoc correction. Nothing else moves either:
-     * {@link #record}, {@link #casesFor}, {@link #updateCase} and both writes keep the live-only read,
-     * so an archived case is readable and is not editable, and its patient's record does not open.
+     * <ul>
+     *   <li><b>G1 — entitled by a live assigned case:</b> a clinician with a live case of their own on
+     *       this patient can now read <em>every archived case of that patient</em>, including ones
+     *       assigned to somebody else.
+     *   <li><b>G2 — entitled by a task:</b> the same, for a clinician whose tie to the patient is a
+     *       scheduled visit rather than a case. Concretely: a nurse with a current visit on this
+     *       patient can open a case a different doctor archived months ago and read its title, brief,
+     *       symptoms and diagnosis. Before this change that was a 404.
+     *   <li><b>G3 — the case names the caller:</b> a case whose {@code assignedProfessionalId} is the
+     *       caller's may be read back by them, live or archived, with no other tie to the patient.
+     * </ul>
+     *
+     * <p><b>G1 and G2 are not incidental and the promise cannot be kept without them.</b>
+     * patientservice gates {@code /archive} on doctor alone, so the clinician who retires a case is
+     * frequently <em>not</em> its assignee — under G3 by itself the motivating scenario would still
+     * 404 for the very person who archived it. They are also hc-patient's own posture: its
+     * {@code GET /clinical-cases/&#123;id&#125;} serves an archived case to anyone its
+     * {@code patientScope} admits, and this service's caseload rule is the narrower of the two.
+     *
+     * <h3>What it still does not widen</h3>
+     * A caller outside the caseload gets the same 404 as before, so this cannot be used to read an
+     * arbitrary case by guessing an id; the three grants above all require a tie to <em>this patient</em>
+     * that the caller already had. Nothing else moves either: {@link #record}, {@link #casesFor},
+     * {@link #updateCase} and both writes keep the live-only read, so an archived case is readable and
+     * is not editable, and its patient's record does not open.
+     *
+     * <p>And what was rejected is the wider reading again: computing {@code assignedToMeLive} over
+     * archived rows too. That would let a clinician whose last case with a patient was archived go on
+     * reading that patient's <em>current</em> cases, written by whoever has them now — continuing
+     * access to a record after involvement ended, which is a product decision nobody has taken and not
+     * one to smuggle in under a javadoc correction. It is one predicate away and
+     * {@code readingBackMYarchivedCaseIsNOTcontinuingAccessToThePatient} is what keeps it away.
      */
     public CaseDetail caseDetail(String patientId, String caseId) {
         String professionalId = callerProfileId().orElse(null);
@@ -648,17 +672,26 @@ public class PatientDirectoryService {
     }
 
     /**
-     * Whether this caller may read this one case (backlog item 82).
+     * Whether this caller may read this one case (backlog item 82) — the three grants
+     * {@link #caseDetail}'s javadoc names, in the order they are evaluated.
      *
-     * <p>Two rules, and the first is the ordinary one: the caller is in the caseload for this patient.
-     * It is evaluated over <b>live rows only</b>, which is what {@link #entitledCases} evaluates —
-     * fetching archived rows above changes which case can be <em>found</em>, and deliberately not who
-     * is entitled to the patient.
+     * <p><b>{@code assignedToMeLive} and {@code scheduledWith} are the ordinary caseload rule</b>, and
+     * it is the same rule {@link #entitledCases} applies: the case half over <b>live rows only</b>
+     * ({@code archivedAt == null}, which is the sibling's own definition of live — its non-archived
+     * branch queries {@code findByPatientIdAndArchivedAtIsNull}), the task half identical. Fetching
+     * archived rows above therefore changes which case can be <em>found</em> and not who is entitled to
+     * the patient — but because {@code found} may now be an archived row, passing this rule reaches
+     * further than it did: that is G1 and G2, and they are stated there rather than buried here.
      *
-     * <p>The second is the narrow addition: the case itself names the caller as its assigned
-     * professional. For a live case that is already covered by the first rule, so this only ever grants
-     * an archived case to the clinician it was assigned to — which is the whole of the promise this
-     * method's javadoc makes, and nothing beyond it.
+     * <p><b>{@code thisCaseIsMine} is the addition</b> (G3). For a live case it is already covered by
+     * the first arm, so it only ever grants an <em>archived</em> case to the clinician it was assigned
+     * to, with no other tie to the patient.
+     *
+     * <p><b>This is a duplicate of {@link #entitledCases}'s rule and duplicates drift.</b> It is
+     * deliberate — see {@link #requireEntitlement} for why parameterising that method was rejected —
+     * and the cost is that narrowing the rule there no longer narrows it here, or the reverse. Both
+     * caseload arms are covered by tests of their own for exactly that reason; deleting either one
+     * reddens a case that names it.
      */
     private boolean mayRead(String professionalId, String patientId, ClinicalCase found, List<ClinicalCase> cases) {
         boolean assignedToMeLive = cases
