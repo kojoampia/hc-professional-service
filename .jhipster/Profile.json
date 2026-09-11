@@ -14,6 +14,18 @@
       "fieldValidateRules": ["unique"]
     },
     {
+      "fieldName": "pushMessagesEnabled",
+      "fieldType": "Boolean"
+    },
+    {
+      "fieldName": "pushComplianceEnabled",
+      "fieldType": "Boolean"
+    },
+    {
+      "fieldName": "pushShowSenderName",
+      "fieldType": "Boolean"
+    },
+    {
       "fieldName": "firstName",
       "fieldType": "String"
     },
@@ -86,6 +98,11 @@
       "fieldType": "String"
     }
   ],
+  "fieldsThisFormatCannotExpress": {
+    "address": "Profile.address is an embedded Address document. The declaration above says String because that is the nearest thing JDL has: its field vocabulary (generator-jhipster/jdl/jhipster/field-types.js, CommonDBTypes) is scalar only, and a MongoDB relationship would emit a DBRef into another collection rather than an embedded object. Regenerating Profile emits String and breaks every consumer of the nested fields.",
+    "emergencyContact": "Profile.emergencyContact is an embedded EmergencyContact, which is a value type with no @Document, no repository and no definition file of its own. Same reason as address: there is no JDL for it, and the String above is an approximation rather than a description.",
+    "teamIds": "Profile.teamIds is a List<String>. JDL has no collection-of-scalar field type at all, so the String above understates it by one dimension. Regenerating Profile emits String, and a clinician stops being able to belong to more than one team."
+  },
   "microserviceName": "professionalMS",
   "name": "Profile",
   "pagination": "pagination",

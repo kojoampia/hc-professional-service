@@ -51,8 +51,11 @@ import org.springframework.test.web.servlet.MockMvc;
  * <p><b>The last test is the one that will still be right next year.</b> The seven named tests pin
  * today's seven; {@link #everyProfileFieldIsEitherAppliedOrRefused} reflects over {@code Profile}
  * and requires an answer for <em>every</em> field, so a field added later — or restored by a
- * regeneration, since {@code .jhipster/Profile.json} lists four of the seven and would re-emit them
- * into {@code partialUpdate} — fails here until somebody decides which side it falls on. That is the
+ * regeneration, since {@code .jhipster/Profile.json} lists all seven and would re-emit them into
+ * {@code partialUpdate} — fails here until somebody decides which side it falls on. (It listed
+ * <em>four</em> of the seven until backlog.md item 21 added the three push preferences that file had
+ * been missing since MOB9, so the regeneration hazard named here is now larger than when it was
+ * written, not smaller.) That is the
  * same reasoning as {@code TechnicalStructureTest.locationHeadersAreBuiltFromTheRequest}: a rule that
  * needs no maintained list cannot be outgrown by a list nobody updated.
  *

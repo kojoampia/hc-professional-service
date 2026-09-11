@@ -48,6 +48,12 @@ import org.junit.jupiter.api.Test;
  * <p><b>Order is part of the contract</b>, not only membership — the generator emits the constants in
  * the order {@code fieldValues} lists them, so a set comparison would pass on an input that
  * regenerates a differently-ordered enum.
+ *
+ * <p><b>This test covers enum values and nothing else</b>, and saying so is the point: it passed
+ * throughout the drift that became backlog.md item 21, where {@code DutyRoster.json} had no
+ * {@code visits} and {@code Profile.json} had none of MOB9's push preferences. The field half is
+ * {@code net.jojoaddison.domain.JhipsterEntityFieldsTest}, a sibling rather than an extension of this
+ * one, because they are different claims about the same input.
  */
 class JhipsterEnumFieldValuesTest {
 
