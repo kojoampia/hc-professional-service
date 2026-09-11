@@ -83,6 +83,13 @@ import org.springframework.web.server.ResponseStatusException;
  * filter ~1260 cases, ~600 profiles and every activity log in the estate down to one person's, in
  * memory, having paged all of it across the wire first.
  *
+ * <p><strong>Clinical cases come in a third form, and it is the exception that states the rule.</strong>
+ * {@link #casesIncludingArchived(String)} sends {@code includeArchived=true}; every other read here
+ * leaves the sibling's default of false alone, so retired cases stay out of the queue, out of a
+ * patient's case list and out of the caseload union. Exactly one caller wants them —
+ * {@code PatientDirectoryService.caseDetail}, reading one case back by id — and backlog item 82 is the
+ * argument for why that one is different.
+ *
  * <p><strong>Known limit, and it is still deliberate.</strong> Those endpoints offer no
  * clinician-scoped filter — no {@code assignedProfessionalId}, no <em>set</em> of patient ids — so
  * the two reads whose subject is a whole caseload ({@code PatientDirectoryService.directory} and
@@ -299,6 +306,30 @@ public class PatientServiceClient {
      */
     public List<ClinicalCase> clinicalCases(String patientId) {
         return getAll("/api/clinical-cases", CASE_LIST, patientId);
+    }
+
+    /**
+     * One patient's clinical cases, <b>archived rows included</b> — the only read here that asks for
+     * them (backlog item 82).
+     *
+     * <p>The sibling's {@code includeArchived} defaults to false and every other read here leaves it
+     * alone, which is right for a list: retiring a case is exactly the act of taking it out of the
+     * working queue. It is wrong for reading one case back, and hc-patient says so on the endpoint
+     * itself — <em>"They are excluded from the list, not hidden: GET /&#123;id&#125; still returns an
+     * archived case, so a link or a bookmark to one keeps working and nothing has to be un-archived
+     * merely to be read."</em> This service was the only thing in the estate that did not honour that,
+     * because it reads cases as a list and never by id.
+     *
+     * <p><b>It is not a substitute for {@link #clinicalCases(String)} and must not become one.</b>
+     * Everything that answers with a <em>set</em> of cases — the queue, a patient's case list, the
+     * caseload union — means live cases, and swapping this in would resurrect retired cases on four
+     * screens at once. {@code PatientDirectoryService.caseDetail} is the single caller by design.
+     *
+     * @param patientId the patient to scope to; {@code null} or blank reads the whole collection.
+     * @throws PatientServiceUnavailableException if the read could not be made
+     */
+    public List<ClinicalCase> casesIncludingArchived(String patientId) {
+        return getAll("/api/clinical-cases", CASE_LIST, patientId, Map.of("includeArchived", "true"));
     }
 
     /** @throws PatientServiceUnavailableException if the collection could not be read */
@@ -519,6 +550,28 @@ public class PatientServiceClient {
      * blank id before they get this far; this is the second of the two.
      */
     private <T extends PatientServiceRow> List<T> getAll(String path, ParameterizedTypeReference<List<T>> type, String patientId) {
+        return getAll(path, type, patientId, Map.of());
+    }
+
+    /**
+     * The same read, with extra query parameters appended to every page request.
+     *
+     * <p>One caller and one parameter today — {@code includeArchived=true}, for
+     * {@link #casesIncludingArchived(String)}. A map rather than a boolean because a boolean on a
+     * method generic over five collections would read as a property of all of them, and this is a
+     * property of one endpoint; the map is empty for everything else and the request is then byte for
+     * byte what it was.
+     *
+     * <p>Everything the javadoc above says still holds: these parameters change <em>what is read</em>
+     * and nothing else — the read pages, dedupes, sorts, budgets and fails identically, so a caller
+     * asking a wider question does not learn a different vocabulary of answers (backlog item 24).
+     */
+    private <T extends PatientServiceRow> List<T> getAll(
+        String path,
+        ParameterizedTypeReference<List<T>> type,
+        String patientId,
+        Map<String, String> extraParams
+    ) {
         if (!enabled) {
             return List.of();
         }
@@ -545,7 +598,7 @@ public class PatientServiceClient {
                         "%ds, after %d page(s) and %d row(s)".formatted(readBudget.toSeconds(), page, rows.size())
                     );
                 }
-                List<T> batch = getPage(path, type, token, page, scope);
+                List<T> batch = getPage(path, type, token, page, scope, extraParams);
                 if (batch == null || batch.isEmpty()) {
                     return List.copyOf(rows.values());
                 }
@@ -708,8 +761,20 @@ public class PatientServiceClient {
      * that returns the identical answer, more expensively, having pulled an estate-wide collection to
      * do it. That is backlog item 23's whole shape, and it is invisible to any assertion made on the
      * result.
+     *
+     * <p>{@code extraParams} is the third of those, and the most invisible of the three:
+     * {@code includeArchived=true} is the difference between a case a clinician can read back and a
+     * 404, and dropping it changes no signature, no type and no test that looks only at what came back
+     * from a stub. Backlog item 82; asserted by the same test, on the same argument.
      */
-    private <T> List<T> getPage(String path, ParameterizedTypeReference<List<T>> type, String token, int page, String patientId) {
+    private <T> List<T> getPage(
+        String path,
+        ParameterizedTypeReference<List<T>> type,
+        String token,
+        int page,
+        String patientId,
+        Map<String, String> extraParams
+    ) {
         return restClient
             .get()
             .uri(uriBuilder -> {
@@ -717,6 +782,7 @@ public class PatientServiceClient {
                 if (patientId != null) {
                     uriBuilder.queryParam("patientId", patientId);
                 }
+                extraParams.forEach(uriBuilder::queryParam);
                 return uriBuilder.build();
             })
             .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)

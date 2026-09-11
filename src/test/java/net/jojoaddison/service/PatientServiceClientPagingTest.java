@@ -485,6 +485,52 @@ class PatientServiceClientPagingTest {
         assertThat(queriesSeen).allSatisfy(query -> assertThat(query).doesNotContain("patientId"));
     }
 
+    // --- Archived rows are asked for exactly once, and by one read (backlog.md item 82) ----------
+
+    /**
+     * The detail read tells the sibling to include archived cases.
+     *
+     * <p>Asserted on the request for the same reason as the pair above, and more sharply: the fake
+     * sibling here serves the same rows either way, so <b>every assertion on the result passes with
+     * the parameter deleted</b> — and against the real sibling deleting it is the difference between a
+     * case a clinician can read back and the 404 item 82 exists to close. It is a query parameter on a
+     * URI builder: no signature changes, nothing stops compiling, no stubbed test notices.
+     */
+    @Test
+    void theArchivedInclusiveReadSaysSoOnEveryPage() {
+        sibling(COLLECTION_SIZE);
+
+        clientForThisServer().casesIncludingArchived("patient-7");
+
+        assertThat(queriesSeen).isNotEmpty();
+        assertThat(queriesSeen).allSatisfy(query -> assertThat(query).contains("includeArchived=true"));
+        assertThat(queriesSeen).allSatisfy(query -> assertThat(query).contains("patientId=patient-7"));
+        assertThat(queriesSeen).allSatisfy(query -> assertThat(query).contains("page=").contains("size="));
+        assertThat(queriesSeen).allSatisfy(PatientServiceClientPagingTest::assertSortsByIdAscending);
+    }
+
+    /**
+     * And no other read does — the half that keeps the decision narrow.
+     *
+     * <p>Archived cases are excluded from every list on purpose: retiring a case is the act of taking
+     * it out of the working queue. A client that sent {@code includeArchived=true} everywhere would
+     * satisfy the case above and put retired cases back in the queue, the patient's case list, the
+     * caseload union and the dashboard counts at once.
+     */
+    @Test
+    void noOtherReadAsksForArchivedRows() {
+        sibling(PatientServiceClient.PAGE_SIZE + 5);
+        PatientServiceClient client = clientForThisServer();
+
+        client.clinicalCases();
+        client.clinicalCases("patient-7");
+        client.activityLogs("patient-7");
+        client.reports("patient-7");
+
+        assertThat(queriesSeen).isNotEmpty();
+        assertThat(queriesSeen).allSatisfy(query -> assertThat(query).doesNotContain("includeArchived"));
+    }
+
     /**
      * A blank id is absent, not a filter for the empty-string patient.
      *

@@ -91,6 +91,10 @@ class PatientDirectoryServiceUnitTest {
         // NPEs, so a test that means to exercise a per-patient path cannot accidentally be served by
         // the estate-wide stub. That distinction is the subject of backlog item 23.
         when(patientService.clinicalCases(anyString())).thenReturn(List.of());
+        // The archived-inclusive form is a sixth read and is stubbed here for the same reason: the
+        // detail path is the only caller (backlog item 82), and a test that means to exercise it must
+        // not be served by the stub for the live-only read beside it.
+        when(patientService.casesIncludingArchived(anyString())).thenReturn(List.of());
         when(patientService.profiles(anyString())).thenReturn(List.of());
         when(patientService.activityLogs(anyString())).thenReturn(List.of());
         when(patientService.medications(anyString())).thenReturn(List.of());
@@ -322,10 +326,14 @@ class PatientDirectoryServiceUnitTest {
         assertThat(service.record("patient-someone-else")).isEmpty();
     }
 
+    /**
+     * The detail path reads {@code casesIncludingArchived} since backlog item 82, and item 24's rule
+     * has to hold on that read too: a collection that could not be read is a 503, never "no such case".
+     */
     @Test
     void anOutageIsNOTaPatientNotInCaseloadOnTheCaseDetail() {
         when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task(MINE)));
-        when(patientService.clinicalCases(MINE)).thenThrow(outage());
+        when(patientService.casesIncludingArchived(MINE)).thenThrow(outage());
 
         assertThatThrownBy(() -> service.caseDetail(MINE, "c1"))
             .isInstanceOf(PatientServiceUnavailableException.class)
@@ -1021,14 +1029,18 @@ class PatientDirectoryServiceUnitTest {
     void aCaseListAnEditAndADetailEachReadTheCasesONCE() {
         onePatientOfMine();
         when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.casesIncludingArchived(MINE)).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
         when(patientService.patchClinicalCase(any(), any())).thenReturn(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID));
 
         service.casesFor(MINE, PageRequest.of(0, 20));
         verify(patientService, org.mockito.Mockito.times(1)).clinicalCases(MINE);
 
+        // The detail reads the archived-inclusive form (item 82) and still reads it once: it checks the
+        // entitlement and answers from the same rows, which is what item 23 established here.
         org.mockito.Mockito.clearInvocations(patientService);
         service.caseDetail(MINE, "c1");
-        verify(patientService, org.mockito.Mockito.times(1)).clinicalCases(MINE);
+        verify(patientService, org.mockito.Mockito.times(1)).casesIncludingArchived(MINE);
+        verify(patientService, org.mockito.Mockito.never()).clinicalCases(MINE);
 
         org.mockito.Mockito.clearInvocations(patientService);
         service.updateCase(MINE, "c1", new PatientDirectoryService.CaseUpdate("s", null, null, null));
@@ -1067,15 +1079,30 @@ class PatientDirectoryServiceUnitTest {
      *
      * <p>Staged by stubbing the scoped call with a row belonging to somebody else, which is precisely
      * what an ignored parameter looks like from this side.
+     *
+     * <p><b>The third arm is {@code caseDetail}, added after review.</b> Backlog item 82 moved that
+     * path onto its own read and its own copy of the rule, and its in-method {@code patientId} filter
+     * carried a comment claiming it was load-bearing "for the same reason it is there" — while this
+     * test, the one holding that reason, covered only the two calls above. Deleting the filter from
+     * {@code caseDetail} reddened nothing. Without it, a sibling that ignored {@code patientId} would
+     * have {@code assignedToMeLive} computed over the <em>estate's</em> cases, and any clinician
+     * holding one live case anywhere could read any case by naming any patient id.
      */
     @Test
     void aSIBLINGthatIGNOREDtheFilterCouldNotWidenTheCaseload() {
         when(patientService.clinicalCases(anyString())).thenReturn(List.of(aCase("c-mine", MINE, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.casesIncludingArchived(anyString())).thenReturn(List.of(aCase("c-mine", MINE, "OPEN", PROFESSIONAL_ID)));
 
         assertThatThrownBy(() -> service.casesFor("p-not-mine", PageRequest.of(0, 20))).isInstanceOf(
             PatientDirectoryService.PatientNotInCaseloadException.class
         );
         assertThatThrownBy(() -> service.appendActivity("p-not-mine", new CreateActivity("s", "d", null, null))).isInstanceOf(
+            PatientDirectoryService.PatientNotInCaseloadException.class
+        );
+        // The case really is readable — under its own patient. What must not happen is it answering
+        // for a patient the caller named and has no tie to.
+        assertThat(service.caseDetail(MINE, "c-mine").id()).isEqualTo("c-mine");
+        assertThatThrownBy(() -> service.caseDetail("p-not-mine", "c-mine")).isInstanceOf(
             PatientDirectoryService.PatientNotInCaseloadException.class
         );
         verify(patientService, org.mockito.Mockito.never()).createActivityLog(any());
@@ -1101,5 +1128,186 @@ class PatientDirectoryServiceUnitTest {
         verify(patientService, org.mockito.Mockito.atLeastOnce()).clinicalCases();
         verify(patientService).profiles();
         verify(patientService, org.mockito.Mockito.never()).profiles(anyString());
+    }
+
+    // --- An archived case is readable, and only by the people it always was (backlog.md item 82) ---
+
+    /** The archived twin of {@link #aCase}: same shape, retired at a stated instant. */
+    private static PatientServiceDtos.ClinicalCase anArchivedCase(String id, String patientId, String assignedTo) {
+        return new PatientServiceDtos.ClinicalCase(
+            id,
+            patientId,
+            1,
+            "Title",
+            Instant.parse("2026-08-20T09:00:00Z"),
+            null,
+            "brief",
+            "CLOSED",
+            "symptoms",
+            "diagnosis",
+            assignedTo,
+            null,
+            Instant.parse("2026-08-21T09:00:00Z")
+        );
+    }
+
+    /**
+     * The promise this method has made since it was written: a case retired while a clinician had it
+     * open renders rather than 404ing.
+     *
+     * <p>It was never kept — the sibling's {@code includeArchived} defaults to false, so the row never
+     * arrived and {@code findFirst} missed. Measured before the fix with the caller entitled by a live
+     * case, which is what makes this the {@code orElseThrow} half rather than the caseload half.
+     */
+    @Test
+    void anARCHIVEDcaseISreadableOnTheDetail() {
+        when(patientService.casesIncludingArchived(MINE)).thenReturn(
+            List.of(aCase("c-live", MINE, "OPEN", PROFESSIONAL_ID), anArchivedCase("c-old", MINE, PROFESSIONAL_ID))
+        );
+
+        var detail = service.caseDetail(MINE, "c-old");
+
+        assertThat(detail.id()).isEqualTo("c-old");
+        assertThat(detail.diagnosis()).isEqualTo("diagnosis");
+        // And it says it is archived. Without this a retired diagnosis renders as current clinical
+        // prose, which is a worse answer than the 404 this replaces.
+        assertThat(detail.archivedAt()).isEqualTo("2026-08-21T09:00:00Z");
+    }
+
+    /** A live case is unchanged, and says so by carrying no {@code archivedAt}. */
+    @Test
+    void aLIVEcaseStillReadsAsLive() {
+        when(patientService.casesIncludingArchived(MINE)).thenReturn(List.of(aCase("c-live", MINE, "OPEN", PROFESSIONAL_ID)));
+
+        assertThat(service.caseDetail(MINE, "c-live").archivedAt()).isNull();
+    }
+
+    /**
+     * The second half of the promise, and the one the ordinary caseload rule cannot keep.
+     *
+     * <p>A clinician whose only case with this patient is the one they archived has no live row and no
+     * task, so the <em>caseload</em> check refuses before the case is ever looked for — a different
+     * throw site from the case above, the same 404, and the reason item 82's one-line diagnosis was
+     * right about only one of the two. They may read back their own work: the case names them.
+     */
+    @Test
+    void theClinicianWhoseONLYtieIsTheArchivedCaseCanStillReadItBack() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of());
+        when(patientService.casesIncludingArchived(MINE)).thenReturn(List.of(anArchivedCase("c-old", MINE, PROFESSIONAL_ID)));
+
+        assertThat(service.caseDetail(MINE, "c-old").id()).isEqualTo("c-old");
+    }
+
+    /**
+     * <b>The one that matters more.</b> A fix that simply asked for archived rows and kept the old
+     * {@code findFirst} would pass both cases above and hand every archived case to anybody who could
+     * name a patient and a case id.
+     *
+     * <p>Here the sibling returns the archived case — the read succeeded, the row exists — and the
+     * caller is assigned to nothing of this patient's and has no task for them. Still 404.
+     */
+    @Test
+    void anARCHIVEDcaseIsSTILLrefusedToACallerOUTSIDEtheCaseload() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of());
+        when(patientService.casesIncludingArchived("p-other")).thenReturn(List.of(anArchivedCase("c-theirs", "p-other", "someone-else")));
+
+        assertThatThrownBy(() -> service.caseDetail("p-other", "c-theirs")).isInstanceOf(
+            PatientDirectoryService.PatientNotInCaseloadException.class
+        );
+    }
+
+    /**
+     * <b>G1: entitled by a live case of my own, reading this patient's OTHER archived case.</b>
+     *
+     * <p>The case belongs to a different clinician, so {@code thisCaseIsMine} is false and only the
+     * {@code assignedToMeLive} arm can serve this — which is the point. This grant is not incidental:
+     * patientservice gates {@code /archive} on doctor alone, so the clinician who retires a case is
+     * frequently not its assignee, and without this arm the motivating scenario 404s for the very
+     * person who archived it.
+     *
+     * <p><b>Added after review.</b> {@code caseDetail} no longer routes through
+     * {@code requireEntitlement}, so its copy of the caseload rule is exercised only from here.
+     * Deleting <em>both</em> caseload arms — leaving {@code return thisCaseIsMine} — left the whole
+     * suite green at 57/57 before this test and the one below existed.
+     */
+    @Test
+    void aCallerEntitledByTheirOwnLIVEcaseReadsThePatientsOTHERarchivedCase() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of());
+        when(patientService.casesIncludingArchived(MINE)).thenReturn(
+            List.of(aCase("c-mine-live", MINE, "OPEN", PROFESSIONAL_ID), anArchivedCase("c-theirs-old", MINE, "another-doctor"))
+        );
+
+        assertThat(service.caseDetail(MINE, "c-theirs-old").id()).isEqualTo("c-theirs-old");
+    }
+
+    /**
+     * <b>G2: entitled by a TASK alone — no case of mine at all, live or archived.</b>
+     *
+     * <p>The caseload union has two halves and a clinician can be scheduled against a patient who has
+     * no case assigned to them. The live case here belongs to someone else, so neither
+     * {@code assignedToMeLive} nor {@code thisCaseIsMine} can serve it: only {@code scheduledWith} can.
+     *
+     * <p>Paired with the case above so that the two caseload arms are covered <em>separately</em> —
+     * one test covering both would go green again the moment somebody deleted the other arm, which is
+     * precisely the silent drift this pair exists to catch.
+     */
+    @Test
+    void aCallerEntitledByATASKaloneReadsThePatientsCase() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task(MINE)));
+        when(patientService.casesIncludingArchived(MINE)).thenReturn(List.of(aCase("c-theirs-live", MINE, "OPEN", "another-doctor")));
+
+        assertThat(service.caseDetail(MINE, "c-theirs-live").id()).isEqualTo("c-theirs-live");
+    }
+
+    /**
+     * And the widening that was deliberately not taken.
+     *
+     * <p>Reading back one's own archived case must not amount to continuing access to the patient.
+     * With the archived case as the only tie: their <em>live</em> case, assigned to whoever has them
+     * now, is refused; the patient's record does not open; their case list is refused; and the archived
+     * case itself cannot be edited. Only the one read the promise is about succeeds.
+     */
+    @Test
+    void readingBackMYarchivedCaseIsNOTcontinuingAccessToThePatient() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of());
+        when(patientService.casesIncludingArchived(MINE)).thenReturn(
+            List.of(anArchivedCase("c-mine-old", MINE, PROFESSIONAL_ID), aCase("c-theirs-now", MINE, "OPEN", "someone-else"))
+        );
+        // What the ordinary reads see: the sibling's default, which excludes the archived row.
+        when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c-theirs-now", MINE, "OPEN", "someone-else")));
+
+        assertThat(service.caseDetail(MINE, "c-mine-old").id()).isEqualTo("c-mine-old");
+
+        assertThatThrownBy(() -> service.caseDetail(MINE, "c-theirs-now")).isInstanceOf(
+            PatientDirectoryService.PatientNotInCaseloadException.class
+        );
+        assertThat(service.record(MINE)).isEmpty();
+        assertThatThrownBy(() -> service.casesFor(MINE, PageRequest.of(0, 20))).isInstanceOf(
+            PatientDirectoryService.PatientNotInCaseloadException.class
+        );
+        assertThatThrownBy(
+            () -> service.updateCase(MINE, "c-mine-old", new PatientDirectoryService.CaseUpdate("x", null, null, null))
+        ).isInstanceOf(PatientDirectoryService.PatientNotInCaseloadException.class);
+        verify(patientService, org.mockito.Mockito.never()).patchClinicalCase(any(), any());
+    }
+
+    /**
+     * The lists are untouched, which is the other half of the decision.
+     *
+     * <p>Retiring a case is exactly the act of taking it out of the working queue, so nothing that
+     * answers with a <em>set</em> of cases may start asking for archived rows — a "fix" that swapped
+     * the read everywhere would resurrect retired cases on four screens at once.
+     */
+    @Test
+    void nothingBUTtheDetailAsksTheSiblingForArchivedRows() {
+        onePatientOfMine();
+        when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
+
+        service.directory();
+        service.myCases(PageRequest.of(0, 20), null);
+        service.casesFor(MINE, PageRequest.of(0, 20));
+        service.record(MINE);
+
+        verify(patientService, org.mockito.Mockito.never()).casesIncludingArchived(anyString());
     }
 }
