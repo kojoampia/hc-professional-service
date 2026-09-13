@@ -100,6 +100,13 @@ import org.springframework.stereotype.Service;
  *       NOT clear on retry</em>, which is true.
  * </ul>
  *
+ * <p><strong>And a degraded read leaves a trace that says <em>which</em> of the two it was</strong>
+ * (backlog item 116). Both branches logged at {@code debug}, which production does not emit, so the
+ * only production evidence that a directory had been served short of rows was an INFO line naming a
+ * path — indistinguishable from the same line for a pharmacist losing a column. See
+ * {@link PatientDirectoryRestrictionMeters}, which is driven from the restriction set this method
+ * returns, and {@link RestrictedPart#removesRows()}, which is where the two are told apart.
+ *
  * <p><strong>Degrading cannot widen anything, and that is why it is safe here.</strong> The case half
  * of the caseload union only ever <em>adds</em> patients, so losing it yields a strictly smaller
  * directory — the same direction as having no cases at all. It is not the same as reading a refusal as
@@ -117,17 +124,20 @@ public class PatientDirectoryService {
     private final ProfileRepository profileRepository;
     private final PatientServiceClient patientService;
     private final PatientWriteReceiptRepository receiptRepository;
+    private final PatientDirectoryRestrictionMeters restrictionMeters;
 
     public PatientDirectoryService(
         TaskRepository taskRepository,
         ProfileRepository profileRepository,
         PatientServiceClient patientService,
-        PatientWriteReceiptRepository receiptRepository
+        PatientWriteReceiptRepository receiptRepository,
+        PatientDirectoryRestrictionMeters restrictionMeters
     ) {
         this.taskRepository = taskRepository;
         this.profileRepository = profileRepository;
         this.patientService = patientService;
         this.receiptRepository = receiptRepository;
+        this.restrictionMeters = restrictionMeters;
     }
 
     /**
@@ -216,24 +226,47 @@ public class PatientDirectoryService {
          * unreadable, so a patient reached <em>only</em> through an assigned case is absent from the
          * directory. The task half is unaffected and is what is listed.
          */
-        CASE_ASSIGNMENTS("caseAssignments"),
+        CASE_ASSIGNMENTS("caseAssignments", true),
         /**
          * patientservice's {@code /api/activity-logs}. Every patient is listed; {@code lastActivityAt}
          * is {@code null} on all of them and the default ordering falls back to that null, so the list
          * is not in recency order. Without this marker a client cannot tell that from a caseload
          * nobody has touched.
          */
-        LAST_ACTIVITY("lastActivity");
+        LAST_ACTIVITY("lastActivity", false);
 
         private final String token;
+        private final boolean removesRows;
 
-        RestrictedPart(String token) {
+        RestrictedPart(String token, boolean removesRows) {
             this.token = token;
+            this.removesRows = removesRows;
         }
 
         /** The stable name a client sees. */
         public String token() {
             return token;
+        }
+
+        /**
+         * Whether losing this part takes <em>patients</em> out of the list rather than blanking a
+         * column on the patients that remain (backlog item 116).
+         *
+         * <p><b>The asymmetry this enum's javadoc argues, made answerable rather than only stated.</b>
+         * It was stated here and followed nowhere: both degrade branches logged at {@code debug},
+         * which {@code application-prod.yml}'s {@code net.jojoaddison: INFO} does not emit, so the two
+         * were indistinguishable in the one environment where the distinction matters.
+         * {@link PatientDirectoryRestrictionMeters} keys its escalation on this rather than on a
+         * constant of its own, so <b>a third part added later has to answer the question here</b>,
+         * beside the description of what its absence costs, instead of inheriting an answer from a
+         * file that never mentions it.
+         *
+         * <p>It is not a wire value and no client sees it: what reaches a client is {@link #token()},
+         * and the difference between the two is expressed there by the marker being collection-level
+         * at all — no per-row field can describe a patient who is not in the list.
+         */
+        public boolean removesRows() {
+            return removesRows;
         }
     }
 
@@ -375,6 +408,13 @@ public class PatientDirectoryService {
         // therefore have flipped between restarts of the api container and between replicas, under a
         // javadoc promising it was stable — and the only input that reaches it is a technician with at
         // least one task, who is refused both parts at once.
+        //
+        // Recorded here rather than in the two degrade branches (backlog item 116), for one reason
+        // that is worth more than the saving: what is metered is then the same set that is rendered
+        // into X-Restricted-Parts, and the two cannot come to disagree. It also counts directories
+        // that were actually SERVED — an unsortable `sort=` throws above this line, and a request
+        // answered 400 delivered no degraded directory to count.
+        restrictionMeters.record(restrictions);
         return new Directory(page, Collections.unmodifiableSet(EnumSet.copyOf(restrictions)));
     }
 
@@ -419,6 +459,10 @@ public class PatientDirectoryService {
             if (!e.fault().isAuthorisationRefusal()) {
                 throw e;
             }
+            // DEBUG, and it stays DEBUG: this line carries the upstream message and is for someone
+            // already reproducing the problem. The production signal for this branch is
+            // PatientDirectoryRestrictionMeters, driven from the restriction set once the directory is
+            // built — see backlog item 116 for why it is not a per-request WARN here.
             log.debug("Composing the directory without the case half: {}", e.getMessage());
             restrictions.add(RestrictedPart.CASE_ASSIGNMENTS);
             return patientIdsFromTasks(professionalId);
@@ -433,6 +477,9 @@ public class PatientDirectoryService {
             if (!e.fault().isAuthorisationRefusal()) {
                 throw e;
             }
+            // As above. This part is counted by PatientDirectoryRestrictionMeters and deliberately not
+            // escalated beyond that: it blanks a column on rows that are all present, which is the
+            // asymmetry RestrictedPart.removesRows() states (backlog item 116).
             log.debug("Composing the directory without last-activity: {}", e.getMessage());
             restrictions.add(RestrictedPart.LAST_ACTIVITY);
             // Empty, and the marker above is what stops it being read as "nobody has been seen".

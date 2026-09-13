@@ -211,7 +211,15 @@ class PatientDirectoryRestrictionHeaderTest {
         );
 
         PatientResource real = new PatientResource(
-            new PatientDirectoryService(taskRepository, profileRepository, patientService, receiptRepository)
+            new PatientDirectoryService(
+                taskRepository,
+                profileRepository,
+                patientService,
+                receiptRepository,
+                new net.jojoaddison.service.PatientDirectoryRestrictionMeters(
+                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry()
+                )
+            )
         );
 
         ResponseEntity<List<PatientListItem>> response = real.list(PageRequest.of(0, 20), null, null, null);
