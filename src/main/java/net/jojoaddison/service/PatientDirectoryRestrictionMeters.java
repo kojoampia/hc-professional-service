@@ -85,6 +85,16 @@ public class PatientDirectoryRestrictionMeters {
      * <p>Micrometer renders it with the base unit appended, so what reaches Prometheus and Mimir is
      * {@code patient_directory_restricted_reads_total}.
      *
+     * <p><b>It reaches Mimir only while this service has the agent's Micrometer bridge.</b> Until
+     * 2026-09-14 {@code OTEL_INSTRUMENTATION_MICROMETER_ENABLED} was set on the gateway alone, and this
+     * service exported the agent's own instrumentation and <em>no Micrometer meter at all</em> —
+     * measured with a control, {@code application_ready_time_seconds} present for the gateway and
+     * absent here while {@code jvm_class_count} was present for both. Turning it off again silently
+     * removes every claim below about a series appearing. Note also that item 97's <em>a
+     * never-incremented counter yields no series</em> was measured on the <em>gateway</em>; the lazy
+     * registration below is right for that reason but the measurement behind it is borrowed, and
+     * remains unverified on this service until a refused read here is seen in Mimir.
+     *
      * <p><b>Unprefixed by the service, in line with {@code SecurityMetersService} beside it</b> — the
      * product is a resource attribute ({@code service_name}) rather than part of the name. Worth
      * knowing that hc-admin has a screen it also calls a "patient directory", and that backlog item 97
