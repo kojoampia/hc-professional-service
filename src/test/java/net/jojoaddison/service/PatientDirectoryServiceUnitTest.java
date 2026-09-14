@@ -100,7 +100,17 @@ class PatientDirectoryServiceUnitTest {
         when(patientService.medications(anyString())).thenReturn(List.of());
         when(patientService.reports(anyString())).thenReturn(List.of());
         receiptRepository = new InMemoryReceiptRepository();
-        service = new PatientDirectoryService(taskRepository, profileRepository, patientService, receiptRepository);
+        // A real meters bean over a throwaway registry rather than a mock (backlog item 116): what it
+        // records is PatientDirectoryRestrictionMetersTest's subject, and the cases here are about the
+        // directory itself — but a stub would let the recording stop happening without anything here
+        // noticing, which is the shape of hole this whole area keeps being about.
+        service = new PatientDirectoryService(
+            taskRepository,
+            profileRepository,
+            patientService,
+            receiptRepository,
+            new PatientDirectoryRestrictionMeters(new io.micrometer.core.instrument.simple.SimpleMeterRegistry())
+        );
     }
 
     private Task task(String patientId) {
