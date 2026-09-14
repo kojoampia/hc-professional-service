@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -13,6 +14,7 @@ import net.jojoaddison.repository.PatientWriteReceiptRepository;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.repository.TaskRepository;
 import net.jojoaddison.security.WithMockGatewayUser;
+import net.jojoaddison.service.PatientDirectoryRestrictionMeters;
 import net.jojoaddison.service.PatientDirectoryService;
 import net.jojoaddison.service.PatientDirectoryService.RestrictedPart;
 import net.jojoaddison.service.PatientServiceClient;
@@ -210,15 +212,14 @@ class PatientDirectoryRestrictionHeaderTest {
             )
         );
 
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
         PatientResource real = new PatientResource(
             new PatientDirectoryService(
                 taskRepository,
                 profileRepository,
                 patientService,
                 receiptRepository,
-                new net.jojoaddison.service.PatientDirectoryRestrictionMeters(
-                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry()
-                )
+                new PatientDirectoryRestrictionMeters(registry)
             )
         );
 
@@ -227,6 +228,27 @@ class PatientDirectoryRestrictionHeaderTest {
         assertThat(response.getHeaders().getFirst(PatientResource.RESTRICTED_PARTS)).isEqualTo("caseAssignments,lastActivity");
         // The directory itself still answers, which is the item: the task half survives both refusals.
         assertThat(response.getBody()).extracting(PatientListItem::id).containsExactly("p-task");
+
+        // The metric and the header name the same parts (backlog item 116).
+        //
+        // Structurally true today — one `record(restrictions)` call, `new Directory(...)` on the very
+        // next line over the same EnumSet instance, and one caller rendering the header from
+        // `directory.restrictions()` — so there is no divergence path to find. Asserted all the same,
+        // because "there is no divergence path" is a fact about where two lines currently sit rather
+        // than a property anything holds, and this is the only test in the suite that crosses both
+        // boundaries with a real service behind it. Without it the registry above would be a
+        // collaborator nothing reads, which is how a recording quietly stops happening.
+        List<String> metered = registry
+            .find(PatientDirectoryRestrictionMeters.METER_NAME)
+            .counters()
+            .stream()
+            .map(counter -> counter.getId().getTag(PatientDirectoryRestrictionMeters.PART_TAG))
+            .sorted()
+            .toList();
+        List<String> headed = java.util.Arrays.stream(response.getHeaders().getFirst(PatientResource.RESTRICTED_PARTS).split(","))
+            .sorted()
+            .toList();
+        assertThat(metered).isEqualTo(headed).hasSize(2);
     }
 
     private static PatientServiceUnavailableException refused(String path) {

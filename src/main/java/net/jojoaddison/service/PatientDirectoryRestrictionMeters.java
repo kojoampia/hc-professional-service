@@ -2,9 +2,12 @@ package net.jojoaddison.service;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
 import net.jojoaddison.security.AuthoritiesConstants;
 import net.jojoaddison.security.SecurityUtils;
 import net.jojoaddison.service.PatientDirectoryService.RestrictedPart;
@@ -190,14 +193,15 @@ public class PatientDirectoryRestrictionMeters {
             // Generic over the part rather than describing the case half, although that is the only
             // part that reaches here today: a message naming a route a future part does not use is a
             // claim nothing established, which is the failure mode this whole area keeps repeating.
-            "The patient directory is being served WITHOUT the '{}' part to callers of discipline '{}' — PATIENTS are missing from " +
-            "that list, not merely a column blanked on the patients in it: anyone this service reaches only through the withheld " +
-            "part is absent, and no field in the response body can say so. Expected for a discipline hc-patient's " +
-            "scope-of-practice matrix does not admit; NOT expected for one it does, which is how a change to that matrix reaches " +
-            "this stack. First seen for login '{}'. Logged once per part per discipline per process, so read the counter " +
-            "patient_directory_restricted_reads_total for how often it is happening rather than counting these lines",
-            part.token(),
+            //
+            // Trimmed on review: this lands in a Grafana log panel, where the reasoning is a wall and
+            // the four facts are what a reader needs. The reasoning is in this class's javadoc.
+            "The patient directory is being served to discipline '{}' WITHOUT the '{}' part: PATIENTS are missing from the list, " +
+            "not a column blanked on the patients in it. Expected for a discipline hc-patient's scope-of-practice matrix does not " +
+            "admit, NOT expected for one it does. First seen for login '{}'; once per part per discipline per process, so count " +
+            "patient_directory_restricted_reads_total rather than these lines",
             discipline,
+            part.token(),
             SecurityUtils.getCurrentUserLogin().orElse("unknown")
         );
     }
@@ -211,9 +215,10 @@ public class PatientDirectoryRestrictionMeters {
      * authority strings would put an unbounded, caller-controlled dimension into a meter — a token
      * carrying {@code ROLE_ANYTHING} would mint a series for it.
      *
-     * <p><b>A caller holding two is reported under the first in that array's declaration order.</b>
-     * Deterministic, and a report of one read rather than a statement about a capability — the same
-     * caveat {@link RestrictedPart}'s javadoc makes about the restriction set itself.
+     * <p><b>A caller holding two is reported under the first of {@link #DISCIPLINES_BEFORE_ADMIN},
+     * which is deliberately not that array's own order.</b> Deterministic, and a report of one read
+     * rather than a statement about a capability — the same caveat {@link RestrictedPart}'s javadoc
+     * makes about the restriction set itself.
      *
      * <p><b>What is deliberately not decided here: whether this discipline <em>should</em> have been
      * refused.</b> Escalating only the unexpected pairs would need a list of which disciplines
@@ -223,11 +228,40 @@ public class PatientDirectoryRestrictionMeters {
      * identically and the operator compares it against what the matrix is supposed to say.
      */
     static String disciplineOfCaller() {
-        for (String authority : AuthoritiesConstants.CLINICAL_AND_ADMIN) {
+        for (String authority : DISCIPLINES_BEFORE_ADMIN) {
             if (SecurityUtils.hasCurrentUserThisAuthority(authority)) {
                 return (authority.startsWith(ROLE_PREFIX) ? authority.substring(ROLE_PREFIX.length()) : authority).toLowerCase(Locale.ROOT);
             }
         }
         return NO_DISCIPLINE;
     }
+
+    /**
+     * {@link AuthoritiesConstants#CLINICAL_AND_ADMIN} with {@code ROLE_ADMIN} moved to the end — the
+     * order {@link #disciplineOfCaller()} resolves a multi-authority caller in.
+     *
+     * <p><b>The array's own order shadows the exact signal this class exists to raise, and that is a
+     * measurement rather than a worry.</b> It is declared {@code ADMIN, DOCTOR, NURSE, PARAMEDIC, …}
+     * and the resolver returns on first match, so an account holding {@code ROLE_ADMIN} <em>and</em>
+     * {@code ROLE_DOCTOR} — a clinical lead, or one of the quality stack's seeded accounts — loading
+     * the directory while hc-patient's matrix refuses doctors would mint
+     * {@code discipline="admin"}. Two things go wrong with that and the second is worse. The drift is
+     * <b>misattributed</b>, so an operator reads it and goes looking at administrator entitlement
+     * rather than at the doctor matrix. And if {@code admin} has already appeared for a reason of its
+     * own, the doctor's drift produces <b>no new label value at all</b> — which is precisely the
+     * condition an alert on this meter keys on, since a never-incremented counter has no series and
+     * "a series that was not there before" is the whole signal.
+     *
+     * <p><b>Derived rather than restated, and it moves exactly one name.</b> A hand-written list of
+     * the eight disciplines would be a fourth copy of a set this estate already keeps in three repos
+     * and watches for drift; this filters the canonical array and appends the one member of it that
+     * is not a discipline, so a ninth discipline added there is picked up here with no edit.
+     * {@code admin} stays in the list rather than being dropped: an administrator with no clinical
+     * authority is still somebody whose directory was degraded, and {@code NO_DISCIPLINE} would say
+     * something false about them.
+     */
+    private static final List<String> DISCIPLINES_BEFORE_ADMIN = Stream.concat(
+        Arrays.stream(AuthoritiesConstants.CLINICAL_AND_ADMIN).filter(authority -> !AuthoritiesConstants.ADMIN.equals(authority)),
+        Stream.of(AuthoritiesConstants.ADMIN)
+    ).toList();
 }

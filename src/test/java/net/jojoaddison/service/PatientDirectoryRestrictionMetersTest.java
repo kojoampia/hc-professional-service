@@ -488,6 +488,74 @@ class PatientDirectoryRestrictionMetersTest {
     }
 
     /**
+     * <b>A clinical lead — {@code ROLE_ADMIN} and {@code ROLE_DOCTOR} — is tagged {@code doctor}.</b>
+     *
+     * <p>Found by the review of this change, and it is the signal shadowing itself.
+     * {@code AuthoritiesConstants.CLINICAL_AND_ADMIN} is declared {@code ADMIN, DOCTOR, NURSE, …} and
+     * the resolver returns on first match, so resolving in that array's own order would report a
+     * clinical lead's <em>doctor</em> drift as {@code discipline="admin"}. Two failures, and the
+     * second is the worse one: the drift is misattributed, so an operator looks at administrator
+     * entitlement instead of at the doctor matrix; and if an {@code admin} series already exists for
+     * a reason of its own, the doctor's drift mints <b>no new label value at all</b> — which is
+     * exactly what an alert on this meter keys on.
+     *
+     * <p>Asserted in both directions, because a fix that simply dropped {@code ADMIN} from the
+     * resolution list would satisfy the first half and tag a pure administrator {@code none} —
+     * saying something false about a caller whose directory really was degraded.
+     */
+    @Test
+    void aCLINICALleadIsTaggedByTheirDISCIPLINEnotByADMIN() {
+        callerIsA("lead", "ROLE_ADMIN", "ROLE_DOCTOR");
+        refusesTheCaseCollection();
+
+        readTheDirectory();
+
+        assertThat(counter("caseAssignments", "doctor").count()).isEqualTo(1);
+        assertThat(counter("caseAssignments", "admin")).isNull();
+    }
+
+    @Test
+    void aPUREadministratorIsStillTaggedAdmin_notNone() {
+        callerIsA("boss", "ROLE_ADMIN");
+        refusesTheCaseCollection();
+
+        readTheDirectory();
+
+        assertThat(counter("caseAssignments", "admin").count()).isEqualTo(1);
+        assertThat(counter("caseAssignments", "none")).isNull();
+    }
+
+    /**
+     * The resolution order is {@code CLINICAL_AND_ADMIN} with {@code ADMIN} moved to the end, and
+     * nothing else — <b>derived, not restated</b>.
+     *
+     * <p>The expectation is computed from the canonical array rather than written out, so a ninth
+     * discipline added there does not redden this and a discipline silently dropped from the
+     * resolver does. That is the same rule {@code JhipsterEnumFieldValuesTest} and
+     * {@code shift-names.spec.ts} follow for the other lists this estate keeps in several places.
+     */
+    @Test
+    void theRESOLUTIONorderIsTheCanonicalArrayWithADMINlast() {
+        List<String> resolution = java.util.Arrays.stream(net.jojoaddison.security.AuthoritiesConstants.CLINICAL_AND_ADMIN)
+            .filter(authority -> !net.jojoaddison.security.AuthoritiesConstants.ADMIN.equals(authority))
+            .toList();
+
+        // Every discipline resolves to itself, in the order the resolver consults them; ADMIN is last
+        // and so can only win when the caller holds no discipline at all — the case above.
+        for (String authority : resolution) {
+            SecurityContextHolder.clearContext();
+            callerIsA("someone", authority);
+            assertThat(PatientDirectoryRestrictionMeters.disciplineOfCaller()).isEqualTo(
+                authority.substring("ROLE_".length()).toLowerCase(java.util.Locale.ROOT)
+            );
+        }
+
+        SecurityContextHolder.clearContext();
+        callerIsA("someone", net.jojoaddison.security.AuthoritiesConstants.ADMIN, resolution.get(resolution.size() - 1));
+        assertThat(PatientDirectoryRestrictionMeters.disciplineOfCaller()).isNotEqualTo("admin");
+    }
+
+    /**
      * {@code removesRows()} is what the escalation keys on, and it is stated on the enum rather than
      * as a constant in the meters class so a third part has to answer the question beside the
      * description of what its absence costs.
