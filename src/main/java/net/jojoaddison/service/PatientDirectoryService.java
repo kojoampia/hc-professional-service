@@ -93,12 +93,30 @@ import org.springframework.stereotype.Service;
  *       {@link RestrictedPart} and {@link Directory}.
  *   <li><b>Only a read that <em>supplies</em> the directory degrades; a read that <em>decides</em>
  *       something still raises.</b> {@link #directory(Pageable, DirectoryFilter)} tolerates a refusal
- *       and marks it. {@link #record}, {@link #casesFor}, {@link #caseDetail}, {@link #myCases},
- *       {@link #summary} and both writes do not, and are unchanged: their answers are entitlements,
- *       counts and case lists, and a number computed over a collection the caller was refused is a
- *       wrong number presented as a fact. What changes for them is only that the 503 now says <em>will
- *       NOT clear on retry</em>, which is true.
+ *       and marks it. {@link #casesFor}, {@link #caseDetail}, {@link #myCases} and both writes do not,
+ *       and are unchanged: their answers are entitlements and case lists, and a list computed over a
+ *       collection the caller was refused is a wrong answer presented as a fact.
  * </ul>
+ *
+ * <p><strong>Item 107 closed the directory and left every row in it a dead end; backlog item 112 is the
+ * larger half.</strong> For the three refused disciplines the first screen loaded and nothing on it
+ * opened — {@link #record} and {@link #summary} answered 503 by the same mechanism. Both now apply the
+ * rule above rather than an exemption from it, and the rule sorts them out by itself:
+ *
+ * <ul>
+ *   <li>{@link #recordWithinScope} loses the activity list, names it, and serves the record — for a
+ *       pharmacist and a chemist, whose cases, medications, reports and demographics all still arrive. A
+ *       <b>technician</b> is refused the collection {@link #entitledCases} decides entitlement from, so
+ *       their record still raises; that javadoc carries the measurements and argues why a hollow record
+ *       would be the worse answer.
+ *   <li>{@link #summary} counts through {@code countableCaseload()}, which tolerates the one refusal that
+ *       <b>changes none of its four numbers</b> and none of the ones that would. That is an argument
+ *       against item 111's Decision C rather than an exception to it, and it is made there.
+ * </ul>
+ *
+ * <p>What changes for everything still strict is the sentence: a refusal no longer opens with
+ * <em>patientservice could not be read</em>, which was a claim about the sibling's health that the
+ * sibling had just disproved by answering. See {@code PatientServiceUnavailableException.message}.
  *
  * <p><strong>And a degraded read leaves a trace that says <em>which</em> of the two it was</strong>
  * (backlog item 116). Both branches logged at {@code debug}, which production does not emit, so the
@@ -517,6 +535,66 @@ public class PatientDirectoryService {
      * {@link #directory(Pageable, DirectoryFilter)}, which tolerates a refusal and says so.
      */
     public List<PatientListItem> directory() {
+        return caseload(this::lastActivityByPatient);
+    }
+
+    /**
+     * The caseload rows {@link #summary()} counts — <b>every read that a count depends on is strict, and
+     * the one that no count depends on is not</b> (backlog item 112).
+     *
+     * <p><b>This is an argument against item 111's Decision C, made narrowly and on a measurement.</b>
+     * Decision C left {@code summary()} refusing because "every {@code DashboardSummary} field is a count
+     * and there is nowhere to say a count is partial, so degrading would turn <em>could not be counted</em>
+     * into a confident wrong number". That reasoning is correct and this method keeps it — for the case
+     * half. It does not hold for the activity log, and the difference is not a matter of taste:
+     *
+     * <ul>
+     *   <li><b>{@code /api/clinical-cases} is half of the caseload union.</b> Losing it removes patients
+     *       from {@link #patientIdsFor}'s set, so {@code patients}, {@code female}, {@code male} and
+     *       {@code kids} all come out smaller than the truth, and the response has no way to say so. Every
+     *       word of Decision C applies. It stays strict, and a technician still gets a 503.
+     *   <li><b>{@code /api/activity-logs} contributes to no field of {@code DashboardSummary} at all.</b>
+     *       Follow it through: {@link #lastActivityByPatient} feeds {@link #compose}'s second argument,
+     *       which reaches {@link #toListItem}'s {@code lastActivityAt} and the sort beside it — and
+     *       {@code summary()} reads {@code size()}, {@code sex()} and {@code isChild()} and never touches
+     *       either. A pharmacist's four counts are <b>byte-identical</b> with the activity log read and
+     *       without it. There is no partial number to mark, because there is no affected number.
+     * </ul>
+     *
+     * <p>So a pharmacist and a chemist were being handed a 503 for a dashboard whose every figure this
+     * service could compute exactly, over a collection none of those figures is made of. That is not
+     * Decision C being applied; it is Decision C's <em>rule</em> being applied to a read its
+     * <em>reason</em> does not cover — and the cost was the dashboard, for two of the eight disciplines,
+     * permanently.
+     *
+     * <p><b>And nothing is marked on the response, which is the other half of the same argument.</b>
+     * {@code GET /api/dashboard/summary} emits no {@code X-Restricted-Parts}. Decision A says a refused
+     * part is named rather than silently emptied, and nothing here is emptied: the answer is complete.
+     * Naming a withheld part beside four correct counts would make a client say <em>some of this is not
+     * permitted</em> about figures that are whole — a new false sentence, pointing the other way, which is
+     * the failure mode this backlog has recorded three times inside its own fixes. The honest report of
+     * this read is the counts.
+     *
+     * <p><b>Rejected: route {@code summary()} through {@link #directory(Pageable, DirectoryFilter)} and
+     * inspect its restrictions.</b> It reads elegantly and it is wrong twice. It would record a directory
+     * counter for a dashboard read (backlog item 116's meter has one call site on purpose), and where the
+     * case half was refused it would have to <em>synthesise</em> a refusal to throw, having already
+     * swallowed the real one — a message nothing established, in place of the sibling's own.
+     */
+    private List<PatientListItem> countableCaseload() {
+        return caseload(this::lastActivityIfPermitted);
+    }
+
+    /**
+     * The caseload rows, assembled once, with only the recency read varying between the callers.
+     *
+     * <p>Extracted rather than copied so that {@link #directory()} and {@link #countableCaseload()}
+     * cannot drift in <em>what</em> they assemble while differing in what they will lose — the argument
+     * {@link #compose} and {@link #withinScope} already make one layer down. The supplier is invoked at
+     * the same point the expression it replaced was evaluated, so a caller with no profile and a caller
+     * with no patients still make no upstream recency read at all.
+     */
+    private List<PatientListItem> caseload(java.util.function.Supplier<Map<String, String>> lastActivity) {
         String professionalId = callerProfileId().orElse(null);
         if (professionalId == null) {
             return List.of();
@@ -525,7 +603,27 @@ public class PatientDirectoryService {
         if (patientIds.isEmpty()) {
             return List.of();
         }
-        return compose(patientIds, lastActivityByPatient());
+        return compose(patientIds, lastActivity.get());
+    }
+
+    /**
+     * The recency map, or an empty one when the caller's discipline may not read the activity log.
+     *
+     * <p>Only a refusal is tolerated; everything else raises, for {@link #lastActivityWithinScope}'s
+     * reason. The map is discarded by {@link #summary()}'s arithmetic either way — see
+     * {@link #countableCaseload()} for why that is what makes tolerating it honest here and not in
+     * {@link #directory()}, whose rows carry the field this populates.
+     */
+    private Map<String, String> lastActivityIfPermitted() {
+        try {
+            return lastActivityByPatient();
+        } catch (PatientServiceUnavailableException e) {
+            if (!e.fault().isAuthorisationRefusal()) {
+                throw e;
+            }
+            log.debug("Counting the dashboard summary without last-activity, which no count uses: {}", e.getMessage());
+            return Map.of();
+        }
     }
 
     /**
@@ -562,9 +660,115 @@ public class PatientDirectoryService {
      * twice. The saving is not a nicety: after item 22 made these reads complete, each estate-wide one
      * was seven requests and ~1260 rows.
      *
+     * <p><b>This is the strict form, and it is no longer what the endpoint serves</b> (backlog item
+     * 112). Every read it makes must succeed, a refusal raising exactly as an outage does — which is
+     * what {@link #activityById} and {@link #reportById} need: they re-read a filed entry so that a
+     * replayed write answers with the record rather than a fresh copy, and a tolerated refusal would
+     * turn that into a {@code 201} carrying nothing instead of a 503 naming why. {@code GET
+     * /api/patients/{id}} goes through {@link #recordWithinScope}, which loses the activity log rather
+     * than the record and says which it was.
+     *
      * @throws PatientServiceUnavailableException when the sibling could not be read
      */
     public Optional<PatientRecord> record(String patientId) {
+        return assemble(patientId, this::activityLog);
+    }
+
+    /**
+     * One patient's record, and whatever the caller's discipline was not allowed to read in it — the
+     * form the endpoint serves (backlog item 112).
+     *
+     * <p><b>Item 107 gave three disciplines a directory in which every row was a dead end.</b> A
+     * pharmacist and a chemist could open the patient list and not one patient in it: {@link #record}
+     * reads {@code /api/activity-logs} unconditionally, hc-patient refuses them that collection, and the
+     * whole record came back 503 over one panel of it. This method is the same composition with that one
+     * read allowed to be refused and <em>named</em>, exactly as
+     * {@link #directory(Pageable, DirectoryFilter)} is to {@link #directory()}.
+     *
+     * <h3>One read tolerated, and the rest are not — the measurements this rests on</h3>
+     * Taken through the gateway on the quality stack, 2026-09-14, all eight disciplines, on each
+     * collection {@link #record} composes:
+     *
+     * <table border="1">
+     *   <caption>hc-patient's answer per discipline</caption>
+     *   <tr><th></th><th>/api/profiles</th><th>/api/clinical-cases</th><th>/api/activity-logs</th>
+     *       <th>/api/medications</th><th>/api/reports</th></tr>
+     *   <tr><td>doctor, nurse, paramedic, therapist, carer</td>
+     *       <td>200</td><td>200</td><td>200</td><td>200</td><td>200</td></tr>
+     *   <tr><td><b>pharmacist, chemist</b></td>
+     *       <td>200</td><td>200</td><td><b>403</b></td><td>200</td><td>200</td></tr>
+     *   <tr><td><b>technician</b></td>
+     *       <td>200</td><td><b>403</b></td><td><b>403</b></td><td><b>403</b></td><td><b>403</b></td></tr>
+     * </table>
+     *
+     * <p><b>So the two refused disciplines are not one case, and answering them the same way would be
+     * wrong for one of them.</b> A pharmacist loses a <em>field</em> — the activity list, and with it the
+     * {@code lastActivityAt} derived from its first entry — out of a record whose cases, medications,
+     * reports and demographics all still arrive. A technician loses the record: hc-patient admits them to
+     * no clinical domain at all, and what would be left after withholding four collections is a name, a
+     * date of birth and a telephone number, with four empty lists beside it. That is not a patient record
+     * served short of one panel; it is a contact card wearing a patient record's shape, and serving it
+     * {@code 200} would put "no medications" and "no cases" on a clinical screen — a far worse sentence
+     * than the blank recency column item 107 was about, and the direction backlog items 62, 64, 67, 73,
+     * 78 and 80 all exist to refuse.
+     *
+     * <p><b>Nothing new decides that, which is the point.</b> Item 111's Decision C already says only a
+     * read that <em>supplies</em> may degrade and a read that <em>decides</em> may not, and it separates
+     * the two disciplines here by itself: for a technician the refused collection is the one
+     * {@link #entitledCases} uses to decide whether this patient is theirs at all, so the refusal reaches
+     * a deciding read and raises. No per-discipline list is written down anywhere, and none could be —
+     * the matrix is hc-patient's, and a copy of it here is the drift
+     * {@link PatientDirectoryRestrictionMeters} exists to catch.
+     *
+     * <h3>Rejected: degrade the entitlement read to the task half as the directory does</h3>
+     * {@link #patientIdsWithinScope} falls back to tasks alone on a refusal, and the same fallback here
+     * would let a technician open the patients their degraded directory already lists. It was rejected
+     * twice over. The record it produced would be the hollow one above; and where the task half says
+     * <em>no</em>, the fallback would answer {@code 404 "no such patient for this clinician"} from a
+     * collection that was never read — telling a technician standing next to their own patient that the
+     * patient is not theirs, which is backlog item 24's defect exactly, arriving by the door this change
+     * would have opened. A directory may be narrowed by a read that did not happen; an entitlement may
+     * not be denied by one.
+     *
+     * <h3>Rejected: omit {@code activities} rather than empty it</h3>
+     * A {@code null} list would be unmistakable on the wire, and it would break {@code web/} and
+     * {@code mobile/} on the release that shipped it — both iterate the field. That is item 111 Decision
+     * A's argument for a header over a body change, and it holds here unchanged.
+     *
+     * @return empty when the patient is not the caller's, exactly as {@link #record} does; otherwise the
+     *     record and the parts of it the caller's discipline may not read
+     */
+    public Optional<RecordView> recordWithinScope(String patientId) {
+        // EnumSet, declared as one, for the two reasons given where Directory is built: iteration is
+        // declaration order, and the static type selects the copyOf overload that cannot throw on empty.
+        EnumSet<RestrictedPart> restrictions = EnumSet.noneOf(RestrictedPart.class);
+        return assemble(patientId, id -> activityLogWithinScope(id, restrictions)).map(
+            found -> new RecordView(found, Collections.unmodifiableSet(EnumSet.copyOf(restrictions)))
+        );
+    }
+
+    /**
+     * One patient's record, and whatever was withheld from it.
+     *
+     * <p>The record's counterpart to {@link Directory}, and a second value beside the body for the same
+     * reason: {@code web/} and {@code mobile/} consume {@code GET /api/patients/{id}} as the record
+     * object itself, so a restriction has to travel beside it rather than inside it.
+     *
+     * @param restrictions empty for the six disciplines that may read every part of a record, which is
+     *     the ordinary case. Iterates in {@link RestrictedPart} declaration order — do not pass a
+     *     general-purpose {@code Set} in here.
+     */
+    public record RecordView(PatientRecord record, Set<RestrictedPart> restrictions) {}
+
+    /**
+     * The record itself, with the one read that may be refused supplied by the caller.
+     *
+     * <p>One body rather than two, for {@link #compose}'s reason: the strict and the scoped forms must
+     * not drift in what a record contains, and they differ only in whether the activity log may be lost.
+     * Passing the read in rather than a flag keeps the decision at the call site, where the two public
+     * methods above each state it once.
+     */
+    private Optional<PatientRecord> assemble(String patientId, Function<String, List<ActivityLogEntry>> activityLog) {
         String professionalId = callerProfileId().orElse(null);
         // The same cases answer both questions: whether this patient is the caller's at all, and what
         // their case list is. Reading them twice was the cheapest half of backlog item 23.
@@ -596,29 +800,7 @@ public class PatientDirectoryService {
             )
             .toList();
 
-        // occurredAt is the clinical time — when the thing happened — falling back to the filing
-        // date. Ordering a record by when it was typed rather than when it happened puts a
-        // late-entered observation at the top, which reads as the most recent event.
-        //
-        // The in-memory patientId filters below are kept although the sibling now scopes the query:
-        // they cost nothing over one patient's rows and they are what makes this method's answer
-        // independent of the far side honouring a parameter. They are no longer the mechanism.
-        List<ActivityLogEntry> activities = patientService
-            .activityLogs(patientId)
-            .stream()
-            .filter(a -> patientId.equals(a.patientId()))
-            .map(
-                a ->
-                    new ActivityLogEntry(
-                        a.id(),
-                        occurredAt(a.loggedAt(), a.createdDate()),
-                        a.summary(),
-                        a.summary(),
-                        a.detail(),
-                        text(a.createdDate())
-                    )
-            )
-            .toList();
+        List<ActivityLogEntry> activities = activityLog.apply(patientId);
 
         List<RecordEntry> medications = patientService
             .medications(patientId)
@@ -665,6 +847,74 @@ public class PatientDirectoryService {
                 reports
             )
         );
+    }
+
+    /**
+     * One patient's activity log, mapped into the record's shape — <b>the strict form</b>.
+     *
+     * <p>occurredAt is the clinical time — when the thing happened — falling back to the filing date.
+     * Ordering a record by when it was typed rather than when it happened puts a late-entered
+     * observation at the top, which reads as the most recent event.
+     *
+     * <p>The in-memory {@code patientId} filter is kept although the sibling now scopes the query: it
+     * costs nothing over one patient's rows and it is what makes this answer independent of the far side
+     * honouring a parameter. It is no longer the mechanism.
+     */
+    private List<ActivityLogEntry> activityLog(String patientId) {
+        return patientService
+            .activityLogs(patientId)
+            .stream()
+            .filter(a -> patientId.equals(a.patientId()))
+            .map(
+                a ->
+                    new ActivityLogEntry(
+                        a.id(),
+                        occurredAt(a.loggedAt(), a.createdDate()),
+                        a.summary(),
+                        a.summary(),
+                        a.detail(),
+                        text(a.createdDate())
+                    )
+            )
+            .toList();
+    }
+
+    /**
+     * The activity log, or none of it when the caller's discipline may not read it (backlog item 112).
+     *
+     * <p>The record's counterpart to {@link #lastActivityWithinScope}, and the same rule: a refusal is
+     * tolerated and marked, and <b>everything else still raises</b>. An outage, a schema drift, a budget
+     * and a page guard are all failures to read something the caller is entitled to, and a record served
+     * without its activity list for one of those would be item 24's defect wearing this change's hat.
+     * The two are told apart by {@link PatientServiceUnavailableException.Fault#isAuthorisationRefusal()}
+     * and by nothing else.
+     *
+     * <p>It empties {@code lastActivityAt} as well as {@code activities}, because that field is the first
+     * entry's timestamp — which is exactly what {@link RestrictedPart#LAST_ACTIVITY} already describes
+     * for the directory, and why this needs no token of its own.
+     */
+    private List<ActivityLogEntry> activityLogWithinScope(String patientId, Set<RestrictedPart> restrictions) {
+        try {
+            return activityLog(patientId);
+        } catch (PatientServiceUnavailableException e) {
+            if (!e.fault().isAuthorisationRefusal()) {
+                throw e;
+            }
+            // DEBUG for the reason the directory's two branches are: this line carries the upstream
+            // message and is for someone already reproducing the problem.
+            //
+            // NOT metered, deliberately (backlog item 116). patient.directory.restricted is named and
+            // described for the directory, and item 116 put its one call site where the Directory is
+            // built precisely so the counter and X-Restricted-Parts could not disagree. A second call
+            // site here would count a record read under a directory meter and move every number on a
+            // panel without moving the thing the panel is about. The drift it watches for — a
+            // discipline refused a part hc-patient's matrix is supposed to admit — reaches the
+            // directory as well, on the screen every record read is opened from.
+            log.debug("Composing the patient record without the activity log: {}", e.getMessage());
+            restrictions.add(RestrictedPart.LAST_ACTIVITY);
+            // Empty, and the marker above is what stops it being read as "nothing has happened".
+            return List.of();
+        }
     }
 
     /**
@@ -1179,16 +1429,17 @@ public class PatientDirectoryService {
      * The figures this service can answer alone: how many patients the clinician has, split by sex
      * and by child/adult. Case counts are patientservice's and are composed in the browser.
      *
-     * <p><b>On the strict {@link #directory()}, deliberately, and so still a 503 for a discipline
-     * refused one of its parts</b> (backlog item 107). Every field here is a <em>count</em>, and
-     * {@code DashboardSummary} has nowhere to say that one is partial — so degrading would turn
-     * "your caseload could not be counted" into "you have three patients" when there are five, which
-     * is the conflation this item is about, in the one shape where nothing on screen could reveal it.
-     * The directory tolerates a refusal because it can name what is missing; this cannot, so it does
-     * not. That is a deliberate limit of this change rather than an oversight.
+     * <p><b>Strict about every read a count is made of, and about no other</b> (backlog items 107 and
+     * 112). This was on {@link #directory()} outright until 2026-09-14, so a pharmacist and a chemist
+     * got a 503 for a dashboard every figure of which this service could compute exactly — refused over
+     * {@code /api/activity-logs}, which none of the four figures is made of. It is now on
+     * {@link #countableCaseload()}, which tolerates that one refusal and nothing else: the case half of
+     * the caseload union still raises, because losing it makes all four counts smaller than the truth
+     * with nowhere in a flat object of numbers to say so. That paragraph is item 111's Decision C and it
+     * is unchanged; what moved is which reads it reaches, and {@link #countableCaseload()} argues it.
      */
     public DashboardSummary summary() {
-        List<PatientListItem> directory = directory();
+        List<PatientListItem> directory = countableCaseload();
         long female = directory.stream().filter(p -> "female".equalsIgnoreCase(p.sex())).count();
         long male = directory.stream().filter(p -> "male".equalsIgnoreCase(p.sex())).count();
         long kids = directory.stream().filter(PatientListItem::isChild).count();

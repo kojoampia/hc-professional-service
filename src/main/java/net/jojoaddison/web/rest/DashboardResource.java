@@ -34,7 +34,22 @@ public class DashboardResource {
         this.patientDirectoryService = patientDirectoryService;
     }
 
-    /** {@code GET /api/dashboard/summary} : patient counts for the calling clinician. */
+    /**
+     * {@code GET /api/dashboard/summary} : patient counts for the calling clinician.
+     *
+     * <p><b>It answered 503 for a pharmacist and a chemist until 2026-09-14</b> (backlog item 112), over
+     * {@code /api/activity-logs} — a collection none of these four figures is computed from. The counts
+     * are now served, and they are the same counts an entitled caller gets, exactly:
+     * {@link PatientDirectoryService#summary} tolerates that one refusal and still raises for the case
+     * collection, which every figure here does depend on.
+     *
+     * <p><b>And it carries no {@code X-Restricted-Parts}, which is a decision rather than an omission.</b>
+     * That header names a part the response was served <em>without</em>; nothing here is. Marking a
+     * complete set of numbers as partial would be a false sentence pointing the other way, and a client
+     * that rendered it would tell a clinician their dashboard is incomplete when it is whole. The
+     * reasoning, and the argument against item 111's Decision C that lets the refusal through at all,
+     * is on {@code PatientDirectoryService.countableCaseload()}.
+     */
     @GetMapping("/summary")
     public DashboardSummary summary() {
         return patientDirectoryService.summary();

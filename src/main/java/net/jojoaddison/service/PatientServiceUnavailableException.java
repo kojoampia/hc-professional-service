@@ -221,18 +221,45 @@ public class PatientServiceUnavailableException extends RuntimeException {
         return new PatientServiceUnavailableException("written to", path, fault, detail);
     }
 
+    /**
+     * The sentence an operator reads, and — for a refusal — the sentence that is still not true.
+     *
+     * <p><b>Backlog item 112 moves the opening clause and the tail, and leaves the middle alone.</b>
+     * Item 107 fixed the retryability of a refusal and left the rest of this sentence as it was, so a
+     * technician opening a patient record was told <em>"patientservice could not be read
+     * (/api/clinical-cases)"</em>. It <em>was</em> read: hc-patient received the request, understood it,
+     * and answered — the answer was no. "Could not be read" is a claim about a service's health, and it
+     * is the claim that sends an operator to the sibling's logs, its container and its network before
+     * anybody thinks to look at a scope-of-practice matrix. It is the same class of untrue sentence item
+     * 107 removed from the clause beside it, one clause to the left.
+     *
+     * <p><b>The tail moves for a reason that only shows up in company.</b> {@code will NOT clear on
+     * retry} is shared with {@link Fault#SCHEMA} and {@link Fault#NO_TOKEN}, where it means <em>somebody
+     * must change this service before this can ever work</em>. For a refusal it means the opposite:
+     * nothing needs changing and nothing is broken. The words item 107 chose are kept verbatim — they
+     * are what {@code PatientServiceFaultTest} pins and what an operator now recognises — and the
+     * distinction is appended rather than substituted.
+     *
+     * <p><b>A refusal is only ever a read here</b>, so the branch does not have to render {@code verb}:
+     * {@code PatientServiceClient.failedWrite} passes a 4xx from a write through with its own status
+     * intact and never reaches this type. If that ever changes, the path in the message still says which
+     * collection it was.
+     */
     private static String message(String verb, String path, Fault fault, String detail) {
+        String opening = fault.isAuthorisationRefusal()
+            ? "patientservice refused this caller's discipline (" + path + ")"
+            : "patientservice could not be " + verb + " (" + path + ")";
+        String outlook = fault.isAuthorisationRefusal()
+            ? "will NOT clear on retry, because nothing is broken"
+            : (fault.clearsOnRetry() ? "may clear on retry" : "will NOT clear on retry");
         return (
-            "patientservice could not be " +
-            verb +
-            " (" +
-            path +
-            "): " +
+            opening +
+            ": " +
             fault +
             " - " +
             fault.description() +
             "; " +
-            (fault.clearsOnRetry() ? "may clear on retry" : "will NOT clear on retry") +
+            outlook +
             (detail == null || detail.isBlank() ? "" : " [" + detail + "]")
         );
     }
