@@ -8,8 +8,10 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import net.jojoaddison.domain.Profile;
@@ -113,6 +115,21 @@ class PatientDirectoryServiceUnitTest {
         );
     }
 
+    /**
+     * One unpaged page of the directory, as the endpoint serves it.
+     *
+     * <p>These cases went through a public strict {@code directory()} until backlog item 112's review
+     * deleted it: this item had moved its last production caller to the dashboard summary, leaving a
+     * method only its own tests reached. Nothing here was ever <em>about</em> strictness — they assert
+     * composition, emptiness and which upstream collections are read — and nothing in them is refused,
+     * so the tolerant form gives the identical answer while exercising the code a clinician reaches.
+     * The cases that are about strictness say so in their names and drive {@link
+     * PatientDirectoryService#summary} or the record.
+     */
+    private List<PatientListItem> rows() {
+        return service.directory(Pageable.unpaged(), DirectoryFilter.NONE).page().getContent();
+    }
+
     private Task task(String patientId) {
         Task task = new Task();
         task.setAttendantId(PROFESSIONAL_ID);
@@ -170,7 +187,7 @@ class PatientDirectoryServiceUnitTest {
             )
         );
 
-        assertThat(service.directory()).extracting("id").containsExactlyInAnyOrder("patient-task", "patient-case");
+        assertThat(rows()).extracting("id").containsExactlyInAnyOrder("patient-task", "patient-case");
     }
 
     @Test
@@ -196,7 +213,7 @@ class PatientDirectoryServiceUnitTest {
         );
         when(patientService.profiles()).thenReturn(List.of(profile("patient-other", "Not", "Mine", "female", LocalDate.of(1990, 1, 1))));
 
-        assertThat(service.directory()).isEmpty();
+        assertThat(rows()).isEmpty();
     }
 
     @Test
@@ -227,7 +244,7 @@ class PatientDirectoryServiceUnitTest {
             )
         );
 
-        assertThat(service.directory()).filteredOn("isChild", true).extracting("id").containsExactly("kid");
+        assertThat(rows()).filteredOn("isChild", true).extracting("id").containsExactly("kid");
     }
 
     @Test
@@ -236,7 +253,7 @@ class PatientDirectoryServiceUnitTest {
         when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task("p1")));
         when(patientService.profiles()).thenReturn(List.of(profile("p1", "Odd", "Value", "not-a-sex", LocalDate.of(1990, 1, 1))));
 
-        assertThat(service.directory()).singleElement().extracting("sex").isEqualTo("unspecified");
+        assertThat(rows()).singleElement().extracting("sex").isEqualTo("unspecified");
     }
 
     @Test
@@ -244,7 +261,7 @@ class PatientDirectoryServiceUnitTest {
         // A registered account before onboarding completes. It genuinely has no patients.
         when(profileRepository.findByAccountId(ACCOUNT_ID)).thenReturn(Optional.empty());
 
-        assertThat(service.directory()).isEmpty();
+        assertThat(rows()).isEmpty();
         assertThat(service.summary().patients()).isZero();
     }
 
@@ -255,7 +272,7 @@ class PatientDirectoryServiceUnitTest {
         when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task("patient-mine")));
         when(patientService.profiles()).thenReturn(List.of());
 
-        assertThat(service.directory()).isEmpty();
+        assertThat(rows()).isEmpty();
     }
 
     // --- An outage is not a caseload decision (backlog.md item 24) ----------------------------
@@ -412,18 +429,30 @@ class PatientDirectoryServiceUnitTest {
         return PatientServiceUnavailableException.read(path, PatientServiceUnavailableException.Fault.UPSTREAM_FORBIDDEN, "Forbidden");
     }
 
+    /**
+     * An activity logged two hours ago — <b>relative to the run, never a date literal</b>.
+     *
+     * <p>It was {@code 2026-09-10T08:00:00Z} until backlog item 112's review, and the caveat that
+     * changed it is worth keeping. {@code theSummaryCOUNTSthroughARefusalOfAPartNoCountIsMadeOf} asserts
+     * that a refused caller's summary <b>equals</b> an entitled caller's, which is what makes it a guard
+     * against a <em>fifth</em> field derived from the activity log rather than a statement about today's
+     * four. A time-relative field — "patients seen this week" is the obvious one — would be zero on both
+     * sides of that equality once a fixed date aged past the window, and the guard would pass while
+     * proving nothing. A fixture that is always recent cannot go quietly vacuous that way.
+     */
     private static ActivityLog loggedFor(String id, String patientId) {
+        Instant loggedAt = Instant.now().minus(Duration.ofHours(2));
         return new ActivityLog(
             id,
             patientId,
             null,
-            Instant.parse("2026-09-10T08:00:00Z"),
+            loggedAt,
             "seen",
             "detail",
             "OBSERVATION",
             "CLINICIAN",
             PROFESSIONAL_ID,
-            LocalDate.of(2026, 9, 10)
+            LocalDate.ofInstant(loggedAt, ZoneOffset.UTC)
         );
     }
 
@@ -541,19 +570,242 @@ class PatientDirectoryServiceUnitTest {
     }
 
     /**
-     * The summary does <b>not</b> degrade, and that is a decision rather than an omission.
+     * <b>The half of item 111's Decision C that survives, and it is the half the decision was written
+     * for.</b> The case collection is one half of the caseload union, so a caller refused it has fewer
+     * patients in the set every one of these four figures is computed over — and {@code DashboardSummary}
+     * is a flat object of numbers with nowhere to say that one is short. Degrading here would turn "your
+     * caseload could not be counted" into "you have one patient" when there are two, which is the
+     * conflation in the one shape where nothing on screen could reveal it.
      *
-     * <p>Every field of {@code DashboardSummary} is a count and it has nowhere to say that one is
-     * partial, so tolerating a refusal there would turn "your caseload could not be counted" into a
-     * confident wrong number — the same conflation, in the one shape where nothing on screen could
-     * reveal it. Asserted so that a later change cannot route it through the tolerant path by accident.
+     * <p>Asserted rather than argued so that a later change cannot route the summary through the tolerant
+     * caseload by accident — which is exactly what backlog item 112 did to the read below, on purpose.
      */
     @Test
-    void theSummaryDoesNOTdegradeOnARefusal() {
+    void theSummaryStillREFUSEStoCountWhenTheCASEhalfWasRefused() {
         onePatientByTaskAndOneByCase();
-        when(patientService.activityLogs()).thenThrow(refused("/api/activity-logs"));
+        when(patientService.clinicalCases()).thenThrow(refused("/api/clinical-cases"));
 
         assertThatThrownBy(() -> service.summary()).isInstanceOf(PatientServiceUnavailableException.class);
+    }
+
+    /**
+     * <b>And the half that does not survive</b> (backlog item 112). This test asserted the opposite until
+     * 2026-09-14, and the reversal is the whole of that item's dashboard argument.
+     *
+     * <p>Decision C's <em>rule</em> covered the activity log; its <em>reason</em> never did. Nothing in
+     * {@code DashboardSummary} is computed from {@code /api/activity-logs}: it reaches
+     * {@code lastActivityAt} and the recency sort, and the summary reads {@code size()}, {@code sex()} and
+     * {@code isChild()}. So there was no partial count to protect — a pharmacist and a chemist were being
+     * handed a 503 for a dashboard whose every figure this service could compute exactly.
+     *
+     * <p><b>Stated as an equality against the entitled caller's own numbers rather than as literals</b>,
+     * because "it returned 200" is satisfied by any four numbers and the claim is that they are the
+     * <em>same</em> four. Without that, a degradation that also dropped the case-only patient would read
+     * as a pass.
+     */
+    @Test
+    void theSummaryCOUNTSthroughARefusalOfAPartNoCountIsMadeOf() {
+        onePatientByTaskAndOneByCase();
+        var entitled = service.summary();
+        when(patientService.activityLogs()).thenThrow(refused("/api/activity-logs"));
+
+        assertThat(service.summary()).isEqualTo(entitled);
+        assertThat(entitled.patients()).isEqualTo(2);
+    }
+
+    /**
+     * The same read, failing rather than refusing, is still a 503. The tolerant path in the summary is one
+     * {@code catch} and a predicate; widened by one word it would swallow an outage and report the counts
+     * as if nothing had happened — a confident number from a collection nobody could read, which is item
+     * 24's defect and not the one item 112 removed.
+     */
+    @Test
+    void anOUTAGEonTheActivityLogIsStillA503forTheSummary() {
+        onePatientByTaskAndOneByCase();
+        when(patientService.activityLogs()).thenThrow(outage());
+
+        assertThatThrownBy(() -> service.summary()).isInstanceOf(PatientServiceUnavailableException.class);
+    }
+
+    // --- The record a refused discipline can now open (backlog.md item 112) -------------------
+
+    private static final String RECORDED = "p-recorded";
+
+    /**
+     * One patient of the caller's with every collection a record composes answering, so that a test can
+     * withdraw exactly one of them and see what is left.
+     *
+     * <p>The scoped forms are what a record reads (backlog item 23), so the estate-wide stubs in
+     * {@code setUp} cannot serve these by accident.
+     */
+    private void oneFullyReadableRecord() {
+        when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task(RECORDED)));
+        when(patientService.profiles(RECORDED)).thenReturn(List.of(profile(RECORDED, "Ama", "Mensah", "female", LocalDate.of(1990, 1, 1))));
+        when(patientService.clinicalCases(RECORDED)).thenReturn(List.of(aCase("c-1", RECORDED, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.activityLogs(RECORDED)).thenReturn(List.of(loggedFor("al-1", RECORDED)));
+        when(patientService.medications(RECORDED)).thenReturn(
+            List.of(
+                new PatientServiceDtos.Medication(
+                    "med-1",
+                    RECORDED,
+                    null,
+                    "Metformin",
+                    null,
+                    "500mg",
+                    "ACTIVE",
+                    LocalDate.of(2026, 8, 1),
+                    LocalDate.of(2026, 8, 1)
+                )
+            )
+        );
+        when(patientService.reports(RECORDED)).thenReturn(
+            List.of(
+                new Report(
+                    "rep-1",
+                    RECORDED,
+                    null,
+                    "Bloods",
+                    "LAB",
+                    null,
+                    null,
+                    "http://example.invalid/r",
+                    null,
+                    LocalDate.of(2026, 8, 2),
+                    LocalDate.of(2026, 8, 2)
+                )
+            )
+        );
+    }
+
+    /**
+     * <b>The positive control, and it is the one assertion that stops every case below being satisfied by
+     * a broken record.</b> Each of those asserts that <em>something</em> survived a refusal; a change that
+     * emptied every panel for everybody would pass all of them and fail only here.
+     */
+    @Test
+    void aDisciplineEntitledToEveryPartGetsTheWholeRecord() {
+        oneFullyReadableRecord();
+
+        PatientDirectoryService.RecordView view = service.recordWithinScope(RECORDED).orElseThrow();
+
+        assertThat(view.restrictions()).isEmpty();
+        assertThat(view.record().activities()).extracting("id").containsExactly("al-1");
+        assertThat(view.record().lastActivityAt()).isNotNull();
+        assertThat(view.record().cases()).extracting("id").containsExactly("c-1");
+        assertThat(view.record().medications()).extracting("id").containsExactly("med-1");
+        assertThat(view.record().reports()).extracting("id").containsExactly("rep-1");
+    }
+
+    /**
+     * A pharmacist or a chemist: the activity log is refused and the rest of the record is theirs.
+     *
+     * <p>Item 107 gave these two a directory in which every row was a dead end — the list loaded and no
+     * patient in it opened, because this composition read {@code /api/activity-logs} unconditionally.
+     *
+     * <p><b>Three assertions and none is redundant.</b> The record arrives; the parts the caller is
+     * entitled to arrive <em>in full</em>, so the degradation did not quietly take the panels beside it;
+     * and the loss is <b>named</b>, because an empty activity list and a blank {@code lastActivityAt} are
+     * precisely what a patient nobody has touched looks like. "Nothing has happened" and "not yours to
+     * see" are different sentences — the distinction items 78, 87 and 92 each drew at a different site.
+     */
+    @Test
+    void aDisciplineREFUSEDtheActivityLogStillGetsTheRecord() {
+        oneFullyReadableRecord();
+        when(patientService.activityLogs(RECORDED)).thenThrow(refused("/api/activity-logs"));
+
+        PatientDirectoryService.RecordView view = service.recordWithinScope(RECORDED).orElseThrow();
+
+        assertThat(view.record().cases()).extracting("id").containsExactly("c-1");
+        assertThat(view.record().medications()).extracting("id").containsExactly("med-1");
+        assertThat(view.record().reports()).extracting("id").containsExactly("rep-1");
+        assertThat(view.record().activities()).isEmpty();
+        assertThat(view.record().lastActivityAt()).isNull();
+        assertThat(view.restrictions()).containsExactly(PatientDirectoryService.RestrictedPart.LAST_ACTIVITY);
+    }
+
+    /**
+     * <b>A technician still gets a refusal, and this is the decision item 112 was open about.</b>
+     *
+     * <p>hc-patient refuses them {@code /api/clinical-cases}, which is the collection
+     * {@code entitledCases} decides entitlement from — a read that <em>decides</em>, so item 111's
+     * Decision C stops it here without anybody writing a discipline down. Measured on the quality stack
+     * 2026-09-14, a technician is also refused medications and reports, so what a degraded record could
+     * carry is a name, a birth date and a phone number with four empty lists beside it: a contact card in
+     * a patient record's shape, saying "no medications" on a clinical screen.
+     *
+     * <p>The alternative — falling back to the task half as the directory does — would additionally
+     * answer <em>no such patient for this clinician</em> from a collection that was never read, wherever
+     * the task half said no. That is backlog item 24's defect, and a directory narrowed by an unread
+     * collection is not the same act as an entitlement denied by one.
+     */
+    @Test
+    void aREFUSEDcaseCollectionStillRefusesTheRecord_becauseItIsWhatDecidesEntitlement() {
+        oneFullyReadableRecord();
+        when(patientService.clinicalCases(RECORDED)).thenThrow(refused("/api/clinical-cases"));
+
+        assertThatThrownBy(() -> service.recordWithinScope(RECORDED)).isInstanceOf(PatientServiceUnavailableException.class);
+    }
+
+    /**
+     * The medication read is not in the tolerant set either, and the reason is not the entitlement one.
+     *
+     * <p>An empty medication list on a patient record is a clinical claim of a different order from a
+     * blank recency column, and no discipline measured on the quality stack can reach this read and be
+     * refused it — a technician, the only one hc-patient refuses it to, is stopped by the case read
+     * above. Tolerating it would be a degradation nothing has ever produced, guarding a claim nobody
+     * established. The refusal is the honest answer until that changes.
+     */
+    @Test
+    void aREFUSEDmedicationReadIsStillA503_becauseNoMedicationsIsAClinicalSentence() {
+        oneFullyReadableRecord();
+        when(patientService.medications(RECORDED)).thenThrow(refused("/api/medications"));
+
+        assertThatThrownBy(() -> service.recordWithinScope(RECORDED)).isInstanceOf(PatientServiceUnavailableException.class);
+    }
+
+    /**
+     * <b>The thing most at risk from this change.</b> An activity log that could not be read must still be
+     * a 503; only a <em>refusal</em> is tolerated. One word wider and a sibling outage would be served as
+     * a record with an empty activity panel and a marker claiming the caller was not permitted it — a
+     * false sentence in place of the old one, which is the failure mode this backlog has recorded three
+     * times inside its own fixes.
+     */
+    @Test
+    void anOUTAGEonTheActivityLogIsStillA503forTheRecord() {
+        oneFullyReadableRecord();
+        when(patientService.activityLogs(RECORDED)).thenThrow(outage());
+
+        assertThatThrownBy(() -> service.recordWithinScope(RECORDED)).isInstanceOf(PatientServiceUnavailableException.class);
+    }
+
+    /**
+     * A patient outside the caseload is still nobody's, with or without a restriction — the authorization
+     * boundary is not a part that may be withheld. Without this, "tolerates a refusal" and "serves any
+     * patient by id" are one edit apart and nothing would say so.
+     */
+    @Test
+    void theToleranceDoesNOTopenAPatientOutsideTheCaseload() {
+        when(patientService.profiles("p-someone-else")).thenReturn(
+            List.of(profile("p-someone-else", "Not", "Mine", "male", LocalDate.of(1980, 1, 1)))
+        );
+        when(patientService.activityLogs("p-someone-else")).thenThrow(refused("/api/activity-logs"));
+
+        assertThat(service.recordWithinScope("p-someone-else")).isEmpty();
+    }
+
+    /**
+     * <b>The strict form keeps its strictness, and it has a caller that needs it.</b>
+     * {@code activityById} and {@code reportById} re-read a filed entry so a replayed write answers with
+     * the record rather than a fresh copy; routed through the tolerant path, a refused activity log would
+     * make that a {@code 201} carrying nothing instead of a 503 naming why. The two forms sit one line
+     * apart in the service and the difference between them is invisible at the call site.
+     */
+    @Test
+    void theSTRICTrecordStillRaisesOnARefusal() {
+        oneFullyReadableRecord();
+        when(patientService.activityLogs(RECORDED)).thenThrow(refused("/api/activity-logs"));
+
+        assertThatThrownBy(() -> service.record(RECORDED)).isInstanceOf(PatientServiceUnavailableException.class);
     }
 
     // --- Paging, filtering and sorting (web-mobile-port.md § Phase 1.1) -----------------------
@@ -830,6 +1082,105 @@ class PatientDirectoryServiceUnitTest {
         verify(patientService).createReport(body.capture());
         assertThat(body.getValue()).containsEntry("category", "ASSESSMENT");
         assertThat(report.reportType()).isEqualTo("ASSESSMENT");
+    }
+
+    /** The filed report both replay cases read back, stubbed on the write and on the scoped read. */
+    private static Report filedReport() {
+        return new Report(
+            "rep-1",
+            MINE,
+            null,
+            "assessment.pdf",
+            "ASSESSMENT",
+            "d",
+            "s",
+            "http://x",
+            PROFESSIONAL_ID,
+            LocalDate.of(2026, 8, 20),
+            LocalDate.of(2026, 8, 20)
+        );
+    }
+
+    /**
+     * <b>A replayed report is answered while the activity log is refused</b> — found by backlog item
+     * 112's review, and live before this item as well as during it.
+     *
+     * <p>The replay path read the <em>whole record</em> to find one filed report, so it read
+     * {@code /api/activity-logs} — which a pharmacist may not. Measured on the quality stack: a
+     * pharmacist is permitted {@code /api/reports} and refused {@code /api/activity-logs}. So the write
+     * succeeded, the receipt was stored, the report was theirs to read, and every retry of the same
+     * {@code clientRef} answered <b>503, for ever</b> — and {@code mobile/}'s offline queue retries by
+     * {@code clientRef} as a matter of course.
+     *
+     * <p><b>It is this item's own argument applied to the path the item did not follow</b>: a report is
+     * not made of the activity log, exactly as none of the dashboard's counts is. The javadoc added by
+     * this change claimed the strict read was what this caller needed, which is what turned a
+     * pre-existing defect into something the change had to answer for.
+     *
+     * <p>The assertion is that the replay returns the filed report — not merely that it does not throw,
+     * which a {@code null} answer would also satisfy while telling a clinician their report had vanished.
+     */
+    @Test
+    void aREPLAYEDreportIsAnsweredWhenTheActivityLogIsREFUSED() {
+        onePatientOfMine();
+        when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c-1", MINE, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.createReport(any())).thenReturn(filedReport());
+        when(patientService.reports(MINE)).thenReturn(List.of(filedReport()));
+
+        var first = service.appendReport(MINE, new CreateReport("assessment.pdf", "ASSESSMENT", "d", "http://x", "ref-rep"));
+        when(patientService.activityLogs(MINE)).thenThrow(refused("/api/activity-logs"));
+        var replay = service.appendReport(MINE, new CreateReport("assessment.pdf", "ASSESSMENT", "d", "http://x", "ref-rep"));
+
+        verify(patientService, org.mockito.Mockito.times(1)).createReport(any());
+        assertThat(first.id()).isEqualTo("rep-1");
+        assertThat(replay).isNotNull();
+        assertThat(replay.id()).isEqualTo("rep-1");
+        assertThat(replay.label()).isEqualTo("assessment.pdf");
+    }
+
+    /**
+     * And the read it <b>is</b> made of is still strict: a report replay during a genuine
+     * {@code /api/reports} outage raises rather than answering {@code null}, which would report a filed
+     * record as missing. Narrowing a read must not become swallowing a failure of it.
+     */
+    @Test
+    void aREPLAYEDreportStillRaisesWhenTheREPORTcollectionCannotBeRead() {
+        onePatientOfMine();
+        when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c-1", MINE, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.createReport(any())).thenReturn(filedReport());
+        when(patientService.reports(MINE)).thenReturn(List.of(filedReport()));
+        service.appendReport(MINE, new CreateReport("assessment.pdf", "ASSESSMENT", "d", "http://x", "ref-rep"));
+
+        when(patientService.reports(MINE)).thenThrow(outage());
+
+        assertThatThrownBy(
+            () -> service.appendReport(MINE, new CreateReport("assessment.pdf", "ASSESSMENT", "d", "http://x", "ref-rep"))
+        ).isInstanceOf(PatientServiceUnavailableException.class);
+    }
+
+    /**
+     * The activity replay is left resting on the strict record, deliberately, and this pins it.
+     *
+     * <p>Unlike a report, an activity entry <em>is</em> made of the refused collection: a caller who may
+     * not read the activity log cannot be told what their filed entry says, and a {@code 201} with the
+     * entry omitted would say the write had produced nothing. Whether any discipline can reach this —
+     * write to that collection and not read it — is an open assumption recorded on the method; the
+     * behaviour is right either way, and asserting it stops a later tidy-up sweeping both replay paths
+     * into one on the strength of their shape.
+     */
+    @Test
+    void aREPLAYEDactivityStillRaisesWhenTheActivityLogIsREFUSED() {
+        onePatientOfMine();
+        when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c-1", MINE, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.createActivityLog(any())).thenReturn(createdLog("al-1", "Wound dressed"));
+        when(patientService.activityLogs(MINE)).thenReturn(List.of(createdLog("al-1", "Wound dressed")));
+        service.appendActivity(MINE, new CreateActivity("Wound dressed", "d", null, "ref-act"));
+
+        when(patientService.activityLogs(MINE)).thenThrow(refused("/api/activity-logs"));
+
+        assertThatThrownBy(() -> service.appendActivity(MINE, new CreateActivity("Wound dressed", "d", null, "ref-act"))).isInstanceOf(
+            PatientServiceUnavailableException.class
+        );
     }
 
     /** A stand-in for the Mongo repository; only findByClientRef and save are exercised. */
@@ -1291,7 +1642,7 @@ class PatientDirectoryServiceUnitTest {
         when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task(MINE)));
         when(patientService.profiles()).thenReturn(List.of(profile(MINE, "Ama", "Mensah", "female", LocalDate.of(1990, 1, 1))));
 
-        service.directory();
+        rows();
         service.myCases(PageRequest.of(0, 20), null);
 
         verify(patientService, org.mockito.Mockito.atLeastOnce()).clinicalCases();
@@ -1472,7 +1823,7 @@ class PatientDirectoryServiceUnitTest {
         onePatientOfMine();
         when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
 
-        service.directory();
+        rows();
         service.myCases(PageRequest.of(0, 20), null);
         service.casesFor(MINE, PageRequest.of(0, 20));
         service.record(MINE);

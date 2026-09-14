@@ -49,6 +49,57 @@ class PatientServiceFaultTest {
     }
 
     /**
+     * <b>The other untrue clause in the same sentence, one to the left</b> (backlog item 112). Item 107
+     * fixed the retryability and left the opening as <em>"patientservice could not be read
+     * (/api/clinical-cases)"</em> — which the sibling had just disproved by answering. "Could not be read"
+     * is a claim about a service's health, and it is the claim that sends an operator to hc-patient's
+     * logs, its container and its network before anyone looks at a scope-of-practice matrix. For the
+     * three refused disciplines it is the message that reaches the screen on every strict read.
+     *
+     * <p>Asserted as a denial plus a replacement rather than on the whole string: the sentence is
+     * composed from four parts and pinning it verbatim would go red on a reworded description, which is
+     * not what this is about.
+     */
+    @Test
+    void aREFUSALdoesNotClaimTheSiblingCouldNotBeRead() {
+        String message = PatientServiceUnavailableException.read("/api/clinical-cases", Fault.of(forbidden()), "Forbidden").getMessage();
+
+        assertThat(message).doesNotContain("could not be read").contains("refused this caller's discipline", "/api/clinical-cases");
+    }
+
+    /**
+     * And the tail, which only misleads in company: {@code will NOT clear on retry} is shared with
+     * {@link Fault#SCHEMA} and {@link Fault#NO_TOKEN}, where it means <em>somebody must change this
+     * service first</em>. For a refusal it means the opposite. The words item 107 chose are kept and the
+     * distinction is appended, so an operator who has learned the phrase still recognises it.
+     */
+    @Test
+    void aREFUSALsaysThatNothingIsBroken() {
+        assertThat(PatientServiceUnavailableException.read("/api/activity-logs", Fault.of(forbidden()), null).getMessage()).contains(
+            "will NOT clear on retry, because nothing is broken"
+        );
+    }
+
+    /**
+     * <b>Nothing else moved, and this is the control for the two above.</b> A failure that really is a
+     * failure still says so: rewriting the opening clause for every fault would have made a genuine
+     * outage read as an authorisation decision, which is item 107's defect inverted and worse — an
+     * operator told "nothing is broken" while the sibling is down.
+     */
+    @Test
+    void aGENUINEfailureStillSaysTheReadDidNotHappen() {
+        String message = PatientServiceUnavailableException.read(
+            "/api/clinical-cases",
+            Fault.of(new ResourceAccessException("connection refused")),
+            null
+        ).getMessage();
+
+        assertThat(message)
+            .contains("could not be read", "may clear on retry")
+            .doesNotContain("refused this caller's discipline", "nothing is broken");
+    }
+
+    /**
      * And the other half, which the fix is at least as likely to break: a sibling that is genuinely
      * unwell is still a transient fault, and telling an operator that a 502 will never clear is the
      * same defect pointing the other way.

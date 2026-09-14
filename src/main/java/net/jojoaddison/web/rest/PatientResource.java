@@ -55,7 +55,15 @@ import tech.jhipster.web.util.PaginationUtil;
 public class PatientResource {
 
     /**
-     * Names the composed parts of the directory the caller's discipline may not read (backlog item 107).
+     * Names the composed parts the caller's discipline may not read (backlog item 107).
+     *
+     * <p><b>On two responses now, not one</b> (backlog item 112): the directory below, and one patient's
+     * record. The vocabulary is the same on both — {@link PatientDirectoryService.RestrictedPart#token()}
+     * — and deliberately so, because the collection that was refused is the same collection. What the
+     * token <em>costs</em> differs by response, and that is the reading client's business rather than
+     * this header's: {@code lastActivity} blanks a column on the list and the activity panel plus
+     * {@code lastActivityAt} on a record. {@code caseAssignments} reaches the list only, since a record
+     * whose case read was refused cannot decide entitlement and is not served at all.
      *
      * <p><b>A header rather than a wider body, and that was the trade.</b> {@code web/} and
      * {@code mobile/} both consume this endpoint's body as a bare JSON array, so an envelope naming the
@@ -259,11 +267,34 @@ public class PatientResource {
      * <p>404 when the patient is not one of the caller's, which is the same answer as for a patient
      * that does not exist. Distinguishing the two would let any clinician test whether a given
      * patient id is real.
+     *
+     * <p><b>It carries {@link #RESTRICTED_PARTS} too, since backlog item 112.</b> Item 107 gave a
+     * pharmacist and a chemist a directory in which every row was a dead end: this endpoint composes
+     * {@code /api/activity-logs}, which hc-patient refuses those two disciplines, and answered 503 for
+     * the whole record over one panel of it. It now serves the record without that panel and names it,
+     * with the same token and the same vocabulary the list above uses — see
+     * {@link PatientDirectoryService#recordWithinScope}, which has the per-discipline measurements and
+     * argues why a technician's record still refuses.
+     *
+     * <p><b>{@code ResponseEntity} rather than the record itself, and the body is byte-identical.</b>
+     * A header is the only place a restriction can go: {@code web/} and {@code mobile/} both deserialise
+     * this response as the record object, so a wrapper naming the restriction would break them on the
+     * release that shipped it — item 111 Decision A's trade, unchanged. Neither frontend reads the header
+     * on this endpoint yet; item 114 did that work for the directory alone, and extending it to the
+     * record screen is a client-side row rather than something this can close.
      */
     @GetMapping("/{id}")
-    public PatientRecord get(@PathVariable String id) {
-        return patientDirectoryService
-            .record(id)
+    public ResponseEntity<PatientRecord> get(@PathVariable String id) {
+        PatientDirectoryService.RecordView found = patientDirectoryService
+            .recordWithinScope(id)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such patient for this clinician"));
+        HttpHeaders headers = new HttpHeaders();
+        if (!found.restrictions().isEmpty()) {
+            headers.add(
+                RESTRICTED_PARTS,
+                found.restrictions().stream().map(PatientDirectoryService.RestrictedPart::token).collect(Collectors.joining(","))
+            );
+        }
+        return ResponseEntity.ok().headers(headers).body(found.record());
     }
 }

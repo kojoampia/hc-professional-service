@@ -151,6 +151,94 @@ class PatientDirectoryRestrictionHeaderTest {
             .isNotEqualTo(RestrictedPart.CASE_ASSIGNMENTS.name());
     }
 
+    // --- The same header on one patient's record (backlog item 112) --------------------------
+
+    private static net.jojoaddison.service.dto.PatientDtos.PatientRecord aRecord() {
+        return new net.jojoaddison.service.dto.PatientDtos.PatientRecord(
+            "p-1",
+            "Ama Mensah",
+            null,
+            "female",
+            false,
+            "1990-01-01",
+            "024",
+            "p@example.invalid",
+            null,
+            null,
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of()
+        );
+    }
+
+    private void answersRecord(java.util.Set<RestrictedPart> restrictions) {
+        when(patientDirectoryService.recordWithinScope(any())).thenReturn(
+            Optional.of(new PatientDirectoryService.RecordView(aRecord(), restrictions))
+        );
+    }
+
+    /**
+     * The ordinary case on the record too: six of the eight disciplines read every part of one, and pay
+     * nothing for the two that cannot.
+     */
+    @Test
+    void aRecordWithNothingRestrictedCarriesNoHeader() {
+        answersRecord(java.util.Set.of());
+
+        ResponseEntity<net.jojoaddison.service.dto.PatientDtos.PatientRecord> response = resource.get("p-1");
+
+        assertThat(response.getHeaders().headerNames()).doesNotContain(PatientResource.RESTRICTED_PARTS);
+        assertThat(response.getBody().id()).isEqualTo("p-1");
+    }
+
+    /**
+     * A pharmacist opening a patient: 200 with the record, and the withheld panel named.
+     *
+     * <p>Item 107 left this at 503, so the directory it unblocked was a list of dead ends (backlog item
+     * 112). The status is asserted beside the header because the header alone would be green on a
+     * response that had kept the 503 and merely started announcing why.
+     */
+    @Test
+    void aRestrictedPartIsNAMEDonTheRecordResponse() {
+        answersRecord(java.util.EnumSet.of(RestrictedPart.LAST_ACTIVITY));
+
+        ResponseEntity<net.jojoaddison.service.dto.PatientDtos.PatientRecord> response = resource.get("p-1");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getHeaders().getFirst(PatientResource.RESTRICTED_PARTS)).isEqualTo("lastActivity");
+        assertThat(response.getBody()).isNotNull();
+    }
+
+    /**
+     * <b>The body is still the record and not an envelope</b>, which is the whole reason a header was
+     * chosen (item 111 Decision A). {@code web/} and {@code mobile/} deserialise this response as the
+     * record object; a wrapper naming the restriction would break both on the release that shipped it,
+     * and a header cannot. Asserted rather than trusted, because the change that adds an envelope looks
+     * exactly like a tidy-up from inside this repository.
+     */
+    @Test
+    void theRecordBodyIsUnchangedByTheRestriction() {
+        answersRecord(java.util.EnumSet.of(RestrictedPart.LAST_ACTIVITY));
+
+        assertThat(resource.get("p-1").getBody()).isEqualTo(aRecord());
+    }
+
+    /**
+     * A patient that is not the caller's is still a 404, restriction machinery or not. The tolerant path
+     * and the authorization boundary are different questions, and this is what keeps them apart at the
+     * resource: {@code Optional.empty()} must not become a 200 carrying a record-shaped nothing.
+     */
+    @Test
+    void aPatientOutsideTheCaseloadIsStillA404() {
+        when(patientDirectoryService.recordWithinScope(any())).thenReturn(Optional.empty());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> resource.get("p-other"))
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+            .hasMessageContaining("404");
+    }
+
     /**
      * The same header, built by the <b>real service</b> from two real refusals — the case the four
      * tests above cannot reach and the one the ordering defect lived in.
