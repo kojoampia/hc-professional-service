@@ -8,8 +8,10 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import net.jojoaddison.domain.Profile;
@@ -113,6 +115,21 @@ class PatientDirectoryServiceUnitTest {
         );
     }
 
+    /**
+     * One unpaged page of the directory, as the endpoint serves it.
+     *
+     * <p>These cases went through a public strict {@code directory()} until backlog item 112's review
+     * deleted it: this item had moved its last production caller to the dashboard summary, leaving a
+     * method only its own tests reached. Nothing here was ever <em>about</em> strictness — they assert
+     * composition, emptiness and which upstream collections are read — and nothing in them is refused,
+     * so the tolerant form gives the identical answer while exercising the code a clinician reaches.
+     * The cases that are about strictness say so in their names and drive {@link
+     * PatientDirectoryService#summary} or the record.
+     */
+    private List<PatientListItem> rows() {
+        return service.directory(Pageable.unpaged(), DirectoryFilter.NONE).page().getContent();
+    }
+
     private Task task(String patientId) {
         Task task = new Task();
         task.setAttendantId(PROFESSIONAL_ID);
@@ -170,7 +187,7 @@ class PatientDirectoryServiceUnitTest {
             )
         );
 
-        assertThat(service.directory()).extracting("id").containsExactlyInAnyOrder("patient-task", "patient-case");
+        assertThat(rows()).extracting("id").containsExactlyInAnyOrder("patient-task", "patient-case");
     }
 
     @Test
@@ -196,7 +213,7 @@ class PatientDirectoryServiceUnitTest {
         );
         when(patientService.profiles()).thenReturn(List.of(profile("patient-other", "Not", "Mine", "female", LocalDate.of(1990, 1, 1))));
 
-        assertThat(service.directory()).isEmpty();
+        assertThat(rows()).isEmpty();
     }
 
     @Test
@@ -227,7 +244,7 @@ class PatientDirectoryServiceUnitTest {
             )
         );
 
-        assertThat(service.directory()).filteredOn("isChild", true).extracting("id").containsExactly("kid");
+        assertThat(rows()).filteredOn("isChild", true).extracting("id").containsExactly("kid");
     }
 
     @Test
@@ -236,7 +253,7 @@ class PatientDirectoryServiceUnitTest {
         when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task("p1")));
         when(patientService.profiles()).thenReturn(List.of(profile("p1", "Odd", "Value", "not-a-sex", LocalDate.of(1990, 1, 1))));
 
-        assertThat(service.directory()).singleElement().extracting("sex").isEqualTo("unspecified");
+        assertThat(rows()).singleElement().extracting("sex").isEqualTo("unspecified");
     }
 
     @Test
@@ -244,7 +261,7 @@ class PatientDirectoryServiceUnitTest {
         // A registered account before onboarding completes. It genuinely has no patients.
         when(profileRepository.findByAccountId(ACCOUNT_ID)).thenReturn(Optional.empty());
 
-        assertThat(service.directory()).isEmpty();
+        assertThat(rows()).isEmpty();
         assertThat(service.summary().patients()).isZero();
     }
 
@@ -255,7 +272,7 @@ class PatientDirectoryServiceUnitTest {
         when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task("patient-mine")));
         when(patientService.profiles()).thenReturn(List.of());
 
-        assertThat(service.directory()).isEmpty();
+        assertThat(rows()).isEmpty();
     }
 
     // --- An outage is not a caseload decision (backlog.md item 24) ----------------------------
@@ -412,18 +429,30 @@ class PatientDirectoryServiceUnitTest {
         return PatientServiceUnavailableException.read(path, PatientServiceUnavailableException.Fault.UPSTREAM_FORBIDDEN, "Forbidden");
     }
 
+    /**
+     * An activity logged two hours ago — <b>relative to the run, never a date literal</b>.
+     *
+     * <p>It was {@code 2026-09-10T08:00:00Z} until backlog item 112's review, and the caveat that
+     * changed it is worth keeping. {@code theSummaryCOUNTSthroughARefusalOfAPartNoCountIsMadeOf} asserts
+     * that a refused caller's summary <b>equals</b> an entitled caller's, which is what makes it a guard
+     * against a <em>fifth</em> field derived from the activity log rather than a statement about today's
+     * four. A time-relative field — "patients seen this week" is the obvious one — would be zero on both
+     * sides of that equality once a fixed date aged past the window, and the guard would pass while
+     * proving nothing. A fixture that is always recent cannot go quietly vacuous that way.
+     */
     private static ActivityLog loggedFor(String id, String patientId) {
+        Instant loggedAt = Instant.now().minus(Duration.ofHours(2));
         return new ActivityLog(
             id,
             patientId,
             null,
-            Instant.parse("2026-09-10T08:00:00Z"),
+            loggedAt,
             "seen",
             "detail",
             "OBSERVATION",
             "CLINICIAN",
             PROFESSIONAL_ID,
-            LocalDate.of(2026, 9, 10)
+            LocalDate.ofInstant(loggedAt, ZoneOffset.UTC)
         );
     }
 
@@ -1055,6 +1084,105 @@ class PatientDirectoryServiceUnitTest {
         assertThat(report.reportType()).isEqualTo("ASSESSMENT");
     }
 
+    /** The filed report both replay cases read back, stubbed on the write and on the scoped read. */
+    private static Report filedReport() {
+        return new Report(
+            "rep-1",
+            MINE,
+            null,
+            "assessment.pdf",
+            "ASSESSMENT",
+            "d",
+            "s",
+            "http://x",
+            PROFESSIONAL_ID,
+            LocalDate.of(2026, 8, 20),
+            LocalDate.of(2026, 8, 20)
+        );
+    }
+
+    /**
+     * <b>A replayed report is answered while the activity log is refused</b> — found by backlog item
+     * 112's review, and live before this item as well as during it.
+     *
+     * <p>The replay path read the <em>whole record</em> to find one filed report, so it read
+     * {@code /api/activity-logs} — which a pharmacist may not. Measured on the quality stack: a
+     * pharmacist is permitted {@code /api/reports} and refused {@code /api/activity-logs}. So the write
+     * succeeded, the receipt was stored, the report was theirs to read, and every retry of the same
+     * {@code clientRef} answered <b>503, for ever</b> — and {@code mobile/}'s offline queue retries by
+     * {@code clientRef} as a matter of course.
+     *
+     * <p><b>It is this item's own argument applied to the path the item did not follow</b>: a report is
+     * not made of the activity log, exactly as none of the dashboard's counts is. The javadoc added by
+     * this change claimed the strict read was what this caller needed, which is what turned a
+     * pre-existing defect into something the change had to answer for.
+     *
+     * <p>The assertion is that the replay returns the filed report — not merely that it does not throw,
+     * which a {@code null} answer would also satisfy while telling a clinician their report had vanished.
+     */
+    @Test
+    void aREPLAYEDreportIsAnsweredWhenTheActivityLogIsREFUSED() {
+        onePatientOfMine();
+        when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c-1", MINE, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.createReport(any())).thenReturn(filedReport());
+        when(patientService.reports(MINE)).thenReturn(List.of(filedReport()));
+
+        var first = service.appendReport(MINE, new CreateReport("assessment.pdf", "ASSESSMENT", "d", "http://x", "ref-rep"));
+        when(patientService.activityLogs(MINE)).thenThrow(refused("/api/activity-logs"));
+        var replay = service.appendReport(MINE, new CreateReport("assessment.pdf", "ASSESSMENT", "d", "http://x", "ref-rep"));
+
+        verify(patientService, org.mockito.Mockito.times(1)).createReport(any());
+        assertThat(first.id()).isEqualTo("rep-1");
+        assertThat(replay).isNotNull();
+        assertThat(replay.id()).isEqualTo("rep-1");
+        assertThat(replay.label()).isEqualTo("assessment.pdf");
+    }
+
+    /**
+     * And the read it <b>is</b> made of is still strict: a report replay during a genuine
+     * {@code /api/reports} outage raises rather than answering {@code null}, which would report a filed
+     * record as missing. Narrowing a read must not become swallowing a failure of it.
+     */
+    @Test
+    void aREPLAYEDreportStillRaisesWhenTheREPORTcollectionCannotBeRead() {
+        onePatientOfMine();
+        when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c-1", MINE, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.createReport(any())).thenReturn(filedReport());
+        when(patientService.reports(MINE)).thenReturn(List.of(filedReport()));
+        service.appendReport(MINE, new CreateReport("assessment.pdf", "ASSESSMENT", "d", "http://x", "ref-rep"));
+
+        when(patientService.reports(MINE)).thenThrow(outage());
+
+        assertThatThrownBy(
+            () -> service.appendReport(MINE, new CreateReport("assessment.pdf", "ASSESSMENT", "d", "http://x", "ref-rep"))
+        ).isInstanceOf(PatientServiceUnavailableException.class);
+    }
+
+    /**
+     * The activity replay is left resting on the strict record, deliberately, and this pins it.
+     *
+     * <p>Unlike a report, an activity entry <em>is</em> made of the refused collection: a caller who may
+     * not read the activity log cannot be told what their filed entry says, and a {@code 201} with the
+     * entry omitted would say the write had produced nothing. Whether any discipline can reach this —
+     * write to that collection and not read it — is an open assumption recorded on the method; the
+     * behaviour is right either way, and asserting it stops a later tidy-up sweeping both replay paths
+     * into one on the strength of their shape.
+     */
+    @Test
+    void aREPLAYEDactivityStillRaisesWhenTheActivityLogIsREFUSED() {
+        onePatientOfMine();
+        when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c-1", MINE, "OPEN", PROFESSIONAL_ID)));
+        when(patientService.createActivityLog(any())).thenReturn(createdLog("al-1", "Wound dressed"));
+        when(patientService.activityLogs(MINE)).thenReturn(List.of(createdLog("al-1", "Wound dressed")));
+        service.appendActivity(MINE, new CreateActivity("Wound dressed", "d", null, "ref-act"));
+
+        when(patientService.activityLogs(MINE)).thenThrow(refused("/api/activity-logs"));
+
+        assertThatThrownBy(() -> service.appendActivity(MINE, new CreateActivity("Wound dressed", "d", null, "ref-act"))).isInstanceOf(
+            PatientServiceUnavailableException.class
+        );
+    }
+
     /** A stand-in for the Mongo repository; only findByClientRef and save are exercised. */
     private static final class InMemoryReceiptRepository
         extends org.mockito.Mockito
@@ -1514,7 +1642,7 @@ class PatientDirectoryServiceUnitTest {
         when(taskRepository.findByAttendantId(PROFESSIONAL_ID)).thenReturn(List.of(task(MINE)));
         when(patientService.profiles()).thenReturn(List.of(profile(MINE, "Ama", "Mensah", "female", LocalDate.of(1990, 1, 1))));
 
-        service.directory();
+        rows();
         service.myCases(PageRequest.of(0, 20), null);
 
         verify(patientService, org.mockito.Mockito.atLeastOnce()).clinicalCases();
@@ -1695,7 +1823,7 @@ class PatientDirectoryServiceUnitTest {
         onePatientOfMine();
         when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
 
-        service.directory();
+        rows();
         service.myCases(PageRequest.of(0, 20), null);
         service.casesFor(MINE, PageRequest.of(0, 20));
         service.record(MINE);

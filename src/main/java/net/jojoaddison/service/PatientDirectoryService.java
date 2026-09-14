@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import net.jojoaddison.domain.PatientWriteReceipt;
@@ -439,7 +440,7 @@ public class PatientDirectoryService {
     /**
      * The directory as far as the caller's discipline is permitted to see it, recording what it was not.
      *
-     * <p>The mirror of {@link #directory()} — same composition, same order, same {@code isChild}
+     * <p>The mirror of {@link #caseload} — same composition, same order, same {@code isChild}
      * arithmetic — differing only in that the two reads whose absence the list can survive are allowed
      * to be refused. Both are expressed as a catch around the strict helper rather than as a second
      * code path, so a change to how the directory is assembled cannot apply to one and miss the other.
@@ -527,18 +528,6 @@ public class PatientDirectoryService {
     }
 
     /**
-     * The clinician's patient directory, newest activity first — <b>the strict form</b>.
-     *
-     * <p>Every read it makes must succeed: a refusal raises here exactly as an outage does. That is
-     * what {@link #summary()} needs, because a count computed over a collection the caller was refused
-     * is a wrong number wearing the clothes of a fact (backlog item 107). The endpoint's form is
-     * {@link #directory(Pageable, DirectoryFilter)}, which tolerates a refusal and says so.
-     */
-    public List<PatientListItem> directory() {
-        return caseload(this::lastActivityByPatient);
-    }
-
-    /**
      * The caseload rows {@link #summary()} counts — <b>every read that a count depends on is strict, and
      * the one that no count depends on is not</b> (backlog item 112).
      *
@@ -588,13 +577,23 @@ public class PatientDirectoryService {
     /**
      * The caseload rows, assembled once, with only the recency read varying between the callers.
      *
-     * <p>Extracted rather than copied so that {@link #directory()} and {@link #countableCaseload()}
-     * cannot drift in <em>what</em> they assemble while differing in what they will lose — the argument
-     * {@link #compose} and {@link #withinScope} already make one layer down. The supplier is invoked at
-     * the same point the expression it replaced was evaluated, so a caller with no profile and a caller
-     * with no patients still make no upstream recency read at all.
+     * <p>Extracted rather than copied so that its callers cannot drift in <em>what</em> they assemble
+     * while differing in what they will lose — the argument {@link #compose} and {@link #withinScope}
+     * already make one layer down. The supplier is invoked at the same point the expression it replaced
+     * was evaluated, so a caller with no profile and a caller with no patients still make no upstream
+     * recency read at all.
+     *
+     * <p><b>There was a public {@code directory()} here — the fully strict composition — and backlog item
+     * 112's review removed it rather than leaving it</b>. It had exactly one caller, {@link #summary},
+     * and this item moved that caller to {@link #countableCaseload()}; what was left was a public method
+     * nothing on a running stack reached, exercised only by its own tests, which go on passing while the
+     * thing they describe stops being true. Keeping it would also have contradicted this item's own
+     * reasoning one method away: {@link #record} keeps its strict form <em>because</em> it has a caller
+     * that needs it, and a strict sibling kept on any weaker ground than that is the exemption this
+     * change refused to grant anywhere else. Its tests now go through
+     * {@link #directory(Pageable, DirectoryFilter)} and {@link #summary}, which is what production does.
      */
-    private List<PatientListItem> caseload(java.util.function.Supplier<Map<String, String>> lastActivity) {
+    private List<PatientListItem> caseload(Supplier<Map<String, String>> lastActivity) {
         String professionalId = callerProfileId().orElse(null);
         if (professionalId == null) {
             return List.of();
@@ -612,7 +611,7 @@ public class PatientDirectoryService {
      * <p>Only a refusal is tolerated; everything else raises, for {@link #lastActivityWithinScope}'s
      * reason. The map is discarded by {@link #summary()}'s arithmetic either way — see
      * {@link #countableCaseload()} for why that is what makes tolerating it honest here and not in
-     * {@link #directory()}, whose rows carry the field this populates.
+     * {@link #withinScope}, whose rows carry the field this populates.
      */
     private Map<String, String> lastActivityIfPermitted() {
         try {
@@ -661,12 +660,18 @@ public class PatientDirectoryService {
      * was seven requests and ~1260 rows.
      *
      * <p><b>This is the strict form, and it is no longer what the endpoint serves</b> (backlog item
-     * 112). Every read it makes must succeed, a refusal raising exactly as an outage does — which is
-     * what {@link #activityById} and {@link #reportById} need: they re-read a filed entry so that a
-     * replayed write answers with the record rather than a fresh copy, and a tolerated refusal would
-     * turn that into a {@code 201} carrying nothing instead of a 503 naming why. {@code GET
+     * 112). Every read it makes must succeed, a refusal raising exactly as an outage does. {@code GET
      * /api/patients/{id}} goes through {@link #recordWithinScope}, which loses the activity log rather
      * than the record and says which it was.
+     *
+     * <p><b>Its one caller is {@link #activityById}, and the claim that it has two was wrong</b> — an
+     * earlier draft of this paragraph named {@link #reportById} as well, on the reasoning that a replayed
+     * write must answer with the filed entry rather than a fresh copy. That is true of both and it does
+     * not make this the right read for both: a report is not made of the activity log, so routing it
+     * through here answered 503 for a pharmacist replaying a report they had successfully filed and could
+     * read perfectly well. <b>The javadoc asserting a property the code did not have is what surfaced
+     * it</b>, and the sentence and the defect were fixed together rather than the sentence alone — see
+     * {@link #reportById}, which now composes from the report collection.
      *
      * @throws PatientServiceUnavailableException when the sibling could not be read
      */
@@ -683,7 +688,7 @@ public class PatientDirectoryService {
      * reads {@code /api/activity-logs} unconditionally, hc-patient refuses them that collection, and the
      * whole record came back 503 over one panel of it. This method is the same composition with that one
      * read allowed to be refused and <em>named</em>, exactly as
-     * {@link #directory(Pageable, DirectoryFilter)} is to {@link #directory()}.
+     * {@link #directory(Pageable, DirectoryFilter)} is to a strict composition.
      *
      * <h3>One read tolerated, and the rest are not — the measurements this rests on</h3>
      * Taken through the gateway on the quality stack, 2026-09-14, all eight disciplines, on each
@@ -809,21 +814,7 @@ public class PatientDirectoryService {
             .map(m -> new RecordEntry(m.id(), occurredAt(null, m.startedOn() == null ? m.createdDate() : m.startedOn()), m.name()))
             .toList();
 
-        List<ClinicalReport> reports = patientService
-            .reports(patientId)
-            .stream()
-            .filter(r -> patientId.equals(r.patientId()))
-            .map(
-                r ->
-                    new ClinicalReport(
-                        r.id(),
-                        occurredAt(null, r.reportDate() == null ? r.createdDate() : r.reportDate()),
-                        r.name(),
-                        r.category(),
-                        r.url()
-                    )
-            )
-            .toList();
+        List<ClinicalReport> reports = clinicalReports(patientId);
 
         PatientListItem summary = toListItem(profile, activities.isEmpty() ? null : activities.get(0).occurredAt());
         return Optional.of(
@@ -1001,7 +992,7 @@ public class PatientDirectoryService {
      * question is which cases name this clinician, and the one filter on offer names a patient — so
      * there is nothing to pass. Narrowing it needs an {@code assignedProfessionalId} filter or a
      * clinician-scoped read agreed with hc-patient's owners; the per-patient methods below no longer
-     * pay this cost, but this one and {@link #directory()} still do.
+     * pay this cost, but this one and {@link #directory(Pageable, DirectoryFilter)} still do.
      */
     public Page<CaseSummary> myCases(Pageable pageable, String status) {
         String professionalId = callerProfileId().orElse(null);
@@ -1376,7 +1367,21 @@ public class PatientDirectoryService {
         }
     }
 
-    /** Re-reads a filed entry so a replay answers with the record rather than a fresh copy. */
+    /**
+     * Re-reads a filed activity so a replay answers with the record rather than a fresh copy.
+     *
+     * <p><b>Through the strict {@link #record}, because this answer <em>is</em> made of the activity
+     * log.</b> A caller refused that collection cannot be told what their filed entry says, and the
+     * honest report of that is the refusal — an entry omitted from a {@code 201} would say the write had
+     * produced nothing.
+     *
+     * <p><b>Whether it is reachable at all is an open assumption, stated rather than relied on.</b> This
+     * path needs a discipline that may <em>write</em> to {@code /api/activity-logs} and may not read it;
+     * no such discipline has been observed, and a pharmacist's write was not probed because the quality
+     * stack is read-only to this work. If one exists, the 503 here is correct for the reason above. If
+     * none does, this line is unreachable and costs nothing. Either way it does not rest on the mistake
+     * {@link #reportById} used to make.
+     */
     private ActivityLogEntry activityById(String patientId, String id) {
         return record(patientId)
             .map(PatientRecord::activities)
@@ -1387,14 +1392,53 @@ public class PatientDirectoryService {
             .orElse(null);
     }
 
+    /**
+     * Re-reads a filed report so a replay answers with the record rather than a fresh copy.
+     *
+     * <p><b>From the report collection alone, since backlog item 112's review.</b> It went through
+     * {@link #record} until then, and so through {@code /api/activity-logs} — a collection this answer is
+     * not made of. The consequence was live and permanent: a pharmacist may write to {@code /api/reports}
+     * and is refused {@code /api/activity-logs}, both measured, so a filed report that was fully readable
+     * to them answered <b>503 on every replay for ever</b> — and {@code mobile/}'s offline queue replays
+     * by {@code clientRef} as a matter of course.
+     *
+     * <p><b>It is this item's own argument, applied to the path the item did not follow.</b> The dashboard
+     * summary tolerates a refused activity log because no figure of it is computed from that collection;
+     * the same sentence is true of a report, and was not acted on here until the review pointed at it.
+     *
+     * <p>No entitlement check is repeated and none is skipped: both callers reach this only after
+     * {@link #requireEntitlement} has already passed for this patient, which is what made the record read
+     * redundant rather than protective.
+     */
     private ClinicalReport reportById(String patientId, String id) {
-        return record(patientId)
-            .map(PatientRecord::reports)
-            .orElseGet(List::of)
+        return clinicalReports(patientId).stream().filter(entry -> entry.id() != null && entry.id().equals(id)).findFirst().orElse(null);
+    }
+
+    /**
+     * One patient's clinical reports, mapped into the record's shape.
+     *
+     * <p>Shared by {@link #assemble} and {@link #reportById} rather than copied into the second: the two
+     * would otherwise drift in how a report's date falls back, and a replay would start answering with a
+     * differently-shaped entry than the record shows. The in-memory {@code patientId} filter is kept for
+     * the reason given on the activity read — it costs nothing over one patient's rows and makes the
+     * answer independent of the far side honouring a parameter.
+     */
+    private List<ClinicalReport> clinicalReports(String patientId) {
+        return patientService
+            .reports(patientId)
             .stream()
-            .filter(entry -> entry.id() != null && entry.id().equals(id))
-            .findFirst()
-            .orElse(null);
+            .filter(r -> patientId.equals(r.patientId()))
+            .map(
+                r ->
+                    new ClinicalReport(
+                        r.id(),
+                        occurredAt(null, r.reportDate() == null ? r.createdDate() : r.reportDate()),
+                        r.name(),
+                        r.category(),
+                        r.url()
+                    )
+            )
+            .toList();
     }
 
     private Optional<Instant> parseInstant(String iso) {
@@ -1430,7 +1474,7 @@ public class PatientDirectoryService {
      * and by child/adult. Case counts are patientservice's and are composed in the browser.
      *
      * <p><b>Strict about every read a count is made of, and about no other</b> (backlog items 107 and
-     * 112). This was on {@link #directory()} outright until 2026-09-14, so a pharmacist and a chemist
+     * 112). This was on a fully strict composition until 2026-09-14, so a pharmacist and a chemist
      * got a 503 for a dashboard every figure of which this service could compute exactly — refused over
      * {@code /api/activity-logs}, which none of the four figures is made of. It is now on
      * {@link #countableCaseload()}, which tolerates that one refusal and nothing else: the case half of
