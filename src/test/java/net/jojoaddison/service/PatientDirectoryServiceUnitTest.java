@@ -31,6 +31,8 @@ import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.Report;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -806,6 +808,171 @@ class PatientDirectoryServiceUnitTest {
         when(patientService.activityLogs(RECORDED)).thenThrow(refused("/api/activity-logs"));
 
         assertThatThrownBy(() -> service.record(RECORDED)).isInstanceOf(PatientServiceUnavailableException.class);
+    }
+
+    // --- A directory whose rows do not open says so (backlog.md item 128) ---------------------
+
+    /**
+     * The two stubs that withdraw one part, on each of the two paths that read it.
+     *
+     * <p>Named rather than inlined so {@link #refusalOf} can hand both to a test that has to refuse the
+     * same part in two places and compare what each does with it.
+     */
+    private record RefusalOf(String path, Runnable onTheRecordPath, Runnable onTheDirectoryPath) {}
+
+    /**
+     * Which upstream read each {@link PatientDirectoryService.RestrictedPart} stands for.
+     *
+     * <p><b>A switch <em>expression</em> with no {@code default}, and that is the load-bearing part of
+     * this helper.</b> It is exhaustive-checked at compile time, so a third constant added to the enum
+     * <b>breaks this build</b> until somebody says which collection it names — which is the same
+     * mechanism {@code removesRows()} and {@code blocksRecord()} use one layer up, and the reason the
+     * test below can claim to cover parts nobody has written yet. A {@code default} arm, or a switch
+     * statement (which Java does not require to be exhaustive over constant labels), would turn that
+     * compile error into a silently unexercised constant.
+     *
+     * <p>The scoped and estate-wide forms are both here because the record reads one and the directory
+     * the other (backlog item 23), and hc-patient refuses <b>both</b>. That equivalence is what makes the
+     * directory's observation evidence about the record path at all — if the sibling refused per query
+     * rather than per collection, the header this section is about would be an inference and not a
+     * report — so it matters that it holds <b>by construction, not by measurement</b>. A probe agreed
+     * (a technician gets 403 from {@code /api/clinical-cases} and from
+     * {@code /api/clinical-cases?patientId=…} alike, through the gateway, 2026-09-15) and a probe is the
+     * weaker instrument. Read from hc-patient's source:
+     *
+     * <ul>
+     *   <li>{@code ClinicalCaseResource.getAllClinicalCases} calls
+     *       {@code patientScope.requireRead(ClinicalDomain.DIAGNOSIS)} as the <b>first statement of the
+     *       handler</b>, before the {@code patientId} parameter is consulted at all.
+     *   <li>{@code PatientScope.canRead} is a pure function of the caller's authorities and the domain.
+     *       No request state reaches it, so it cannot answer differently for a scoped and an unscoped
+     *       read of the same collection.
+     *   <li>The only other refusal-shaped path there, {@code PatientScope.findScopedPage}, returns an
+     *       empty page rather than throwing, so it cannot produce the 403 this test stands in for.
+     * </ul>
+     *
+     * <p><b>The derivation earns its place by naming the change that would break it</b>, which a
+     * measurement cannot: hc-patient moving that {@code requireRead} below a {@code patientId} branch, or
+     * introducing a per-patient {@code DIAGNOSIS} refusal. Either would make the two forms answer
+     * differently, and the marker built on them would be wrong for a caller whose directory said one
+     * thing and whose record did another. A premise recorded as "assumed" when it is provable invites
+     * somebody to re-establish it later with a weaker probe than this.
+     */
+    private RefusalOf refusalOf(PatientDirectoryService.RestrictedPart part) {
+        return switch (part) {
+            case CASE_ASSIGNMENTS -> new RefusalOf(
+                "/api/clinical-cases",
+                () -> when(patientService.clinicalCases(RECORDED)).thenThrow(refused("/api/clinical-cases")),
+                () -> when(patientService.clinicalCases()).thenThrow(refused("/api/clinical-cases"))
+            );
+            case LAST_ACTIVITY -> new RefusalOf(
+                "/api/activity-logs",
+                () -> when(patientService.activityLogs(RECORDED)).thenThrow(refused("/api/activity-logs")),
+                () -> when(patientService.activityLogs()).thenThrow(refused("/api/activity-logs"))
+            );
+        };
+    }
+
+    /**
+     * <b>The flag is held against what the record path actually does, per part and exhaustively.</b>
+     *
+     * <p>{@code blocksRecord()} is what {@code GET /api/patients} renders
+     * {@code X-Restricted-Follow-Ups: record} from, so it is a claim made to a client about a different
+     * endpoint. This is what keeps it true: refuse exactly one part on the record path and assert that
+     * the record refuses <em>iff</em> the flag says it will. The expectation is derived from the enum
+     * rather than written down, so the case that goes red is whichever one somebody breaks —
+     * <b>including the one that has not happened yet</b>: if backlog item 127's neighbourhood ever makes
+     * the case read tolerant on a record, this reddens unless the flag moves with it, and the header
+     * cannot go on promising something the code stopped doing.
+     *
+     * <p>Two hand-written tests above — {@code aREFUSEDcaseCollectionStillRefusesTheRecord…} and
+     * {@code aDisciplineREFUSEDtheActivityLogStillGetsTheRecord} — cover the same two inputs and are
+     * <b>not</b> replaced by this, deliberately. They assert what a degraded record still <em>carries</em>,
+     * which is item 112's argument and is invisible here; this asserts only the correspondence.
+     */
+    @ParameterizedTest
+    @EnumSource(PatientDirectoryService.RestrictedPart.class)
+    void blocksRecordSaysExactlyWhetherTheRECORDpathRefusesThatPart(PatientDirectoryService.RestrictedPart part) {
+        RefusalOf refusal = refusalOf(part);
+        oneFullyReadableRecord();
+        refusal.onTheRecordPath().run();
+
+        // The outcome is measured and then compared, rather than asserted in two branches. An
+        // assertThatThrownBy whose code did not throw reports "Expecting code to raise a throwable" and
+        // drops the description with it — on a test whose whole content is *which* of two flags is
+        // wrong, the message has to name the part and the read it stands for in both directions.
+        boolean recordRefused;
+        try {
+            service.recordWithinScope(RECORDED);
+            recordRefused = false;
+        } catch (PatientServiceUnavailableException expectedForSomeParts) {
+            recordRefused = true;
+        }
+
+        assertThat(recordRefused)
+            .describedAs(
+                "%s.blocksRecord() is %s, so refusing %s on the record path must %s",
+                part,
+                part.blocksRecord(),
+                refusal.path(),
+                part.blocksRecord() ? "refuse the record" : "still serve one"
+            )
+            .isEqualTo(part.blocksRecord());
+    }
+
+    /**
+     * And the directory says it, from the same refusal the record would hit.
+     *
+     * <p>The other half of the correspondence: refuse the part on the <em>list</em> path and the served
+     * page reports {@code blocksEveryRecord()} exactly when that part blocks a record. Both halves are
+     * needed — the test above could pass with a directory that never asked, and this one could pass with
+     * a record that never refused.
+     */
+    @ParameterizedTest
+    @EnumSource(PatientDirectoryService.RestrictedPart.class)
+    void theDIRECTORYreportsThatItsRowsWillNotOpen_forExactlyThosePartsThatBlockARecord(PatientDirectoryService.RestrictedPart part) {
+        onePatientByTaskAndOneByCase();
+        refusalOf(part).onTheDirectoryPath().run();
+
+        PatientDirectoryService.Directory directory = service.directory(PageRequest.of(0, 20), DirectoryFilter.NONE);
+
+        assertThat(directory.restrictions()).contains(part);
+        assertThat(directory.blocksEveryRecord()).isEqualTo(part.blocksRecord());
+        // The rows are still served either way. "Nothing opens" is not a reason to serve nothing: the
+        // page is still the patients this clinician is scheduled to attend, which is the whole of what
+        // item 128 decided not to take away.
+        assertThat(directory.page().getContent()).isNotEmpty();
+    }
+
+    /**
+     * <b>The positive control, and the assertion that stops the header meaning nothing.</b> A caller
+     * refused no part opens every row, so the marker must be absent — a value present on every response
+     * cannot distinguish a technician from a doctor, which is the whole of its use.
+     */
+    @Test
+    void aDisciplineEntitledToEveryPartIsNOTtoldItsRowsWillNotOpen() {
+        onePatientByTaskAndOneByCase();
+
+        assertThat(service.directory(PageRequest.of(0, 20), DirectoryFilter.NONE).blocksEveryRecord()).isFalse();
+    }
+
+    /**
+     * <b>An outage produces no marker, because it produces no directory.</b> The claim is *this caller's
+     * discipline was refused*, and a sibling that is merely down has refused nobody — reporting it as a
+     * permanent restriction would be the false sentence item 107 removed, pointing the other way.
+     *
+     * <p>It holds by construction today: {@code directory()} rethrows anything that is not a refusal, so
+     * there is no {@code Directory} to carry a marker. Asserted all the same, because "there is no path"
+     * is a fact about where a {@code throw} currently sits rather than a property anything holds.
+     */
+    @Test
+    void anOUTAGEonTheCaseCollectionIsA503andNOTaDirectoryClaimingItsRowsAreRefused() {
+        onePatientByTaskAndOneByCase();
+        when(patientService.clinicalCases()).thenThrow(outage());
+
+        assertThatThrownBy(() -> service.directory(PageRequest.of(0, 20), DirectoryFilter.NONE)).isInstanceOf(
+            PatientServiceUnavailableException.class
+        );
     }
 
     // --- Paging, filtering and sorting (web-mobile-port.md § Phase 1.1) -----------------------

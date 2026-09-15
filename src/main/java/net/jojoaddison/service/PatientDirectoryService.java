@@ -115,6 +115,17 @@ import org.springframework.stereotype.Service;
  *       against item 111's Decision C rather than an exception to it, and it is made there.
  * </ul>
  *
+ * <p><strong>For a technician the rows still do not open, and the directory now says so</strong>
+ * (backlog item 128). Item 112 refused to degrade their record and argued it well — hc-patient admits
+ * them to no clinical domain, so what a degraded record could carry is a contact card with four empty
+ * lists beside it. That argument is about the record; it leaves the <em>list</em> presenting a hundred
+ * tappable rows of which not one opens, with nothing on the wire a client could mark them by.
+ * {@link RestrictedPart#blocksRecord()} is the missing fact and it is derived rather than asserted: the
+ * directory <em>observed</em> the refusal of a collection that {@link #assemble} reads strictly, so
+ * "these rows will not open" follows from this read plus this service's own composition, and needs no
+ * copy of another product's matrix to hold. See {@link Directory#blocksEveryRecord()}, and
+ * {@code PatientResource.RESTRICTED_FOLLOW_UPS} for what reaches the wire.
+ *
  * <p>What changes for everything still strict is the sentence: a refusal no longer opens with
  * <em>patientservice could not be read</em>, which was a claim about the sibling's health that the
  * sibling had just disproved by answering. See {@code PatientServiceUnavailableException.message}.
@@ -245,21 +256,23 @@ public class PatientDirectoryService {
          * unreadable, so a patient reached <em>only</em> through an assigned case is absent from the
          * directory. The task half is unaffected and is what is listed.
          */
-        CASE_ASSIGNMENTS("caseAssignments", true),
+        CASE_ASSIGNMENTS("caseAssignments", true, true),
         /**
          * patientservice's {@code /api/activity-logs}. Every patient is listed; {@code lastActivityAt}
          * is {@code null} on all of them and the default ordering falls back to that null, so the list
          * is not in recency order. Without this marker a client cannot tell that from a caseload
          * nobody has touched.
          */
-        LAST_ACTIVITY("lastActivity", false);
+        LAST_ACTIVITY("lastActivity", false, false);
 
         private final String token;
         private final boolean removesRows;
+        private final boolean blocksRecord;
 
-        RestrictedPart(String token, boolean removesRows) {
+        RestrictedPart(String token, boolean removesRows, boolean blocksRecord) {
             this.token = token;
             this.removesRows = removesRows;
+            this.blocksRecord = blocksRecord;
         }
 
         /** The stable name a client sees. */
@@ -287,6 +300,69 @@ public class PatientDirectoryService {
         public boolean removesRows() {
             return removesRows;
         }
+
+        /**
+         * Whether losing this part <em>also</em> makes {@code GET /api/patients/{id}} refuse, so that
+         * every row of the directory it was withheld from is a row that will not open (backlog item
+         * 128).
+         *
+         * <p><b>This is a fact about this service's own composition, and deliberately not about
+         * hc-patient's matrix.</b> It reads: the record path makes this read and does not tolerate
+         * losing it. {@link #CASE_ASSIGNMENTS} is the clinical-cases collection, which
+         * {@link #assemble} asks {@link #entitledCases} for <em>first</em> and strictly, because that
+         * is what decides whether the patient is the caller's at all — so a caller refused it reaches
+         * no record, by item 111's Decision C and for its reason. {@link #LAST_ACTIVITY} is tolerated
+         * on a record exactly as it is on the list ({@link #activityLogWithinScope}), so it costs a
+         * panel and never the record.
+         *
+         * <p><b>{@code true} for {@link #CASE_ASSIGNMENTS} rests on an ordering that is argued where it
+         * is written and would be easy to undo by accident.</b> {@link #entitledCases} makes the scoped
+         * case read <em>before</em> {@link #scheduledWith} is consulted, deliberately — see its javadoc
+         * — so even a row the directory listed on the strength of a task alone still refuses, because
+         * the refusal arrives before the task half is reached. Reverse that order and a task-entitled
+         * patient would open, this flag would be wrong for every such row, and the directory would be
+         * telling clients the opposite of what the endpoint does. The test named below is what catches
+         * it; this paragraph is what tells whoever reverses the order why the test went red.
+         *
+         * <p><b>What the directory may then say, and what it may not.</b> The honest sentence is the
+         * past tense one: <em>a part was withheld from this read that the record endpoint requires</em>.
+         * The prediction a client draws from it — <em>these rows will not open</em> — is the same
+         * prediction {@link #token()} already licenses for a column, and it goes stale in the same way
+         * and at the same rate as the directory beside it. <b>No discipline is named and none could
+         * be</b>: the scope-of-practice matrix is hc-patient's, a copy of it here is the drift
+         * {@link PatientDirectoryRestrictionMeters} exists to catch, and if that matrix moves the next
+         * directory read observes the change and the marker disappears with it.
+         *
+         * <p><b>It is a sufficient signal, not a complete one, and that asymmetry is chosen.</b>
+         * Present, it is never wrong; absent, the record may still refuse for a read the directory
+         * never makes. The gap has exactly one shape: a caller who may read hc-patient's
+         * {@code DIAGNOSIS} domain (which gates the cases collection) and not its {@code MEDICATION}
+         * one (which gates the medication read {@link #assemble} also makes strictly). Such a caller
+         * would open a clean, unmarked directory and get a 503 on every row.
+         *
+         * <p><b>Nobody is in that position, and this deliberately does not rely on that.</b> In
+         * hc-patient's {@code ScopeOfPractice} the two read sets are identical — all eight disciplines
+         * but the technician hold both — so today the marker is necessary <em>and</em> sufficient. That
+         * is a coincidence of another product's table, not a property of anything here: encoding it, or
+         * narrowing the record's strict reads because of it, would be the second copy of a matrix that
+         * backlog item 116 exists to catch drifting. It is written down only so a reader knows how much
+         * slack there is, and the slack is a fact about a file in another repository that may change
+         * without this one hearing.
+         *
+         * <p>A missing marker degrades to the behaviour this item is about — the clinician learns by
+         * tapping. A marker that was wrong when present would be a confident lie, which is the direction
+         * backlog items 62, 64, 67, 73, 78 and 80 exist to refuse, so the implication is only ever
+         * asserted in the direction that holds.
+         *
+         * <p>Answered here, beside {@link #removesRows()} and for its reason: a third part added later
+         * has to state what its absence costs the record as well as what it costs the list, rather
+         * than inheriting an answer from a constant in a file that never mentions it. {@code
+         * PatientDirectoryServiceUnitTest} holds this flag against what the record path actually does,
+         * per constant and exhaustively, so the two cannot come apart.
+         */
+        public boolean blocksRecord() {
+            return blocksRecord;
+        }
     }
 
     /**
@@ -304,7 +380,25 @@ public class PatientDirectoryService {
      *     declaration order</b>, which the header rendered from it is a contract about — see the
      *     comment where it is built, and do not pass a general-purpose {@code Set} in here.
      */
-    public record Directory(Page<PatientListItem> page, Set<RestrictedPart> restrictions) {}
+    public record Directory(Page<PatientListItem> page, Set<RestrictedPart> restrictions) {
+        /**
+         * Whether opening <em>any</em> row of this page would be refused (backlog item 128).
+         *
+         * <p><b>Every row, not some.</b> What was refused is a collection, for this caller, by their
+         * discipline — not a row, and not a patient. So the question the client needs answering is a
+         * property of the read, which is why it is derived from {@link #restrictions()} here rather
+         * than marked per row: item 111's Decision A's argument, in the one direction it did not
+         * anticipate.
+         *
+         * <p>Derived rather than stored, and derived from {@link RestrictedPart#blocksRecord()} rather
+         * than from a list of constants, so that a third part cannot join the enum and quietly answer
+         * {@code false} here. It is {@code false} whenever nothing was restricted, which is almost
+         * every request and the case that should pay nothing.
+         */
+        public boolean blocksEveryRecord() {
+            return restrictions.stream().anyMatch(RestrictedPart::blocksRecord);
+        }
+    }
 
     /**
      * How a caller may narrow the directory. Every field is optional; all present fields must match.

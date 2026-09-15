@@ -85,6 +85,58 @@ public class PatientResource {
      */
     static final String RESTRICTED_PARTS = "X-Restricted-Parts";
 
+    /**
+     * Names a read reachable <em>from</em> the directory that the same refusal also blocks — so that a
+     * clinician handed a list of rows that will not open learns it before tapping one (backlog item 128).
+     *
+     * <p><b>The condition item 112 is named for, still true for one discipline.</b> Item 112 refused to
+     * degrade a technician's record and argued it well: hc-patient admits them to no clinical domain, so
+     * a degraded record would be a name, a birth date and a phone number beside four empty lists. That
+     * settles the record and leaves the <em>list</em> — a hundred rows on the quality stack, measured
+     * 2026-09-15, of which not one opens, with nothing on the wire to mark them by.
+     * {@link #RESTRICTED_PARTS} cannot say it: it names what was withheld from <em>this</em> read, which
+     * is a different sentence from <em>and therefore that one will refuse you</em>.
+     *
+     * <p><b>A second header rather than a token on the first, and that is not a style choice.</b>
+     * {@link PatientDirectoryService.RestrictedPart} means "a composed part of this read that was
+     * withheld", and a follow-up endpoint is not a part of this read — a pseudo-token would be nonsense
+     * on {@link #get}, which shares that vocabulary, and would be counted by
+     * {@code PatientDirectoryRestrictionMeters}, whose one call site exists precisely so the metric and
+     * {@link #RESTRICTED_PARTS} name the same parts (backlog item 116). A separate header is additive in
+     * the way item 111's Decision A required: the body is untouched, and {@code web/} and {@code mobile/}
+     * ignore an unknown header as they ignored this one until item 114.
+     *
+     * <p><b>Whether it is <em>true</em> is the question this row turned on, and the answer is that it is
+     * a statement about the past.</b> It says: a part was withheld from this read that
+     * {@code GET /api/patients/&#123;id&#125;} requires and does not tolerate losing. Both halves are
+     * established rather than guessed — the refusal was observed by the read that emitted this header,
+     * and the record path's strictness is this service's own code, held to the flag it is rendered from
+     * by an exhaustive test. What a client draws from it is a prediction, exactly as it is for a
+     * {@code lastActivity} column rendered "not permitted"; it goes stale at the rate the directory does,
+     * and if hc-patient's matrix moves the next read stops emitting it. <b>No discipline is written down
+     * here or anywhere it is derived from</b> — that copy would be the drift backlog item 116 exists to
+     * catch.
+     *
+     * <p>Values are tokens, comma-separated, absent entirely when nothing is blocked. {@link #RECORD} is
+     * the only one, and {@code /api/patients/&#123;id&#125;/cases} is deliberately <b>not</b> named
+     * beside it although it refuses the same callers for the same reason: whether it should keep refusing
+     * is open as backlog item 127, and a header naming it would have to be unpicked by whichever way that
+     * goes.
+     *
+     * <p><b>Same-origin only, as {@link #RESTRICTED_PARTS} is</b> — a browser cannot read a response
+     * header absent from {@code Access-Control-Expose-Headers}, and both deployments of {@code web/} are
+     * same-origin, so the question arises only for a cross-origin consumer and is the gateway's to answer.
+     */
+    static final String RESTRICTED_FOLLOW_UPS = "X-Restricted-Follow-Ups";
+
+    /**
+     * The one follow-up token: {@code GET /api/patients/{id}}, the record behind a directory row.
+     *
+     * <p>Spelled here rather than derived from a type name, for {@link #RESTRICTED_PARTS}'s reason — a
+     * client reads this string, so renaming a Java identifier must not rename the contract.
+     */
+    static final String RECORD = "record";
+
     private final PatientDirectoryService patientDirectoryService;
 
     public PatientResource(PatientDirectoryService patientDirectoryService) {
@@ -104,6 +156,11 @@ public class PatientResource {
      * whole caseload. {@code web/} already asks for {@code size=200} and filters client-side, so it
      * is unaffected; a caller that sends no paging parameters now receives Spring's default page
      * rather than everything, which is the point.
+     *
+     * <p><b>Two headers name what a caller's discipline cost this read</b>: {@link #RESTRICTED_PARTS},
+     * what was withheld from the list, and {@link #RESTRICTED_FOLLOW_UPS}, what the same refusal also
+     * blocks behind a row (backlog item 128). Both are absent for a caller who was refused nothing,
+     * which is the ordinary case, and neither changes the body.
      *
      * @param pageable standard Spring Data paging. Sorts are whitelisted — see
      *     {@link PatientDirectoryService#sortableProperties()} — because the list is assembled in
@@ -136,6 +193,12 @@ public class PatientResource {
                 RESTRICTED_PARTS,
                 directory.restrictions().stream().map(PatientDirectoryService.RestrictedPart::token).collect(Collectors.joining(","))
             );
+        }
+        // Asked of the Directory rather than tested against a constant here, so that the fact and the
+        // enum that decides it stay in one place — see RestrictedPart.blocksRecord(). A directory with
+        // no restrictions answers false, so the ordinary request pays nothing and gains no header.
+        if (directory.blocksEveryRecord()) {
+            headers.add(RESTRICTED_FOLLOW_UPS, RECORD);
         }
         return ResponseEntity.ok().headers(headers).body(directory.page().getContent());
     }
