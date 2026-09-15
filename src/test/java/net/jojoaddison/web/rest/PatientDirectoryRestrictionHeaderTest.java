@@ -97,9 +97,14 @@ class PatientDirectoryRestrictionHeaderTest {
     }
 
     /**
-     * The ordinary case — five of the eight disciplines — and the one that should pay nothing. An
-     * always-present header would make the value meaningless: a client cannot distinguish "nothing was
-     * restricted" from "this field means nothing" if it is there every time.
+     * The ordinary case — every discipline hc-patient admits to both collections — and the one that
+     * should pay nothing. An always-present header would make the value meaningless: a client cannot
+     * distinguish "nothing was restricted" from "this field means nothing" if it is there every time.
+     *
+     * <p>(A count stood here and is dropped rather than corrected, closing the residual backlog item 128
+     * parked in this file and in {@code PatientDirectoryRestrictionMeters}. It counted rows of another
+     * repository's scope-of-practice matrix, so it could go stale with nothing here changing — which is
+     * the drift that meter exists to catch, restated as a number in a comment beside it.)
      */
     @Test
     void nothingRestrictedMeansNoHeaderAtAll() {
@@ -207,9 +212,13 @@ class PatientDirectoryRestrictionHeaderTest {
     /**
      * <b>The record response carries no follow-up marker, and that is a decision.</b> {@code X-Restricted-Parts}
      * is shared by both endpoints because the refused collection is the same collection; this one is not,
-     * because it answers "what does this list lead to" and a record leads nowhere the same refusal
-     * governs — {@code /api/patients/&#123;id&#125;/cases} is open as backlog item 127 and would have to
-     * be unpicked whichever way that goes.
+     * because it answers "what does this list lead to".
+     *
+     * <p>A record <em>does</em> lead somewhere the same refusal governs — {@code /api/patients/&#123;id&#125;/cases},
+     * which backlog item 127 settled as going on refusing — and marking it here would still say nothing.
+     * A caller refused the case collection <b>never receives this response at all</b>: their record is the
+     * 503 item 112 argued for. The only callers who can read this header are the ones for whom it would
+     * always be absent, which is a header with one possible value.
      */
     @Test
     void theRECORDresponseDoesNOTcarryAFollowUpMarker() {

@@ -47,8 +47,28 @@ import org.springframework.web.client.RestClientResponseException;
  * service not known"}. The underlying throwable is logged with its stack trace at the point of
  * failure instead, which is where an operator looks for it.
  */
-@ResponseStatus(value = HttpStatus.SERVICE_UNAVAILABLE, reason = "The patient service could not be reached")
+@ResponseStatus(value = HttpStatus.SERVICE_UNAVAILABLE, reason = PatientServiceUnavailableException.UNREACHABLE_TITLE)
 public class PatientServiceUnavailableException extends RuntimeException {
+
+    /**
+     * The problem-detail title for a read that genuinely did not happen — and, until backlog item 127,
+     * for every one of these, a refusal included.
+     *
+     * <p><b>Named rather than spelled twice.</b> It is the {@code reason} of the annotation above
+     * <em>and</em> the non-refusal arm of {@link #title()}; two literals meaning the same thing is how a
+     * reworded annotation would leave {@link #title()} serving the old sentence to the one caller it is
+     * not about.
+     */
+    static final String UNREACHABLE_TITLE = "The patient service could not be reached";
+
+    /**
+     * The problem-detail title for a refusal (backlog item 127).
+     *
+     * <p>Deliberately the opening clause of {@link #message}'s refusal branch, in the title's voice, so
+     * that the two prose fields of one problem document say the same thing. They said opposite things
+     * until this item — see {@link #title()}.
+     */
+    static final String REFUSED_TITLE = "The patient service refused this caller's discipline";
 
     /**
      * Why the call did not happen — and, above all, whether waiting is the remedy.
@@ -262,6 +282,50 @@ public class PatientServiceUnavailableException extends RuntimeException {
             outlook +
             (detail == null || detail.isBlank() ? "" : " [" + detail + "]")
         );
+    }
+
+    /**
+     * The RFC 7807 {@code title} that goes above {@link #getMessage()} — <b>the last clause of this
+     * sentence that was still false for a refusal</b> (backlog item 127).
+     *
+     * <p><b>Item 127 asked whether {@code GET /api/patients/&#123;id&#125;/cases} should go on refusing a
+     * technician. It should</b>, for the reason {@code PatientDirectoryService.casesFor} sets out: that
+     * response <em>is</em> the refused collection and there is no honest partial of it. So what was left
+     * to fix was the sentence, and the sentence had a part nobody had looked at.
+     *
+     * <p><b>Items 107 and 112 fixed the message and the problem document has two prose fields.</b>
+     * {@code ExceptionTranslator} builds {@code detail} from {@link #getMessage()} — which since item 112
+     * opens <em>"patientservice refused this caller's discipline"</em> — and builds {@code title} from the
+     * {@code reason} of the {@code @ResponseStatus} above, which is a class-level annotation and so was
+     * the same string for every fault. Measured on the quality stack, 2026-09-15, a technician asking for
+     * one patient's cases:
+     *
+     * <pre>
+     * "title":  "The patient service could not be reached"
+     * "detail": "patientservice refused this caller's discipline (/api/clinical-cases): …"
+     * </pre>
+     *
+     * <p>The two contradict each other, and the false one is the one a generic problem-detail renderer
+     * shows first. It is the same claim about a sibling's health that item 107 removed from the
+     * retryability clause and item 112 from the opening clause — surviving one field to the left, because
+     * both items were reading the message and the title is not part of it.
+     *
+     * <p><b>Why here and not in the resource.</b> The title is wrong for a refusal on every path that
+     * composes a patientservice read, not only on the cases endpoint; fixing it where item 127 found it
+     * would have been the first of several copies. It is rendered per fault for the same reason
+     * {@link #message} is — {@code clearsOnRetry()} and {@link Fault#isAuthorisationRefusal()} are already
+     * the two questions this type answers, and a third field keyed on the same predicate cannot come to
+     * disagree with them.
+     *
+     * <p><b>An annotation cannot do it, which is why a method does.</b> {@code @ResponseStatus} sits on
+     * the class, so its {@code reason} is fixed at compile time for every instance — the same constraint
+     * backlog item 113 records for the <em>status</em>, and the reason that item needs a second exception
+     * type while this one needs only a getter. The annotation is still what supplies the 503 and is still
+     * what an uncaught one resolves through; {@code ExceptionTranslator.getCustomizedTitle} simply prefers
+     * this when it has one.
+     */
+    public String title() {
+        return fault.isAuthorisationRefusal() ? REFUSED_TITLE : UNREACHABLE_TITLE;
     }
 
     /** The sibling path that could not be reached. */

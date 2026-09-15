@@ -766,6 +766,51 @@ class PatientDirectoryServiceUnitTest {
     }
 
     /**
+     * The report read is not in the tolerant set either (backlog item 129).
+     *
+     * <p><b>Filed as an asymmetry rather than as a hole, and it is worth saying which.</b> Both reads sit
+     * outside {@code recordWithinScope}'s single {@code catch}, so a refusal raises by construction and
+     * this cannot fail while that is true. The same was exactly as true of the medication read one case
+     * above, and it got a test — so the gap was not coverage but the <em>appearance</em> of a decision: a
+     * reader finding one of three strict reads tested concludes the other two were considered and
+     * deliberately left, which is the kind of inference that survives the code it was drawn from.
+     *
+     * <p>The sentence is the medication one in a different register. An empty report list on a patient
+     * record says <em>nothing has been filed on this patient</em> — and a clinician who files a report for
+     * a colleague to read is precisely the person that claim misleads.
+     */
+    @Test
+    void aREFUSEDreportReadIsStillA503_becauseNoReportsIsAClinicalSentenceToo() {
+        oneFullyReadableRecord();
+        when(patientService.reports(RECORDED)).thenThrow(refused("/api/reports"));
+
+        assertThatThrownBy(() -> service.recordWithinScope(RECORDED)).isInstanceOf(PatientServiceUnavailableException.class);
+    }
+
+    /**
+     * And the scoped profile read, which is a different argument from the two above (backlog item 129).
+     *
+     * <p>The record's demographics <em>are</em> that read — name, birth date, sex, telephone, emergency
+     * contact — so there is no panel to withhold and nothing left to serve. It is the record's counterpart
+     * to the rule {@code directory(Pageable, DirectoryFilter)} states for the estate-wide profile read:
+     * a caller refused it has no record to be handed a degraded version of.
+     *
+     * <p><b>Note what it must not become.</b> {@code assemble} answers {@code Optional.empty()} — a 404,
+     * "no such patient for this clinician" — when the profile is merely absent, so a refusal swallowed
+     * anywhere near here would tell a clinician standing next to their own patient that the patient is not
+     * theirs, from a collection nobody read. That is backlog item 24's defect, and it is why this asserts
+     * the exception rather than {@code isEmpty()}: the two outcomes are one {@code catch} apart and only
+     * one of them is honest.
+     */
+    @Test
+    void aREFUSEDscopedProfileReadIsStillA503_andNotAPatientWhoIsNotYours() {
+        oneFullyReadableRecord();
+        when(patientService.profiles(RECORDED)).thenThrow(refused("/api/profiles"));
+
+        assertThatThrownBy(() -> service.recordWithinScope(RECORDED)).isInstanceOf(PatientServiceUnavailableException.class);
+    }
+
+    /**
      * <b>The thing most at risk from this change.</b> An activity log that could not be read must still be
      * a 503; only a <em>refusal</em> is tolerated. One word wider and a sibling outage would be served as
      * a record with an empty activity panel and a marker claiming the caller was not permitted it — a
@@ -973,6 +1018,86 @@ class PatientDirectoryServiceUnitTest {
         assertThatThrownBy(() -> service.directory(PageRequest.of(0, 20), DirectoryFilter.NONE)).isInstanceOf(
             PatientServiceUnavailableException.class
         );
+    }
+
+    // --- The cases endpoint goes on refusing, and that is the decision (backlog.md item 127) ---
+
+    /**
+     * <b>The decision item 112 left open, asserted as behaviour so that changing it has to be deliberate.</b>
+     *
+     * <p>A technician is refused {@code /api/clinical-cases}, and {@code GET /api/patients/&#123;id&#125;/cases}
+     * is that collection — measured through the gateway on the quality stack 2026-09-15 as a 503 beside a
+     * nurse's 200 on the same patient. Item 127 asked whether it should degrade the way the record and the
+     * dashboard summary now do, and the answer is no: there is no remainder. {@code PatientDirectoryService.casesFor}
+     * carries the argument; this is what makes it cost something to reverse.
+     *
+     * <p><b>Three outcomes are excluded and they are excluded separately</b>, because the plausible
+     * "fixes" produce different wrong answers and an {@code isInstanceOf} on the type alone would not say
+     * which was refused. An empty page is the clinical lie — <em>this patient has no cases</em>. A
+     * {@code PatientNotInCaseloadException} is what the task-half fallback yields wherever the task half
+     * says no, which is backlog item 24's defect reached through this door. Only the refusal is honest.
+     */
+    @Test
+    void aREFUSEDcaseCollectionIsStillA503onTheCasesEndpoint_becauseThatEndpointISthatCollection() {
+        onePatientOfMine();
+        when(patientService.clinicalCases(MINE)).thenThrow(refused("/api/clinical-cases"));
+
+        assertThatThrownBy(() -> service.casesFor(MINE, PageRequest.of(0, 20)))
+            .isInstanceOf(PatientServiceUnavailableException.class)
+            .isNotInstanceOf(PatientDirectoryService.PatientNotInCaseloadException.class)
+            .extracting(raised -> ((PatientServiceUnavailableException) raised).fault())
+            .isEqualTo(PatientServiceUnavailableException.Fault.UPSTREAM_FORBIDDEN);
+    }
+
+    /**
+     * <b>The positive control.</b> A caller refused nothing still gets their patient's cases — without
+     * this, "the endpoint refuses a refused discipline" is satisfied by an endpoint that refuses everyone,
+     * and item 127's decision would be indistinguishable from having broken it.
+     */
+    @Test
+    void aDisciplineEntitledToTheCaseCollectionStillGetsTheCases() {
+        onePatientOfMine();
+        when(patientService.clinicalCases(MINE)).thenReturn(List.of(aCase("c1", MINE, "OPEN", PROFESSIONAL_ID)));
+
+        assertThat(service.casesFor(MINE, PageRequest.of(0, 20)).getContent()).extracting("id").containsExactly("c1");
+    }
+
+    /**
+     * And the sentence such a caller reads, which is what item 127 actually changed.
+     *
+     * <p>The refusal stays; the claim that hc-patient could not be reached does not. Asserted at the
+     * service boundary as well as in {@code PatientServiceFaultTest} because that test constructs the
+     * exception itself, and what a client gets is the one the <em>client class</em> raised on this path —
+     * a fault classified somewhere else, or a refusal relabelled on the way out, would pass there and fail
+     * here.
+     */
+    @Test
+    void theREFUSALaCasesCallerReadsDoesNotClaimTheSiblingWasUnreachable() {
+        onePatientOfMine();
+        when(patientService.clinicalCases(MINE)).thenThrow(refused("/api/clinical-cases"));
+
+        assertThatThrownBy(() -> service.casesFor(MINE, PageRequest.of(0, 20)))
+            .isInstanceOf(PatientServiceUnavailableException.class)
+            .satisfies(raised -> {
+                assertThat(raised.getMessage()).contains("refused this caller's discipline").doesNotContain("could not be read");
+                assertThat(((PatientServiceUnavailableException) raised).title()).doesNotContain("could not be reached");
+            });
+    }
+
+    /**
+     * <b>Nothing else moved.</b> A sibling that is genuinely down is still a sibling that is down, on this
+     * endpoint as on every other: the decision above is about a read that <em>succeeded at refusing</em>,
+     * and a change that folded the two together would tell an operator nothing is broken while hc-patient
+     * is unreachable.
+     */
+    @Test
+    void anOUTAGEonTheCasesEndpointIsStillAnOutageAndNotARefusal() {
+        onePatientOfMine();
+        when(patientService.clinicalCases(MINE)).thenThrow(outage());
+
+        assertThatThrownBy(() -> service.casesFor(MINE, PageRequest.of(0, 20)))
+            .isInstanceOf(PatientServiceUnavailableException.class)
+            .satisfies(raised -> assertThat(((PatientServiceUnavailableException) raised).fault().isAuthorisationRefusal()).isFalse());
     }
 
     // --- Paging, filtering and sorting (web-mobile-port.md § Phase 1.1) -----------------------

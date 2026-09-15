@@ -119,9 +119,18 @@ public class PatientResource {
      *
      * <p>Values are tokens, comma-separated, absent entirely when nothing is blocked. {@link #RECORD} is
      * the only one, and {@code /api/patients/&#123;id&#125;/cases} is deliberately <b>not</b> named
-     * beside it although it refuses the same callers for the same reason: whether it should keep refusing
-     * is open as backlog item 127, and a header naming it would have to be unpicked by whichever way that
-     * goes.
+     * beside it although it refuses the same callers for the same reason.
+     *
+     * <p><b>That was left open as backlog item 127 and is now settled, and a second token was still
+     * refused.</b> Item 127 decided the cases endpoint keeps refusing — see
+     * {@link PatientDirectoryService#casesFor}, which argues it — so a {@code cases} token here would at
+     * least be true. It buys a client nothing. The refusal is the same refusal, on the same collection,
+     * observed by the same read: any caller told {@link #RECORD} is told {@code cases} too and never one
+     * without the other, so a second value would be a flag whose value is a copy of the first's, and a
+     * copy is what goes stale while looking maintained. The record is also the only one of the two a
+     * directory row leads to — a client that marks a row unopenable has already said everything a
+     * {@code cases} token could add, because the cases screen is reached <em>through</em> the record.
+     * A token earns its place by letting a client render something different; this one would not.
      *
      * <p><b>Same-origin only, as {@link #RESTRICTED_PARTS} is</b> — a browser cannot read a response
      * header absent from {@code Access-Control-Expose-Headers}, and both deployments of {@code web/} are
@@ -263,6 +272,13 @@ public class PatientResource {
      * and since backlog item 23 the read behind it is scoped to the patient in the path.
      *
      * <p>Archived cases are excluded, matching the sibling's own default.
+     *
+     * <p><b>It answers 503 to a discipline hc-patient refuses the case collection, and that is deliberate
+     * since backlog item 127.</b> This response <em>is</em> that collection, so there is no partial of it
+     * to serve and no header to hang a marker on — an empty page would say "this patient has no cases",
+     * which is a clinical claim and a false one. {@link PatientDirectoryService#casesFor} carries the
+     * argument and the alternatives that were rejected; what item 127 changed is the <em>sentence</em> such
+     * a caller reads, at {@link net.jojoaddison.service.PatientServiceUnavailableException#title()}.
      */
     @GetMapping("/{id}/cases")
     public ResponseEntity<List<CaseSummary>> cases(@PathVariable String id, @ParameterObject Pageable pageable) {
