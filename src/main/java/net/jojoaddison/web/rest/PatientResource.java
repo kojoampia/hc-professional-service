@@ -159,8 +159,8 @@ public class PatientResource {
      *
      * <p><b>Two headers name what a caller's discipline cost this read</b>: {@link #RESTRICTED_PARTS},
      * what was withheld from the list, and {@link #RESTRICTED_FOLLOW_UPS}, what the same refusal also
-     * blocks behind a row (backlog item 128). Both are absent for the five disciplines that lose
-     * nothing, and neither changes the body.
+     * blocks behind a row (backlog item 128). Both are absent for a caller who was refused nothing,
+     * which is the ordinary case, and neither changes the body.
      *
      * @param pageable standard Spring Data paging. Sorts are whitelisted — see
      *     {@link PatientDirectoryService#sortableProperties()} — because the list is assembled in

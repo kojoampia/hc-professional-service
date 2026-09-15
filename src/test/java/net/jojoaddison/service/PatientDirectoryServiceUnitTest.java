@@ -832,11 +832,31 @@ class PatientDirectoryServiceUnitTest {
      * compile error into a silently unexercised constant.
      *
      * <p>The scoped and estate-wide forms are both here because the record reads one and the directory
-     * the other (backlog item 23), and hc-patient refuses <b>both</b> — measured through the gateway on
-     * the quality stack 2026-09-15, a technician gets 403 from {@code /api/clinical-cases} and from
-     * {@code /api/clinical-cases?patientId=…} alike. That measurement is what makes the directory's
-     * observation evidence about the record path at all; were the sibling to refuse per query rather
-     * than per collection, the header this section is about would be an inference and not a report.
+     * the other (backlog item 23), and hc-patient refuses <b>both</b>. That equivalence is what makes the
+     * directory's observation evidence about the record path at all — if the sibling refused per query
+     * rather than per collection, the header this section is about would be an inference and not a
+     * report — so it matters that it holds <b>by construction, not by measurement</b>. A probe agreed
+     * (a technician gets 403 from {@code /api/clinical-cases} and from
+     * {@code /api/clinical-cases?patientId=…} alike, through the gateway, 2026-09-15) and a probe is the
+     * weaker instrument. Read from hc-patient's source:
+     *
+     * <ul>
+     *   <li>{@code ClinicalCaseResource.getAllClinicalCases} calls
+     *       {@code patientScope.requireRead(ClinicalDomain.DIAGNOSIS)} as the <b>first statement of the
+     *       handler</b>, before the {@code patientId} parameter is consulted at all.
+     *   <li>{@code PatientScope.canRead} is a pure function of the caller's authorities and the domain.
+     *       No request state reaches it, so it cannot answer differently for a scoped and an unscoped
+     *       read of the same collection.
+     *   <li>The only other refusal-shaped path there, {@code PatientScope.findScopedPage}, returns an
+     *       empty page rather than throwing, so it cannot produce the 403 this test stands in for.
+     * </ul>
+     *
+     * <p><b>The derivation earns its place by naming the change that would break it</b>, which a
+     * measurement cannot: hc-patient moving that {@code requireRead} below a {@code patientId} branch, or
+     * introducing a per-patient {@code DIAGNOSIS} refusal. Either would make the two forms answer
+     * differently, and the marker built on them would be wrong for a caller whose directory said one
+     * thing and whose record did another. A premise recorded as "assumed" when it is provable invites
+     * somebody to re-establish it later with a weaker probe than this.
      */
     private RefusalOf refusalOf(PatientDirectoryService.RestrictedPart part) {
         return switch (part) {

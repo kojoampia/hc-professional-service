@@ -315,6 +315,15 @@ public class PatientDirectoryService {
          * on a record exactly as it is on the list ({@link #activityLogWithinScope}), so it costs a
          * panel and never the record.
          *
+         * <p><b>{@code true} for {@link #CASE_ASSIGNMENTS} rests on an ordering that is argued where it
+         * is written and would be easy to undo by accident.</b> {@link #entitledCases} makes the scoped
+         * case read <em>before</em> {@link #scheduledWith} is consulted, deliberately — see its javadoc
+         * — so even a row the directory listed on the strength of a task alone still refuses, because
+         * the refusal arrives before the task half is reached. Reverse that order and a task-entitled
+         * patient would open, this flag would be wrong for every such row, and the directory would be
+         * telling clients the opposite of what the endpoint does. The test named below is what catches
+         * it; this paragraph is what tells whoever reverses the order why the test went red.
+         *
          * <p><b>What the directory may then say, and what it may not.</b> The honest sentence is the
          * past tense one: <em>a part was withheld from this read that the record endpoint requires</em>.
          * The prediction a client draws from it — <em>these rows will not open</em> — is the same
@@ -326,14 +335,24 @@ public class PatientDirectoryService {
          *
          * <p><b>It is a sufficient signal, not a complete one, and that asymmetry is chosen.</b>
          * Present, it is never wrong; absent, the record may still refuse for a read the directory
-         * never makes — a discipline refused {@code /api/medications} but admitted to the cases
-         * collection would open a clean directory and get a 503 per row, and no marker. None exists
-         * today (measured through the gateway on the quality stack, 2026-09-15: pharmacist and chemist
-         * lose the activity log alone; a technician is refused cases, activity logs, medications and
-         * reports; nobody is refused a middle subset). A missing marker degrades to the behaviour this
-         * item is about — the clinician learns by tapping. A marker that was wrong when present would
-         * be a confident lie, which is the direction backlog items 62, 64, 67, 73, 78 and 80 exist to
-         * refuse, so the implication is only ever asserted in the direction that holds.
+         * never makes. The gap has exactly one shape: a caller who may read hc-patient's
+         * {@code DIAGNOSIS} domain (which gates the cases collection) and not its {@code MEDICATION}
+         * one (which gates the medication read {@link #assemble} also makes strictly). Such a caller
+         * would open a clean, unmarked directory and get a 503 on every row.
+         *
+         * <p><b>Nobody is in that position, and this deliberately does not rely on that.</b> In
+         * hc-patient's {@code ScopeOfPractice} the two read sets are identical — all eight disciplines
+         * but the technician hold both — so today the marker is necessary <em>and</em> sufficient. That
+         * is a coincidence of another product's table, not a property of anything here: encoding it, or
+         * narrowing the record's strict reads because of it, would be the second copy of a matrix that
+         * backlog item 116 exists to catch drifting. It is written down only so a reader knows how much
+         * slack there is, and the slack is a fact about a file in another repository that may change
+         * without this one hearing.
+         *
+         * <p>A missing marker degrades to the behaviour this item is about — the clinician learns by
+         * tapping. A marker that was wrong when present would be a confident lie, which is the direction
+         * backlog items 62, 64, 67, 73, 78 and 80 exist to refuse, so the implication is only ever
+         * asserted in the direction that holds.
          *
          * <p>Answered here, beside {@link #removesRows()} and for its reason: a third part added later
          * has to state what its absence costs the record as well as what it costs the list, rather

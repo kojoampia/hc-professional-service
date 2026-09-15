@@ -194,7 +194,7 @@ class PatientDirectoryRestrictionHeaderTest {
         assertThat(response.getHeaders().headerNames()).doesNotContain(PatientResource.RESTRICTED_FOLLOW_UPS);
     }
 
-    /** The ordinary case pays nothing for this header either — five of the eight disciplines. */
+    /** A caller refused nothing pays nothing for this header either, which is the ordinary request. */
     @Test
     void nothingRestrictedMeansNoFollowUpHeaderEither() {
         answers(directory(java.util.Set.of()));
@@ -411,6 +411,63 @@ class PatientDirectoryRestrictionHeaderTest {
             .sorted()
             .toList();
         assertThat(metered).isEqualTo(headed).hasSize(2);
+    }
+
+    /**
+     * <b>The marker is emitted on an empty page, and that is reachable rather than theoretical</b> — a
+     * technician with no {@code Task} rows at all (found by the review of PR #51).
+     *
+     * <p>The path: the case collection is refused, so {@code patientIdsWithinScope} records
+     * {@code CASE_ASSIGNMENTS} and falls back to the task half, which is empty, so {@code withinScope}
+     * returns <em>before the activity log is ever read</em>. The result is one restriction, zero rows,
+     * and {@code X-Restricted-Follow-Ups: record} over nothing. Note what is asserted below beside it:
+     * {@code X-Restricted-Parts} is {@code caseAssignments} <b>alone</b>, where a technician with one
+     * task gets both parts — the caseload-dependence {@code RestrictedPart}'s own javadoc warns about,
+     * reached here by a second route.
+     *
+     * <p><b>It is correct on this header's own terms and it is a trap for a client.</b> The claim is
+     * <em>a part was withheld from this read that the record endpoint requires</em>, which is as true of
+     * an empty page as of a full one — and the empty page is not vacuous, because the same technician
+     * <em>does</em> have patients they simply cannot be shown, the case half being what would have
+     * listed them. But the sentence a client renders from it — "the records behind these rows are not
+     * yours to open" — is a banner over an empty list. <b>A client must key the banner on having rows
+     * to describe</b>, exactly as item 114 keyed {@code caseAssignments} on the list rather than on a
+     * row; the empty-and-restricted case wants "some patients cannot be shown here", which is
+     * {@code X-Restricted-Parts}'s sentence and not this one. Asserted here rather than fixed here,
+     * because suppressing the header on an empty page would make the wire value depend on the caller's
+     * caseload — and a client that cached it (as {@code mobile/} caches the restricted set beside page
+     * zero) would then see it appear and disappear as shifts are assigned.
+     */
+    @Test
+    void anEmptyPageStillCarriesTheMarker_whichIsTheClientsToRenderCarefully() {
+        String accountId = "uid-tech-notasks";
+        String professionalId = "professional-tech-notasks";
+        SecurityContextHolder.getContext().setAuthentication(WithMockGatewayUser.Factory.authenticationFor("technician", accountId));
+
+        Profile mine = new Profile();
+        mine.setId(professionalId);
+        mine.setAccountId(accountId);
+        when(profileRepository.findByAccountId(accountId)).thenReturn(Optional.of(mine));
+        // No tasks: the half that survives the refusal is empty, which is the whole of this case.
+        when(taskRepository.findByAttendantId(professionalId)).thenReturn(List.of());
+        when(patientService.clinicalCases()).thenThrow(refused("/api/clinical-cases"));
+
+        PatientResource real = new PatientResource(
+            new PatientDirectoryService(
+                taskRepository,
+                profileRepository,
+                patientService,
+                receiptRepository,
+                new PatientDirectoryRestrictionMeters(new SimpleMeterRegistry())
+            )
+        );
+
+        ResponseEntity<List<PatientListItem>> response = real.list(PageRequest.of(0, 20), null, null, null);
+
+        assertThat(response.getBody()).isEmpty();
+        assertThat(response.getHeaders().getFirst(PatientResource.RESTRICTED_FOLLOW_UPS)).isEqualTo("record");
+        // One part, not two: the activity log was never asked for, so it was never refused.
+        assertThat(response.getHeaders().getFirst(PatientResource.RESTRICTED_PARTS)).isEqualTo("caseAssignments");
     }
 
     private static PatientServiceUnavailableException refused(String path) {
