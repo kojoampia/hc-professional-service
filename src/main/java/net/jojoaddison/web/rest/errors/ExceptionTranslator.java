@@ -9,6 +9,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import net.jojoaddison.service.PatientServiceUnavailableException;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
@@ -191,8 +192,24 @@ public class ExceptionTranslator extends ResponseEntityExceptionHandler {
         return null;
     }
 
+    /**
+     * A title the exception supplies itself, in preference to the one its {@code @ResponseStatus} carries.
+     *
+     * <p><b>{@link PatientServiceUnavailableException} is here because its title was false for half of
+     * its own instances</b> (backlog item 127). {@code @ResponseStatus} sits on a class, so its
+     * {@code reason} is one string for every fault: a refusal by hc-patient's scope of practice — a read
+     * that happened, was understood and was answered "no" — was titled <em>"The patient service could not
+     * be reached"</em>, directly above a {@code detail} that since backlog item 112 says it was refused.
+     * Two prose fields of one problem document contradicting each other, with the false one first.
+     *
+     * <p>Asked of the exception rather than switched on here, so that the sentence lives beside
+     * {@code message()}, which is composed from the same predicate — see
+     * {@link PatientServiceUnavailableException#title()}, which argues it. This advice keeps no
+     * vocabulary of its own about the sibling.
+     */
     private String getCustomizedTitle(Throwable err) {
         if (err instanceof MethodArgumentNotValidException) return "Method argument not valid";
+        if (err instanceof PatientServiceUnavailableException patientService) return patientService.title();
         return null;
     }
 

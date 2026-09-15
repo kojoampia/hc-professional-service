@@ -1110,6 +1110,48 @@ public class PatientDirectoryService {
      *
      * <p>One scoped read serves both, because the entitlement check and the answer are the same rows:
      * see {@link #requireEntitlement}.
+     *
+     * <h3>It refuses a discipline hc-patient refuses the case collection, and that is the answer
+     * (backlog item 127)</h3>
+     * <b>This was left open by item 112 and decided here rather than inherited from it.</b> A technician
+     * gets 503 from {@code GET /api/patients/&#123;id&#125;/cases} — measured through the gateway on the
+     * quality stack, 2026-09-15, beside a nurse's 200 on the same patient — and item 112 deliberately did
+     * not pre-judge whether that should change when it made {@link #recordWithinScope} tolerant. It should
+     * not, and for a reason that is <em>stronger</em> here than on the record rather than merely inherited:
+     *
+     * <ul>
+     *   <li><b>There is nothing left to serve.</b> {@link #recordWithinScope} degrades because a record
+     *       refused its activity log still has cases, medications, reports and demographics — four
+     *       collections that arrived. This response is the refused collection and nothing else. What a
+     *       degradation could return is an empty page, and an empty page here reads <em>this patient has
+     *       no cases</em>: a clinical statement, made to a clinician, that is false. That is the direction
+     *       backlog items 62, 64, 67, 73, 78 and 80 exist to refuse, and it is worse than the
+     *       <em>"no medications"</em> sentence item 112 already declined to print on a hollow record.
+     *   <li><b>The same read decides the entitlement.</b> {@link #requireEntitlement} is
+     *       {@link #entitledCases}, so item 111's Decision C applies unchanged: a read that
+     *       <em>decides</em> may not degrade. The only fallback available is the task half, which
+     *       {@link #recordWithinScope} rejected twice over — it would answer <em>no such patient for this
+     *       clinician</em> from a collection nobody read wherever the task half says no, which is backlog
+     *       item 24's defect, and would let the other rows through to the empty page above.
+     *   <li><b>No header could carry it.</b> {@code X-Restricted-Parts} names a part withheld from a
+     *       response that was still served. A 200, an empty array and a marker is the shape of
+     *       <em>this collection is empty and by the way it was refused</em> — which is the conflation item
+     *       107 removed from the directory, reintroduced on the one response with no remainder to attach
+     *       it to.
+     * </ul>
+     *
+     * <p><b>So the refusal stays and the sentence was what needed fixing</b>; see
+     * {@link PatientServiceUnavailableException#title()}, where item 127's change actually landed. A
+     * clinician is warned before they get here, by {@code X-Restricted-Follow-Ups} on the directory
+     * (backlog item 128) — and that header deliberately does <b>not</b> name this endpoint, for the reason
+     * given on {@code PatientResource.RESTRICTED_FOLLOW_UPS}.
+     *
+     * <p><b>What this decision is not.</b> It is not backlog item 113: whether a permanent refusal should
+     * be 403 rather than 503 is a cross-repo behavioural change — {@code mobile/}'s offline queue splits on
+     * 4xx versus 5xx — and it is orthogonal to whether this endpoint answers at all. And no discipline is
+     * written down here or anywhere it is derived from; the scope-of-practice matrix is hc-patient's, and
+     * the day it admits a technician to {@code DIAGNOSIS} this endpoint starts answering them with no
+     * change here.
      */
     public Page<CaseSummary> casesFor(String patientId, Pageable pageable) {
         List<CaseSummary> matches = requireEntitlement(patientId)

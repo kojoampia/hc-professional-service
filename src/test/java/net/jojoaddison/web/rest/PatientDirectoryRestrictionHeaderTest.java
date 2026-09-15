@@ -207,9 +207,13 @@ class PatientDirectoryRestrictionHeaderTest {
     /**
      * <b>The record response carries no follow-up marker, and that is a decision.</b> {@code X-Restricted-Parts}
      * is shared by both endpoints because the refused collection is the same collection; this one is not,
-     * because it answers "what does this list lead to" and a record leads nowhere the same refusal
-     * governs — {@code /api/patients/&#123;id&#125;/cases} is open as backlog item 127 and would have to
-     * be unpicked whichever way that goes.
+     * because it answers "what does this list lead to".
+     *
+     * <p>A record <em>does</em> lead somewhere the same refusal governs — {@code /api/patients/&#123;id&#125;/cases},
+     * which backlog item 127 settled as going on refusing — and marking it here would still say nothing.
+     * A caller refused the case collection <b>never receives this response at all</b>: their record is the
+     * 503 item 112 argued for. The only callers who can read this header are the ones for whom it would
+     * always be absent, which is a header with one possible value.
      */
     @Test
     void theRECORDresponseDoesNOTcarryAFollowUpMarker() {
