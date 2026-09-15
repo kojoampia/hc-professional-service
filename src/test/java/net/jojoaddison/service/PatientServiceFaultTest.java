@@ -233,24 +233,51 @@ class PatientServiceFaultTest {
     }
 
     /**
-     * <b>Every fault gets one of the two titles, including the ones nobody has written yet.</b> Derived by
-     * iterating the enum rather than by listing the constants, for the reason {@code blocksRecord()}'s
-     * tests are derived: a ninth fault added later would otherwise pick up whichever arm the ternary falls
-     * to, silently. It asserts only the correspondence with {@code isAuthorisationRefusal()} — which is the
-     * whole of the rule — so a new fault is covered the day it is declared.
+     * Which title each fault takes — <b>hand-listed in a {@code switch} expression with no {@code default}
+     * arm, which is the whole of what makes this more than a restatement of the implementation</b>.
+     *
+     * <p><b>The first version derived the expectation from {@link Fault#isAuthorisationRefusal()} and
+     * claimed a ninth fault would therefore be "covered the day it is declared". It would not, and the
+     * review of PR #52 proved it by adding one: twenty-one tests, zero failures.</b> An expectation that is
+     * the same ternary as the implementation cannot disagree with it, so a new constant is
+     * <em>iterated</em> and never <em>checked</em> — it slides in and takes {@code UNREACHABLE_TITLE} in
+     * silence, which is precisely the outcome that sentence promised to prevent. By this repository's own
+     * standard — backlog item 112's review, <em>a document asserting a property the code lacks is itself a
+     * defect</em> — the javadoc was the defect rather than the assertion.
+     *
+     * <p>{@code blocksRecord()}'s tests have the shape that does work, and it is borrowed rather than
+     * reinvented: a switch <em>expression</em> is exhaustive-checked at compile time, so a ninth
+     * {@link Fault} <b>breaks this build</b> until somebody decides whether it is a refusal — a decision
+     * forced where the constant is declared instead of an arm quietly inherited. Verified the way the
+     * review falsified the old one, by adding a ninth: it no longer compiles.
+     *
+     * <p><b>The property the old version genuinely did hold is kept, because this listing is not the
+     * implementation's predicate.</b> {@code title()} is a function of {@code isAuthorisationRefusal()} and
+     * of nothing else — re-keying it on {@code !clearsOnRetry()}, the neighbouring flag and the plausible
+     * mistake, reddens {@link Fault#SCHEMA} and {@link Fault#NO_TOKEN} here, which share that value with a
+     * refusal while meaning something else entirely.
      */
     @ParameterizedTest
     @EnumSource(Fault.class)
     void everyFaultIsTitledByWhetherItIsARefusal(Fault fault) {
-        String title = PatientServiceUnavailableException.read("/api/clinical-cases", fault, null).title();
+        // No `default`, deliberately: this is a decision table, not a shortcut. A `default` arm — or a
+        // switch statement, which Java does not require to be exhaustive over constant labels — would
+        // turn the compile error a ninth constant should cause back into a silently unexercised case.
+        String expected =
+            switch (fault) {
+                case UPSTREAM_FORBIDDEN -> PatientServiceUnavailableException.REFUSED_TITLE;
+                case TRANSPORT,
+                    UPSTREAM_STATUS,
+                    BUDGET_EXHAUSTED,
+                    PAGE_GUARD,
+                    SCHEMA,
+                    NO_TOKEN,
+                    UNKNOWN -> PatientServiceUnavailableException.UNREACHABLE_TITLE;
+            };
 
-        assertThat(title)
+        assertThat(PatientServiceUnavailableException.read("/api/clinical-cases", fault, null).title())
             .describedAs("%s.isAuthorisationRefusal() is %s", fault, fault.isAuthorisationRefusal())
-            .isEqualTo(
-                fault.isAuthorisationRefusal()
-                    ? PatientServiceUnavailableException.REFUSED_TITLE
-                    : PatientServiceUnavailableException.UNREACHABLE_TITLE
-            );
+            .isEqualTo(expected);
     }
 
     /**

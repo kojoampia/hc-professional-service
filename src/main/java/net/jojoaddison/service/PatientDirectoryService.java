@@ -1142,9 +1142,17 @@ public class PatientDirectoryService {
      *
      * <p><b>So the refusal stays and the sentence was what needed fixing</b>; see
      * {@link PatientServiceUnavailableException#title()}, where item 127's change actually landed. A
-     * clinician is warned before they get here, by {@code X-Restricted-Follow-Ups} on the directory
-     * (backlog item 128) — and that header deliberately does <b>not</b> name this endpoint, for the reason
-     * given on {@code PatientResource.RESTRICTED_FOLLOW_UPS}.
+     * <em>client</em> is told before a clinician gets here, by {@code X-Restricted-Follow-Ups} on the
+     * directory (backlog item 128) — and that header deliberately does <b>not</b> name this endpoint, for
+     * the reason given on {@code PatientResource.RESTRICTED_FOLLOW_UPS}.
+     *
+     * <p><b>Told, not warned, and the gap between the two is backlog item 132, which is open.</b> Neither
+     * {@code web/} nor {@code mobile/} reads that header yet, so no clinician is warned of anything today —
+     * they still learn by tapping. Item 132 exists to name this chain's recurring failure, <em>a
+     * capability is not an outcome</em>, which has happened three times here already; writing the
+     * capability down as though it were the outcome is exactly how somebody closes 132 in two months as
+     * already covered. The refusal below is right either way. What 132 decides is whether anybody finds
+     * out before they tap.
      *
      * <p><b>What this decision is not.</b> It is not backlog item 113: whether a permanent refusal should
      * be 403 rather than 503 is a cross-repo behavioural change — {@code mobile/}'s offline queue splits on

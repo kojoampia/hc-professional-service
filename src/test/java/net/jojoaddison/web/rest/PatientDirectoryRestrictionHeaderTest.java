@@ -97,9 +97,14 @@ class PatientDirectoryRestrictionHeaderTest {
     }
 
     /**
-     * The ordinary case — five of the eight disciplines — and the one that should pay nothing. An
-     * always-present header would make the value meaningless: a client cannot distinguish "nothing was
-     * restricted" from "this field means nothing" if it is there every time.
+     * The ordinary case — every discipline hc-patient admits to both collections — and the one that
+     * should pay nothing. An always-present header would make the value meaningless: a client cannot
+     * distinguish "nothing was restricted" from "this field means nothing" if it is there every time.
+     *
+     * <p>(A count stood here and is dropped rather than corrected, closing the residual backlog item 128
+     * parked in this file and in {@code PatientDirectoryRestrictionMeters}. It counted rows of another
+     * repository's scope-of-practice matrix, so it could go stale with nothing here changing — which is
+     * the drift that meter exists to catch, restated as a number in a comment beside it.)
      */
     @Test
     void nothingRestrictedMeansNoHeaderAtAll() {

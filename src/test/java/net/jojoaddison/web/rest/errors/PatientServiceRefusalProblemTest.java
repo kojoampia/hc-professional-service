@@ -11,7 +11,16 @@ import org.springframework.web.context.request.ServletWebRequest;
 import tech.jhipster.web.rest.errors.ProblemDetailWithCause;
 
 /**
- * What a refused caller actually reads, as one document rather than as one field (backlog item 127).
+ * What a refused caller is answered, as one document rather than as one field (backlog item 127).
+ *
+ * <p><b>"Answered", not "reads", and that is measured rather than hedged.</b> Neither client surfaces this
+ * field: {@code web/}'s {@code alert-error.component.ts} renders {@code error.detail ?? error.message} and
+ * {@code mobile/}'s {@code write-queue.service.ts} does the same, and a search of both application sources
+ * finds no read of a problem {@code title} at all — {@code web/}'s only {@code error.title} is the static
+ * i18n key of its error <em>page</em>. So this fix is operator-, log- and API-consumer-facing, and item 127
+ * must never be cited as having changed a sentence a clinician sees. The sentence a clinician sees is
+ * {@code detail}, which items 107 and 112 fixed, rendered untranslated because {@code error.http.503} is
+ * absent from all four catalogues — a separate {@code web/} row.
  *
  * <p><b>The defect this closes was invisible from either side.</b> {@code PatientServiceFaultTest} holds
  * the message and {@code PatientServiceUnavailableException.title()} holds the title, and each was right

@@ -159,8 +159,13 @@ public class PatientDirectoryRestrictionMeters {
      * {@code X-Restricted-Parts}, so the metric and the header cannot come to disagree — two call
      * sites recording what they each believed was withheld is exactly how they would.
      *
-     * <p>Empty is the ordinary case — five of the eight disciplines, on every request — and costs a
-     * branch. Nothing is registered, nothing is resolved, no tag is built.
+     * <p>Empty is the ordinary case — every discipline hc-patient admits to both collections, on every
+     * request — and costs a branch. Nothing is registered, nothing is resolved, no tag is built.
+     *
+     * <p>(A count stood in that sentence and is dropped rather than corrected, closing the residual
+     * backlog item 128 parked here and in {@code PatientDirectoryRestrictionHeaderTest}. It counted rows
+     * of the matrix this meter exists to notice moving, so it was a number that could go stale with
+     * nothing in this repository changing — which is the drift itself, written down as a constant.)
      */
     public void record(Set<RestrictedPart> restrictions) {
         if (restrictions.isEmpty()) {
