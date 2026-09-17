@@ -58,6 +58,19 @@ public class SecurityConfiguration {
                     // carry the matching @PreAuthorize so the requirement is legible where the code
                     // is, the way AccountIdMigrationResource does under /api/admin.
                     //
+                    // HEAD IS LISTED BESIDE GET AND THE OMISSION WAS A REAL FAIL-OPEN, found in review.
+                    // Spring MVC dispatches a HEAD to the @GetMapping handler, so a rule scoped to GET
+                    // alone let HEAD fall through to /api/** → .authenticated() below. That is not a
+                    // technicality on this resource: the /email/{email} oracle answers entirely on the
+                    // STATUS LINE — measured on quality, a carer's HEAD of a known address returned 200
+                    // and of an unknown one 404 — so "does this person work here" leaks with no body at
+                    // all, and HEAD of the collection returned 200 carrying X-Total-Count, the directory
+                    // size. The @PreAuthorize layer did refuse it, because method security intercepts
+                    // the invocation whatever the verb; the point is that the LAYER THIS COMMENT CALLS
+                    // OPERATIVE did not, so deleting the annotations on the strength of the paragraph
+                    // above would have reopened the oracle with every committed test still green.
+                    // ProfileResourceIT pins both verbs now. Add a verb here, not an exception below.
+                    //
                     // WRITES ARE UNTOUCHED and still admit CLINICAL_MUTATION's six through the rules
                     // below. What was decided is who may READ a profile that is not theirs.
                     //
@@ -68,6 +81,7 @@ public class SecurityConfiguration {
                     // excuses the caller has to compare caller against path, which is the shape that
                     // gets it wrong. See ProfileResource and ClinicalAuthorityMatrixIT.
                     .requestMatchers(HttpMethod.GET, "/api/profiles", "/api/profiles/**").hasAuthority(AuthoritiesConstants.ADMIN)
+                    .requestMatchers(HttpMethod.HEAD, "/api/profiles", "/api/profiles/**").hasAuthority(AuthoritiesConstants.ADMIN)
                     // The estate-wide recipient directory: account id, LOGIN and role for every
                     // ACTIVE professional, unpaginated. The login is what /api/authenticate takes,
                     // so an unauthorised read of this is the estate's valid-login list. All nine

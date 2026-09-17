@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -416,6 +417,52 @@ class ProfileResourceIT {
         storeTheSubject();
 
         restProfileMockMvc.perform(get(ENTITY_API_URL + "/email/{email}", DEFAULT_EMAIL)).andExpect(status().isForbidden());
+    }
+
+    /**
+     * <b>HEAD is refused too, and these two exist because the filter-chain rule originally missed it.</b>
+     *
+     * <p>Spring MVC dispatches a HEAD to the {@code @GetMapping} handler, so a rule scoped to
+     * {@code HttpMethod.GET} alone left HEAD falling through to {@code /api/**} →
+     * {@code .authenticated()}. The {@code @PreAuthorize} layer refused it regardless — method
+     * security intercepts the invocation whatever the verb — so nothing ever leaked from the
+     * committed code; what was wrong was that the layer {@code SecurityConfiguration} advertises as
+     * the operative, future-proof one did not hold, and deleting the annotations on the strength of
+     * that paragraph would have reopened this with every other test still green.
+     *
+     * <p><b>On this resource HEAD is not a technicality, because the oracle lives on the status
+     * line.</b> Measured on the quality stack before the fix, a {@code carer}'s HEAD of a known
+     * address returned {@code 200} and of an unknown one {@code 404} — so "does this person work
+     * here" is answerable with no body at all — and HEAD of the collection returned {@code 200}
+     * carrying {@code X-Total-Count}, the size of the clinician directory.
+     *
+     * <p>Two tests rather than one combined: a single method asserting both would redden together
+     * and could not distinguish the collection being gated from the email path being gated.
+     */
+    @Test
+    void aClinicianIsRefusedTheProfileCollectionByHead() throws Exception {
+        storeTheSubject();
+
+        restProfileMockMvc.perform(head(ENTITY_API_URL)).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void aClinicianIsRefusedAProfileByEmailByHead() throws Exception {
+        storeTheSubject();
+
+        restProfileMockMvc.perform(head(ENTITY_API_URL + "/email/{email}", DEFAULT_EMAIL)).andExpect(status().isForbidden());
+    }
+
+    /**
+     * The positive control for the two above: HEAD is refused to a clinician because of the
+     * authority, not because HEAD is broken on this resource for everybody.
+     */
+    @Test
+    @WithMockGatewayUser(login = ADMIN, authorities = { "ROLE_ADMIN" })
+    void anAdministratorMayHeadAProfileByEmail() throws Exception {
+        storeTheSubject();
+
+        restProfileMockMvc.perform(head(ENTITY_API_URL + "/email/{email}", DEFAULT_EMAIL)).andExpect(status().isOk());
     }
 
     /**
