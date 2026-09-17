@@ -26,9 +26,26 @@ import tech.jhipster.web.rest.errors.ProblemDetailWithCause;
  * is a <em>translation key</em>, and {@code alert-error.component.ts} renders {@code detail} only as the
  * fallback for one that misses — which {@code error.http.503} always did, being in none of the four
  * catalogues. So the clinician read the operator's sentence, in English, whatever their locale. The cases
- * below now assert the key beside the title, because the two are keyed on one predicate
- * ({@code Fault.isAuthorisationRefusal()}) and a document whose three prose fields disagree is precisely what
- * item 127 removed.
+ * below assert the key beside the title and the detail, because a document whose prose fields disagree is
+ * precisely what item 127 removed one field to the left.
+ *
+ * <p><b>The key is a three-way split and the title is a two-way one, and this javadoc claimed otherwise for
+ * the length of one review.</b> It said the two were "keyed on one predicate
+ * ({@code Fault.isAuthorisationRefusal()})", which is true of the title and false of the key — because
+ * {@code message}'s outlook clause has always keyed on {@code clearsOnRetry()} as well. The two-way key that
+ * sentence described gave {@code SCHEMA} and {@code NO_TOKEN} a translated <em>"try again in a few
+ * minutes"</em> directly beneath a detail reading <em>"will NOT clear on retry"</em>. Both halves of what the
+ * clinician read were false, the fluent one was new, and that is item 107's defect re-shipped to the audience
+ * item 135 exists to serve.
+ *
+ * <p><b>Nothing here could have caught it, and that is the more useful half.</b>
+ * {@code theMessageKeysAreTheConstantsTheExceptionDeclares} exercises {@code SCHEMA} — and asserts that the
+ * wire key equals {@code messageKey()}, which is self-consistency <em>across the boundary</em> and stays
+ * green however wrong {@code messageKey()} is. So {@code aKEYneverPromisesARetryTheDetailRefuses} below
+ * asserts the two fields against <em>each other</em>, over every {@code Fault} value rather than a listed
+ * few: a key promising a retry may not sit above a detail refusing one. It is the only assertion here that
+ * would have reddened, and it is derived rather than enumerated so that a ninth fault is covered by nobody
+ * editing this file.
  *
  * <p><b>The defect this closes was invisible from either side.</b> {@code PatientServiceFaultTest} holds
  * the message and {@code PatientServiceUnavailableException.title()} holds the title, and each was right
@@ -188,6 +205,61 @@ class PatientServiceRefusalProblemTest {
     }
 
     /**
+     * <b>The third sentence, and the defect that made it necessary.</b> A fault that is neither a refusal
+     * nor retryable takes neither of the other two keys.
+     *
+     * <p>Both faults are asserted because they are the whole population of that branch and because they
+     * arrive by different routes — {@code SCHEMA} from the sibling's JSON not fitting this service's DTOs,
+     * {@code NO_TOKEN} from there being no caller token to relay — and a branch that covered only one of
+     * them would look identical here.
+     *
+     * <p>The detail is asserted beside the key, spelled out, because the contradiction is the point: these
+     * two used to be told <em>"try again in a few minutes"</em> under exactly this sentence.
+     */
+    @Test
+    void aPERSISTENTfaultNamesNeitherOfTheOtherTwoSentences() {
+        for (Fault fault : new Fault[] { Fault.SCHEMA, Fault.NO_TOKEN }) {
+            ProblemDetailWithCause problem = problemFor(PatientServiceUnavailableException.read("/api/clinical-cases", fault, null));
+
+            assertThat(messageKeyOf(problem)).as("%s", fault).isEqualTo("error.patientService.faulted");
+            assertThat(problem.getDetail()).as("%s", fault).contains("will NOT clear on retry");
+        }
+    }
+
+    /**
+     * <b>The invariant, over every {@code Fault} there is — and the only assertion in this class that would
+     * have caught the two-way key.</b>
+     *
+     * <p>The clinician's key and the operator's outlook clause make the same promise about retrying, or
+     * they make a document that contradicts itself. That is a relation <em>between two fields</em>, which
+     * is exactly what every other case here misses: they each check one field against a literal, and a
+     * wrong mapping applied consistently satisfies all of them.
+     *
+     * <p><b>Derived, not enumerated.</b> It walks {@code Fault.values()}, so the ninth fault somebody adds
+     * is covered without anybody remembering this file — the shape {@code restricted-part-names.spec.ts}
+     * uses in {@code web/} and for the same reason. Asserting equality of the two booleans rather than
+     * implication is deliberate: a key that refused a retry over a fault the enum says clears would be the
+     * mirror defect, and is just as much a lie to somebody.
+     *
+     * <p>It reads the sentences rather than the predicates on purpose. Re-deriving the mapping from
+     * {@code isAuthorisationRefusal()} and {@code clearsOnRetry()} would restate the implementation and
+     * pass against any consistent error; these are the two strings that actually travel.
+     */
+    @Test
+    void aKEYneverPromisesARetryTheDetailRefuses() {
+        for (Fault fault : Fault.values()) {
+            ProblemDetailWithCause problem = problemFor(PatientServiceUnavailableException.read("/api/clinical-cases", fault, null));
+
+            boolean keyPromisesARetry = "error.patientService.unreachable".equals(messageKeyOf(problem));
+            boolean detailPromisesARetry = problem.getDetail().contains("may clear on retry");
+
+            assertThat(keyPromisesARetry)
+                .as("%s: key=%s detail=%s", fault, messageKeyOf(problem), problem.getDetail())
+                .isEqualTo(detailPromisesARetry);
+        }
+    }
+
+    /**
      * <b>The literals above are the constants the exception declares</b>, for exactly the reason
      * {@code theTitlesAreTheConstantsTheExceptionDeclares} gives three tests up: the two cases above pin
      * the wiring against spelled-out strings, and this pins the strings to their source, so renaming a
@@ -197,15 +269,24 @@ class PatientServiceRefusalProblemTest {
      * slipped through leaves all four locales missing it and puts the operator's sentence back on the
      * clinician's screen, which is the entire defect item 135 exists to close and which nothing else here
      * would notice.
+     *
+     * <p><b>Read what this does and does not say, because a review found the gap the expensive way.</b> It
+     * asserts that the key <em>on the wire</em> is the key the exception <em>declares</em> — a property of
+     * the boundary, not of the mapping. It exercised {@code SCHEMA} while {@code SCHEMA} was being given the
+     * retryable sentence and stayed green throughout, because {@code messageKey()} was consistently wrong
+     * and consistency is all this can see. {@code aKEYneverPromisesARetryTheDetailRefuses} is the case that
+     * looks at the mapping; keep both, and do not mistake one for the other.
+     *
+     * <p>All three faults are walked rather than a representative two, so that a key added later is not
+     * left unpinned merely because the fault carrying it was added after this test was written.
      */
     @Test
     void theMessageKeysAreTheConstantsTheExceptionDeclares() {
-        assertThat(
-            messageKeyOf(problemFor(PatientServiceUnavailableException.read("/api/reports", Fault.UPSTREAM_FORBIDDEN, null)))
-        ).isEqualTo(PatientServiceUnavailableException.read("/api/reports", Fault.UPSTREAM_FORBIDDEN, null).messageKey());
-        assertThat(messageKeyOf(problemFor(PatientServiceUnavailableException.read("/api/reports", Fault.SCHEMA, null)))).isEqualTo(
-            PatientServiceUnavailableException.read("/api/reports", Fault.SCHEMA, null).messageKey()
-        );
+        for (Fault fault : new Fault[] { Fault.UPSTREAM_FORBIDDEN, Fault.TRANSPORT, Fault.SCHEMA }) {
+            assertThat(messageKeyOf(problemFor(PatientServiceUnavailableException.read("/api/reports", fault, null))))
+                .as("%s", fault)
+                .isEqualTo(PatientServiceUnavailableException.read("/api/reports", fault, null).messageKey());
+        }
     }
 
     /**
