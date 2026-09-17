@@ -419,6 +419,15 @@ public class PatientServiceUnavailableException extends RuntimeException {
      * clinician will act on. It is <b>not</b> true that all four fields make one split, and the earlier
      * version of this paragraph said so.
      *
+     * <p><b>A fault added later inherits the retry half of that and not the refusal half.</b> The first
+     * branch reads {@link Fault#isAuthorisationRefusal()}, which is a literal
+     * {@code this == UPSTREAM_FORBIDDEN} — so a ninth refusal-shaped status takes {@link #FAULTED_MESSAGE_KEY}
+     * until somebody widens that predicate, and the test above cannot tell, because {@code refused} and
+     * {@code faulted} decline a retry alike. Widening {@code isAuthorisationRefusal()} is therefore the edit
+     * that matters, and its two enumerated cases in {@code PatientServiceRefusalProblemTest} go with it. The
+     * predicate already exists as a predicate rather than an equality test at each call site for exactly
+     * that reason — see its own javadoc.
+     *
      * <p><b>The three sentences this names are the clinician's, not translations of the operator's.</b> A
      * refusal says the role is not permitted and that retrying will not help; an outage says the service is
      * not answering, that the clinician caused nothing, and to try again shortly; a fault says something is

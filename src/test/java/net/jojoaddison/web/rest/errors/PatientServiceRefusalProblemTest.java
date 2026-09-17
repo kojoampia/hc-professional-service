@@ -44,8 +44,24 @@ import tech.jhipster.web.rest.errors.ProblemDetailWithCause;
  * green however wrong {@code messageKey()} is. So {@code aKEYneverPromisesARetryTheDetailRefuses} below
  * asserts the two fields against <em>each other</em>, over every {@code Fault} value rather than a listed
  * few: a key promising a retry may not sit above a detail refusing one. It is the only assertion here that
- * would have reddened, and it is derived rather than enumerated so that a ninth fault is covered by nobody
- * editing this file.
+ * would have reddened.
+ *
+ * <p><b>It covers one of the two axes, and saying which is the whole point of this paragraph.</b> The
+ * derived invariant holds the <em>retry</em> axis for any fault added later, with nobody editing this file.
+ * It cannot see the <em>refusal</em> axis at all: {@code refused} and {@code faulted} both decline a retry,
+ * so both booleans read the same either way, and a ninth fault with {@code clearsOnRetry=false} would have
+ * its refused-versus-faulted assignment pinned by nothing. That axis is held by <b>enumeration</b>, in three
+ * places that must be edited by hand — {@code Fault.isAuthorisationRefusal()} in the production type, which
+ * is a literal {@code == UPSTREAM_FORBIDDEN}; the {@code SCHEMA, NO_TOKEN} array in
+ * {@code aPERSISTENTfaultNamesNeitherOfTheOtherTwoSentences}; and the single {@code UPSTREAM_FORBIDDEN} in
+ * {@code aREFUSALnamesTheRefusalSentenceForTheClinician}. Those two faults are today's entire non-retryable
+ * population, which is exactly why the lists look complete and would go on looking complete.
+ *
+ * <p>An earlier version of this paragraph claimed the derived case covered a ninth fault outright. That is
+ * the same over-claim, one axis over, as the "keyed on one predicate" sentence above it — a javadoc
+ * asserting a property the code has only partly got, which is item 112's classification and now this item's
+ * recurring failure. Stated honestly it is still a good trade: the axis that produced a live defect is
+ * derived, and the axis that has never moved is enumerated.
  *
  * <p><b>The defect this closes was invisible from either side.</b> {@code PatientServiceFaultTest} holds
  * the message and {@code PatientServiceUnavailableException.title()} holds the title, and each was right
@@ -235,11 +251,16 @@ class PatientServiceRefusalProblemTest {
      * is exactly what every other case here misses: they each check one field against a literal, and a
      * wrong mapping applied consistently satisfies all of them.
      *
-     * <p><b>Derived, not enumerated.</b> It walks {@code Fault.values()}, so the ninth fault somebody adds
-     * is covered without anybody remembering this file — the shape {@code restricted-part-names.spec.ts}
-     * uses in {@code web/} and for the same reason. Asserting equality of the two booleans rather than
-     * implication is deliberate: a key that refused a retry over a fault the enum says clears would be the
-     * mirror defect, and is just as much a lie to somebody.
+     * <p><b>Derived, not enumerated — on this axis.</b> It walks {@code Fault.values()}, so the ninth fault
+     * somebody adds has its <em>retry</em> advice covered without anybody remembering this file — the shape
+     * {@code restricted-part-names.spec.ts} uses in {@code web/} and for the same reason. Asserting equality
+     * of the two booleans rather than implication is deliberate: a key that refused a retry over a fault the
+     * enum says clears would be the mirror defect, and is just as much a lie to somebody.
+     *
+     * <p><b>What it cannot see.</b> {@code refused} and {@code faulted} both decline a retry, so this case
+     * reads {@code false}/{@code false} for either and a fault taking the wrong one of the two passes here.
+     * The refused-versus-faulted split is enumerated — see the class javadoc, which names the three lists
+     * that need editing by hand. Do not read a green run of this as saying a new fault is fully pinned.
      *
      * <p>It reads the sentences rather than the predicates on purpose. Re-deriving the mapping from
      * {@code isAuthorisationRefusal()} and {@code clearsOnRetry()} would restate the implementation and
