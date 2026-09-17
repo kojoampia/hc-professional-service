@@ -71,6 +71,36 @@ public class PatientServiceUnavailableException extends RuntimeException {
     static final String REFUSED_TITLE = "The patient service refused this caller's discipline";
 
     /**
+     * The i18n key naming a refusal, for the clinician's sentence rather than the operator's (backlog
+     * item 135).
+     *
+     * <p><b>This type owns the key because it owns the distinction.</b> The problem document's
+     * {@code message} property is a <em>translation key</em>, not prose: {@code web/}'s
+     * {@code alert-error.component.ts} hands it to ngx-translate and falls back to the {@code detail}
+     * only when the key misses. Every one of these carried {@code error.http.503} — absent from all four
+     * catalogues — so the key always missed and the clinician read {@link #message}, which is written
+     * for an operator, in English, whatever their locale. Items 107, 112 and 127 each improved that
+     * sentence for the reader who was not looking at it.
+     *
+     * <p>Named on the exception and not in {@code ErrorConstants} for the reason {@link #title()} gives
+     * for living here: {@code ExceptionTranslator} is generic JHipster machinery and keeps no vocabulary
+     * of its own about the sibling. {@code TechnicalStructureTest} enforces the same direction from the
+     * other side — {@code ..service..} may not reference {@code ..web..}, so this type could not reach
+     * {@code ErrorConstants} even if it wanted to.
+     */
+    static final String REFUSED_MESSAGE_KEY = "error.patientService.refused";
+
+    /**
+     * The i18n key naming a read that genuinely did not happen. See {@link #REFUSED_MESSAGE_KEY}.
+     *
+     * <p>Two keys rather than one, for the reason item 127 gave for two titles: a clinician told
+     * "nothing is broken, speak to your administrator" while hc-patient is down has been sent to the
+     * wrong person, and one told "try again in a few minutes" over a scope-of-practice rule will retry
+     * for ever.
+     */
+    static final String UNREACHABLE_MESSAGE_KEY = "error.patientService.unreachable";
+
+    /**
      * Why the call did not happen — and, above all, whether waiting is the remedy.
      *
      * <p>Every value is a 503 to the caller. The distinction is for whoever is paged: {@link #SCHEMA},
@@ -326,6 +356,32 @@ public class PatientServiceUnavailableException extends RuntimeException {
      */
     public String title() {
         return fault.isAuthorisationRefusal() ? REFUSED_TITLE : UNREACHABLE_TITLE;
+    }
+
+    /**
+     * The i18n key that goes into the problem's {@code message} property — <b>the field a clinician
+     * actually reads</b> (backlog item 135).
+     *
+     * <p><b>Items 107, 112 and 127 improved three clauses of {@link #message} and one title, and none of
+     * them asked who reads them.</b> {@code web/}'s {@code alert-error.component.ts} renders
+     * {@code error.detail ?? error.message} and passes {@code error.message} to ngx-translate as the key;
+     * {@code AlertService} falls back to the detail only when the key misses. So the operator's sentence —
+     * which names the collection, the fault and the retryability — is what a clinician was shown on screen,
+     * in English, whatever their locale, because {@code error.http.503} is in none of the four catalogues.
+     * Naming the fault here gives each of them their own sentence: the operator keeps {@code detail}
+     * verbatim and the clinician gets {@code error.patientService.*} translated.
+     *
+     * <p><b>Keyed on {@link Fault#isAuthorisationRefusal()}, the same predicate as {@link #title()} and
+     * {@link #message}</b>, so a third prose field cannot come to disagree with the two beside it — which
+     * is the defect item 127 removed one field to the left.
+     *
+     * <p><b>The two sentences this names are the clinician's, not translations of the operator's.</b> A
+     * refusal says the role is not permitted and that retrying will not help; an outage says the service is
+     * not answering, that the clinician caused nothing, and to try again shortly. Neither names the
+     * collection or the {@link Fault}: those are an operator's vocabulary and stay in {@code detail}.
+     */
+    public String messageKey() {
+        return fault.isAuthorisationRefusal() ? REFUSED_MESSAGE_KEY : UNREACHABLE_MESSAGE_KEY;
     }
 
     /** The sibling path that could not be reached. */

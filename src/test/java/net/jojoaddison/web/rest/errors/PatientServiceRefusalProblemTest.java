@@ -13,14 +13,22 @@ import tech.jhipster.web.rest.errors.ProblemDetailWithCause;
 /**
  * What a refused caller is answered, as one document rather than as one field (backlog item 127).
  *
- * <p><b>"Answered", not "reads", and that is measured rather than hedged.</b> Neither client surfaces this
- * field: {@code web/}'s {@code alert-error.component.ts} renders {@code error.detail ?? error.message} and
- * {@code mobile/}'s {@code write-queue.service.ts} does the same, and a search of both application sources
- * finds no read of a problem {@code title} at all — {@code web/}'s only {@code error.title} is the static
- * i18n key of its error <em>page</em>. So this fix is operator-, log- and API-consumer-facing, and item 127
- * must never be cited as having changed a sentence a clinician sees. The sentence a clinician sees is
- * {@code detail}, which items 107 and 112 fixed, rendered untranslated because {@code error.http.503} is
- * absent from all four catalogues — a separate {@code web/} row.
+ * <p><b>"Answered", not "reads", and that is measured rather than hedged.</b> Neither client surfaces the
+ * {@code title}: {@code web/}'s {@code alert-error.component.ts} renders {@code error.detail ?? error.message}
+ * and {@code mobile/}'s {@code write-queue.service.ts} stores the same, and a search of both application
+ * sources finds no read of a problem {@code title} at all — {@code web/}'s only {@code error.title} is the
+ * static i18n key of its error <em>page</em>. So item 127 was operator-, log- and API-consumer-facing and
+ * must never be cited as having changed a sentence a clinician sees.
+ *
+ * <p><b>Backlog item 135 is the sentence a clinician sees, and it is a third field again.</b> This javadoc
+ * used to end by naming {@code detail} as that sentence and the missing {@code error.http.503} as "a separate
+ * {@code web/} row"; that row is now closed here, so the claim has to move rather than stand. {@code message}
+ * is a <em>translation key</em>, and {@code alert-error.component.ts} renders {@code detail} only as the
+ * fallback for one that misses — which {@code error.http.503} always did, being in none of the four
+ * catalogues. So the clinician read the operator's sentence, in English, whatever their locale. The cases
+ * below now assert the key beside the title, because the two are keyed on one predicate
+ * ({@code Fault.isAuthorisationRefusal()}) and a document whose three prose fields disagree is precisely what
+ * item 127 removed.
  *
  * <p><b>The defect this closes was invisible from either side.</b> {@code PatientServiceFaultTest} holds
  * the message and {@code PatientServiceUnavailableException.title()} holds the title, and each was right
@@ -56,6 +64,17 @@ class PatientServiceRefusalProblemTest {
             raised,
             new ServletWebRequest(new MockHttpServletRequest("GET", "/api/patients/p-1/cases"))
         );
+    }
+
+    /**
+     * The problem's {@code message} property — the i18n key {@code web/} hands to ngx-translate, not prose.
+     *
+     * <p>Read through the property map rather than a getter because RFC 7807 has no such field:
+     * {@code message} is JHipster's own extension, set by {@code customizeProblem}, and {@code web/}'s
+     * {@code alert-error.component.ts} reads it off the parsed body by that name.
+     */
+    private Object messageKeyOf(ProblemDetailWithCause problem) {
+        return problem.getProperties().get("message");
     }
 
     /**
@@ -125,5 +144,84 @@ class PatientServiceRefusalProblemTest {
         );
 
         assertThat(problem.getTitle()).isEqualTo("Internal Server Error");
+    }
+
+    /**
+     * <b>Backlog item 135.</b> The one field a clinician actually reads names a refusal, and the three
+     * fields around it do not move.
+     *
+     * <p>The status, the title and the detail are asserted here rather than left to the cases above,
+     * because the whole risk of this change is a fourth prose field drifting from the three it is keyed
+     * with: {@code message} is chosen by {@code Fault.isAuthorisationRefusal()}, and so are
+     * {@code title()} and the opening clause of the detail. A refusal whose key said one thing while its
+     * title said another would be item 127's defect rebuilt one field to the right.
+     */
+    @Test
+    void aREFUSALnamesTheRefusalSentenceForTheClinician() {
+        ProblemDetailWithCause problem = problemFor(
+            PatientServiceUnavailableException.read("/api/clinical-cases", Fault.UPSTREAM_FORBIDDEN, "Forbidden")
+        );
+
+        assertThat(messageKeyOf(problem)).isEqualTo("error.patientService.refused");
+        assertThat(problem.getStatus()).isEqualTo(503);
+        assertThat(problem.getTitle()).isEqualTo("The patient service refused this caller's discipline");
+        assertThat(problem.getDetail()).contains("refused this caller's discipline", "/api/clinical-cases");
+    }
+
+    /**
+     * <b>The positive control, and the half that makes the pair a test.</b> An outage takes the
+     * <em>other</em> key, so a change that keyed every one of these on the refusal sentence reddens here.
+     *
+     * <p>A one-sided assertion would pass against a constant that was never right in any state: an
+     * implementation returning {@code REFUSED_MESSAGE_KEY} unconditionally satisfies the case above and
+     * tells a clinician nothing is broken while hc-patient is down — item 107's defect inverted, and the
+     * reason {@code anOUTAGEkeepsTheTitleItAlwaysHad} exists one field to the left.
+     */
+    @Test
+    void anOUTAGEnamesTheOutageSentenceForTheClinician() {
+        ProblemDetailWithCause problem = problemFor(PatientServiceUnavailableException.read("/api/clinical-cases", Fault.TRANSPORT, null));
+
+        assertThat(messageKeyOf(problem)).isEqualTo("error.patientService.unreachable");
+        assertThat(problem.getStatus()).isEqualTo(503);
+        assertThat(problem.getTitle()).isEqualTo("The patient service could not be reached");
+        assertThat(problem.getDetail()).contains("could not be read");
+    }
+
+    /**
+     * <b>The literals above are the constants the exception declares</b>, for exactly the reason
+     * {@code theTitlesAreTheConstantsTheExceptionDeclares} gives three tests up: the two cases above pin
+     * the wiring against spelled-out strings, and this pins the strings to their source, so renaming a
+     * constant reddens one test instead of silently rewording the contract everywhere.
+     *
+     * <p>Renaming one of these is not a cosmetic change — the key is a catalogue path, so a rename that
+     * slipped through leaves all four locales missing it and puts the operator's sentence back on the
+     * clinician's screen, which is the entire defect item 135 exists to close and which nothing else here
+     * would notice.
+     */
+    @Test
+    void theMessageKeysAreTheConstantsTheExceptionDeclares() {
+        assertThat(
+            messageKeyOf(problemFor(PatientServiceUnavailableException.read("/api/reports", Fault.UPSTREAM_FORBIDDEN, null)))
+        ).isEqualTo(PatientServiceUnavailableException.read("/api/reports", Fault.UPSTREAM_FORBIDDEN, null).messageKey());
+        assertThat(messageKeyOf(problemFor(PatientServiceUnavailableException.read("/api/reports", Fault.SCHEMA, null)))).isEqualTo(
+            PatientServiceUnavailableException.read("/api/reports", Fault.SCHEMA, null).messageKey()
+        );
+    }
+
+    /**
+     * <b>Nothing else acquired a key from this change.</b> The mirror of
+     * {@code anUNRELATEDexceptionIsUntouched}: {@code getMappedMessageKey} is consulted for <em>every</em>
+     * throwable before the {@code error.http.<status>} fallback, so an arm added there is one edit away
+     * from answering for types it was never about — and the failure would be silent, because a key that
+     * misses renders the detail and looks exactly like today.
+     */
+    @Test
+    void anUNRELATEDexceptionKeepsTheStatusKey() {
+        ProblemDetailWithCause problem = translator.wrapAndCustomizeProblem(
+            new IllegalStateException("something else entirely"),
+            new ServletWebRequest(new MockHttpServletRequest("GET", "/api/patients"))
+        );
+
+        assertThat(messageKeyOf(problem)).isEqualTo("error.http.500");
     }
 }
