@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.gatewayUser;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -123,7 +124,14 @@ class OnboardingContractsIT {
             .andExpect(status().isOk())
             .andExpectAll(theFourWP2Fields());
 
-        restMockMvc.perform(get("/api/profiles/{id}", profile.getId())).andExpect(status().isOk()).andExpectAll(theFourWP2Fields());
+        // The independent read is an administrator's since backlog.md item 143: GET /api/profiles/**
+        // takes its subject from the path and is ROLE_ADMIN. The write above stays the doctor's —
+        // the mutation matrix is unchanged — and what this test is about is the four WP2 fields
+        // surviving a round trip rather than who may perform either half.
+        restMockMvc
+            .perform(get("/api/profiles/{id}", profile.getId()).with(gatewayUser("item143.admin", "ROLE_ADMIN")))
+            .andExpect(status().isOk())
+            .andExpectAll(theFourWP2Fields());
     }
 
     /** {@code title}, {@code specialtyCategoryId}, {@code teamIds} and {@code emergencyContact}. */

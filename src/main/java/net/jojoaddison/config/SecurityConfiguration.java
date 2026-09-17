@@ -41,6 +41,33 @@ public class SecurityConfiguration {
                     // endpoints stay open to authenticated users, with admin-only decisions
                     // enforced via method security on OnboardingResource.
                     .requestMatchers("/api/onboarding/**").authenticated()
+                    // EVERY READ ON /api/profiles NAMES ITS SUBJECT IN THE PATH, so authentication
+                    // gates nothing: every caller is authenticated as somebody and the subject is
+                    // whoever they ask for. Held at .authenticated() below, a carer read a doctor's
+                    // 21 fields — cardNumber, birthDate, address, emergencyContact, mobilePhone —
+                    // and the collection read paged the whole clinician directory at once. The three
+                    // gateways share one signing key and not a user store, so "any authenticated
+                    // caller" here is every account in hc-admin and hc-patient too, and hc-admin
+                    // dials this service directly over infranet where the gateway's own
+                    // CLINICAL_AND_ADMIN rule on /services/** never runs. docs/backlog.md item 143.
+                    //
+                    // GATED BY PATH AND METHOD RATHER THAN PER HANDLER, deliberately: a GET added to
+                    // ProfileResource later is gated the day it is written, which is the property the
+                    // item asks for — the projection is the whole document, so a field added to
+                    // Profile is published by this resource with no edit to review. The handlers
+                    // carry the matching @PreAuthorize so the requirement is legible where the code
+                    // is, the way AccountIdMigrationResource does under /api/admin.
+                    //
+                    // WRITES ARE UNTOUCHED and still admit CLINICAL_MUTATION's six through the rules
+                    // below. What was decided is who may READ a profile that is not theirs.
+                    //
+                    // A CLINICIAN'S OWN PROFILE IS NOT REACHED THROUGH HERE and never was:
+                    // GET /api/onboarding/profile resolves the caller from the uid claim and takes no
+                    // subject at all, so it cannot name anyone else and stays .authenticated() above.
+                    // Do not add a self-exception to this rule — a subject-addressed endpoint that
+                    // excuses the caller has to compare caller against path, which is the shape that
+                    // gets it wrong. See ProfileResource and ClinicalAuthorityMatrixIT.
+                    .requestMatchers(HttpMethod.GET, "/api/profiles", "/api/profiles/**").hasAuthority(AuthoritiesConstants.ADMIN)
                     // The estate-wide recipient directory: account id, LOGIN and role for every
                     // ACTIVE professional, unpaginated. The login is what /api/authenticate takes,
                     // so an unauthorised read of this is the estate's valid-login list. All nine

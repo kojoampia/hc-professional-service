@@ -174,6 +174,83 @@ class ClinicalAuthorityMatrixIT {
         restMockMvc.perform(get("/api/messaging/unread-count")).andExpect(status().isOk());
     }
 
+    // --- Profiles: the reads that name their subject, and the one that cannot -------------------
+    //
+    // `GET /api/**` is open to any authenticated caller because a read is not a clinical mutation,
+    // and for every other resource that is right. `/api/profiles` is the exception, and the reason
+    // generalises past it: EVERY READ THERE TAKES ITS SUBJECT FROM THE PATH — or, for the
+    // collection, returns every subject there is — so authentication constrains nothing at all.
+    // Every caller is authenticated as somebody; the subject is whoever they ask for. Measured on
+    // the quality stack on 2026-09-17, a `carer` read a doctor's 21 fields through
+    // /account/{accountId}: cardNumber, birthDate, address, emergencyContact, mobilePhone, email,
+    // sex. The three gateways share one signing key and not a user store, so the caller could as
+    // easily have been an hc-patient account, and hc-admin dials this service over infranet where
+    // the gateway's own CLINICAL_AND_ADMIN rule on /services/** never runs. docs/backlog.md item 143.
+    //
+    // WHAT A CLINICIAN KEEPS is the last case in this section, and it is the half that makes the
+    // gate honest rather than merely strict: GET /api/onboarding/profile resolves the caller from
+    // the uid claim and takes no subject, so it cannot name anyone else. Identity is the boundary
+    // there, which is exactly why it stays .authenticated(). Do not answer "a clinician needs their
+    // own profile" by excusing the caller on a subject-addressed path — that shape has to compare
+    // caller against path, and it is the one that gets it wrong.
+
+    /** The contract read hc-admin is being pointed at (item 140), and the gate it now meets. */
+    @Test
+    @WithMockGatewayUser(login = "matrix-admin", authorities = { "ROLE_ADMIN" })
+    void anAdministratorReadsAProfile() throws Exception {
+        restMockMvc.perform(get("/api/profiles")).andExpect(status().isOk());
+    }
+
+    /**
+     * A doctor — the widest clinical role, and one of the six {@code CLINICAL_MUTATION} may-write
+     * authorities — is refused. If the widest is refused, the read-only three are refused by the
+     * same rule and for the same reason.
+     */
+    @Test
+    @WithMockGatewayUser(login = "matrix-doctor", authorities = { "ROLE_DOCTOR" })
+    void aClinicianCannotReadAColleaguesProfile() throws Exception {
+        restMockMvc.perform(get("/api/profiles")).andExpect(status().isForbidden());
+        restMockMvc.perform(get("/api/profiles/{id}", "matrix-any-id")).andExpect(status().isForbidden());
+        restMockMvc.perform(get("/api/profiles/account/{accountId}", "matrix-any-account")).andExpect(status().isForbidden());
+        restMockMvc.perform(get("/api/profiles/email/{email}", "matrix@example.com")).andExpect(status().isForbidden());
+    }
+
+    /** The role that was measured doing it. */
+    @Test
+    @WithMockGatewayUser(login = "matrix-carer", authorities = { "ROLE_CARER" })
+    void aReadOnlyClinicalRoleCannotReadAColleaguesProfile() throws Exception {
+        restMockMvc.perform(get("/api/profiles/account/{accountId}", "matrix-any-account")).andExpect(status().isForbidden());
+    }
+
+    /**
+     * And nor may a role-less applicant — which is also what a sibling stack's patient and a token
+     * still bearing {@code ROLE_ANGEL} amount to here, since every positive list refuses them.
+     */
+    @Test
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
+    void anApplicantCannotReadAProfile() throws Exception {
+        restMockMvc.perform(get("/api/profiles")).andExpect(status().isForbidden());
+        restMockMvc.perform(get("/api/profiles/account/{accountId}", "matrix-any-account")).andExpect(status().isForbidden());
+    }
+
+    /**
+     * <b>What the gate did not take away.</b> A clinician still reads their own profile, through the
+     * endpoint that cannot name anyone else — which is where {@code mobile/}'s
+     * {@code profile-api.service.ts} has always read it from, and {@code web/} calls
+     * {@code ProfileResource} nowhere at all.
+     *
+     * <p>A clinician who has not completed onboarding has no profile row yet and gets a 404 from it;
+     * that is the pre-existing behaviour of {@code OnboardingService.getOwnProfile} and not an
+     * authorization answer. What this asserts is the only thing item 143 could have broken and did
+     * not: <b>not a 403</b>. Seeding a row to make it a 200 would assert the onboarding write path
+     * instead, which {@code ProfileResourceIT} already covers.
+     */
+    @Test
+    @WithMockGatewayUser(login = "matrix-doctor", authorities = { "ROLE_DOCTOR" })
+    void aClinicianStillReadsTheirOwnProfileThroughTheEndpointThatCannotNameAnyoneElse() throws Exception {
+        restMockMvc.perform(get("/api/onboarding/profile")).andExpect(status().isNotFound());
+    }
+
     // --- And where a ROLE_ANGEL token sits, which is not where the read-only disciplines do -------
     //
     // ROLE_ANGEL IS NOT AN AUTHORITY OF THIS SUBSYSTEM. The estate decided on 2026-09-06 that an angel
