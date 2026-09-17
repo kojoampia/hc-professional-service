@@ -15,9 +15,21 @@ import org.springframework.test.web.servlet.MockMvc;
 /**
  * WP1 gate (professional-onboarding-workflow.md §Authorities): the server —
  * not the frontend — enforces the clinical mutation matrix. Reads are open to
- * every authenticated role; mutations require admin/doctor or the
+ * every authenticated role <b>except on {@code /api/profiles}</b> (see below);
+ * mutations require admin/doctor or the
  * clinical-mutation group (nurse, paramedic, pharmacist, therapist). Carer,
  * Chemist, and Technician are read-only in v1.
+ *
+ * <p><b>THE READ RULE HAS AN EXCEPTION NOW, AND THIS SENTENCE USED TO DENY IT.</b> Until backlog item
+ * 143 the opening paragraph said reads were open to every authenticated role full stop, while the
+ * cases 150 lines down asserted the opposite — the contradiction resolved in the reader's favour only
+ * if they read to the end. {@code GET} <i>and</i> {@code HEAD} on {@code /api/profiles} and everything
+ * under it require {@code ROLE_ADMIN}, because every one of those reads names its subject in the path,
+ * and identity cannot gate a read whose subject is whoever you ask for. A clinician's own profile is
+ * not reached that way and never was: {@code GET /api/onboarding/profile} takes no subject at all and
+ * stays open to any authenticated caller. {@code ProfileResourceIT} holds the endpoint's own cases;
+ * what this class holds is the <i>matrix</i> view — that the refusal applies to a clinician and to a
+ * role-less applicant alike.
  *
  * <p><b>And the matrix has exceptions, which are part of it.</b> Four prefixes sit above the
  * {@code POST /api/**} rule in {@code SecurityConfiguration} — onboarding, messaging, notifications
