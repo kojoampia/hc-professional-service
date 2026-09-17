@@ -183,11 +183,33 @@ public class ExceptionTranslator extends ResponseEntityExceptionHandler {
         return ErrorConstants.DEFAULT_TYPE;
     }
 
+    /**
+     * The i18n key for the problem's {@code message} property, or {@code null} to fall back to
+     * {@code error.http.<status>}.
+     *
+     * <p><b>{@link PatientServiceUnavailableException} is here because {@code message} is the field a
+     * clinician reads</b> (backlog item 135). {@code web/}'s {@code alert-error.component.ts} hands this
+     * value to ngx-translate and renders the {@code detail} only when the key misses, and
+     * {@code error.http.503} was in none of the four catalogues — so every one of these put the operator's
+     * sentence on a clinician's screen, untranslated. The key is asked of the exception for the reason
+     * {@link #getCustomizedTitle} gives: this advice is generic JHipster machinery and keeps no vocabulary
+     * of its own about the sibling.
+     *
+     * <p><b>It matches on the throwable itself and does not walk the cause chain, exactly as
+     * {@link #getCustomizedTitle} does not</b> — and the two must stay the same shape. A refusal arriving
+     * <em>wrapped</em> resolves 503 through {@code resolveResponseStatus} and falls through both arms
+     * unmatched, taking {@code UNREACHABLE_TITLE} and {@code error.http.503} together. If only one of them
+     * walked causes, a wrapped refusal would tell a clinician <em>"your role is not permitted"</em> beneath
+     * a title saying <em>"could not be reached"</em> — item 127's defect rebuilt one field to the left.
+     * That path is unreachable today; see {@link #getCustomizedTitle}, which records what was checked.
+     */
     private String getMappedMessageKey(Throwable err) {
         if (err instanceof MethodArgumentNotValidException) {
             return ErrorConstants.ERR_VALIDATION;
         } else if (err instanceof ConcurrencyFailureException || err.getCause() instanceof ConcurrencyFailureException) {
             return ErrorConstants.ERR_CONCURRENCY_FAILURE;
+        } else if (err instanceof PatientServiceUnavailableException patientService) {
+            return patientService.messageKey();
         }
         return null;
     }

@@ -71,6 +71,65 @@ public class PatientServiceUnavailableException extends RuntimeException {
     static final String REFUSED_TITLE = "The patient service refused this caller's discipline";
 
     /**
+     * The i18n key naming a refusal, for the clinician's sentence rather than the operator's (backlog
+     * item 135).
+     *
+     * <p><b>This type owns the key because it owns the distinction.</b> The problem document's
+     * {@code message} property is a <em>translation key</em>, not prose: {@code web/}'s
+     * {@code alert-error.component.ts} hands it to ngx-translate and falls back to the {@code detail}
+     * only when the key misses. Every one of these carried {@code error.http.503} — absent from all four
+     * catalogues — so the key always missed and the clinician read {@link #message}, which is written
+     * for an operator, in English, whatever their locale. Items 107, 112 and 127 each improved that
+     * sentence for the reader who was not looking at it.
+     *
+     * <p>Named on the exception and not in {@code ErrorConstants} for the reason {@link #title()} gives
+     * for living here: {@code ExceptionTranslator} is generic JHipster machinery and keeps no vocabulary
+     * of its own about the sibling. {@code TechnicalStructureTest} enforces the same direction from the
+     * other side — {@code ..service..} may not reference {@code ..web..}, so this type could not reach
+     * {@code ErrorConstants} even if it wanted to.
+     */
+    static final String REFUSED_MESSAGE_KEY = "error.patientService.refused";
+
+    /**
+     * The i18n key for a read that did not happen and may well happen next time. See
+     * {@link #REFUSED_MESSAGE_KEY}.
+     *
+     * <p>More than one key, for the reason item 127 gave for two titles: a clinician told "nothing is
+     * broken, speak to your administrator" while hc-patient is down has been sent to the wrong person,
+     * and one told "try again in a few minutes" over a scope-of-practice rule will retry for ever.
+     *
+     * <p><b>This one promises a retry, so it is the one that must never cover a fault that will not
+     * clear</b> — which is what {@link #FAULTED_MESSAGE_KEY} exists to stop.
+     */
+    static final String UNREACHABLE_MESSAGE_KEY = "error.patientService.unreachable";
+
+    /**
+     * The i18n key for a fault that is nobody's rule and will not clear on its own.
+     *
+     * <p><b>The third key, and the one this item shipped without at first.</b> {@link #messageKey()}
+     * keyed on {@link Fault#isAuthorisationRefusal()} alone, while {@link #message}'s outlook clause has
+     * always keyed on <em>both</em> predicates — so {@link Fault#SCHEMA} and {@link Fault#NO_TOKEN}, the
+     * two faults that are neither a refusal nor retryable, took the retryable sentence. The clinician was
+     * told to try again in a few minutes directly beneath a {@code detail} reading <em>"will NOT clear on
+     * retry"</em>, and both halves of what they read were false: the sibling <em>answered</em> — in a
+     * shape the DTOs reject — and every retry fails identically until a DTO ships.
+     *
+     * <p><b>That is item 107's defect re-shipped to the other audience, which is why the third key is not
+     * a refinement.</b> Item 107 exists because <em>"may clear on retry"</em> over a permanent fault sent
+     * an operator to three wrong places. Before this key a {@code SCHEMA} clinician read the true, opaque,
+     * untranslated operator sentence; with two keys they read a false, fluent, translated retry
+     * instruction. Confidently wrong is worse than merely opaque, and {@code SCHEMA} is the one fault here
+     * with a production precedent — see this class's own note on {@code PatientServiceDtos.ActivityLog},
+     * corrected 2026-08-22.
+     *
+     * <p><b>It says a third thing, not a softer version of the other two.</b> A refusal is about who is
+     * asking and will never change; an outage clears itself; this is a defect somebody must fix, so the
+     * sentence says that nothing the clinician did caused it, that retrying will not help, and that the
+     * administrator has the details — the only one of the three that points at a person who can act.
+     */
+    static final String FAULTED_MESSAGE_KEY = "error.patientService.faulted";
+
+    /**
      * Why the call did not happen — and, above all, whether waiting is the remedy.
      *
      * <p>Every value is a 503 to the caller. The distinction is for whoever is paged: {@link #SCHEMA},
@@ -326,6 +385,60 @@ public class PatientServiceUnavailableException extends RuntimeException {
      */
     public String title() {
         return fault.isAuthorisationRefusal() ? REFUSED_TITLE : UNREACHABLE_TITLE;
+    }
+
+    /**
+     * The i18n key that goes into the problem's {@code message} property — <b>the field a clinician
+     * actually reads</b> (backlog item 135).
+     *
+     * <p><b>Items 107, 112 and 127 improved three clauses of {@link #message} and one title, and none of
+     * them asked who reads them.</b> {@code web/}'s {@code alert-error.component.ts} renders
+     * {@code error.detail ?? error.message} and passes {@code error.message} to ngx-translate as the key;
+     * {@code AlertService} falls back to the detail only when the key misses. So the operator's sentence —
+     * which names the collection, the fault and the retryability — is what a clinician was shown on screen,
+     * in English, whatever their locale, because {@code error.http.503} is in none of the four catalogues.
+     * Naming the fault here gives each of them their own sentence: the operator keeps {@code detail}
+     * verbatim and the clinician gets {@code error.patientService.*} translated.
+     *
+     * <p><b>This is the same three-way split {@link #message}'s outlook clause makes, written once more
+     * rather than keyed independently</b> — and it is three-way because a two-way version of it shipped
+     * and was wrong. Keying on {@link Fault#isAuthorisationRefusal()} alone gave {@link Fault#SCHEMA} and
+     * {@link Fault#NO_TOKEN} the retryable sentence while the {@code detail} above it said <em>"will NOT
+     * clear on retry"</em>; see {@link #FAULTED_MESSAGE_KEY}, which argues why that is worse than the
+     * untranslated sentence it replaced. The branches are deliberately written in the same order and on
+     * the same two predicates as {@code outlook}, so that a change to one reads as an obvious omission in
+     * the other.
+     *
+     * <p><b>What is actually guaranteed, stated precisely, because the loose version of this sentence is
+     * what let the defect through.</b> This key and {@code outlook} draw the <em>same</em> three
+     * distinctions, so a key promising a retry can never sit above a detail refusing one — that is the
+     * invariant, and {@code PatientServiceRefusalProblemTest} asserts it over every {@link Fault} value
+     * rather than over a listed few. {@link #title()} and {@code opening} draw only <em>one</em>
+     * distinction, refusal against not, and this key agrees with them on that axis. It is finer than they
+     * are on purpose: a title names the service's state for an operator, while this has to carry advice a
+     * clinician will act on. It is <b>not</b> true that all four fields make one split, and the earlier
+     * version of this paragraph said so.
+     *
+     * <p><b>A fault added later inherits the retry half of that and not the refusal half.</b> The first
+     * branch reads {@link Fault#isAuthorisationRefusal()}, which is a literal
+     * {@code this == UPSTREAM_FORBIDDEN} — so a ninth refusal-shaped status takes {@link #FAULTED_MESSAGE_KEY}
+     * until somebody widens that predicate, and the test above cannot tell, because {@code refused} and
+     * {@code faulted} decline a retry alike. Widening {@code isAuthorisationRefusal()} is therefore the edit
+     * that matters, and its two enumerated cases in {@code PatientServiceRefusalProblemTest} go with it. The
+     * predicate already exists as a predicate rather than an equality test at each call site for exactly
+     * that reason — see its own javadoc.
+     *
+     * <p><b>The three sentences this names are the clinician's, not translations of the operator's.</b> A
+     * refusal says the role is not permitted and that retrying will not help; an outage says the service is
+     * not answering, that the clinician caused nothing, and to try again shortly; a fault says something is
+     * broken, that retrying will not help, and that the administrator has the details. None of them names
+     * the collection or the {@link Fault}: those are an operator's vocabulary and stay in {@code detail}.
+     */
+    public String messageKey() {
+        if (fault.isAuthorisationRefusal()) {
+            return REFUSED_MESSAGE_KEY;
+        }
+        return fault.clearsOnRetry() ? UNREACHABLE_MESSAGE_KEY : FAULTED_MESSAGE_KEY;
     }
 
     /** The sibling path that could not be reached. */

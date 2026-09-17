@@ -53,6 +53,15 @@ public class AccountIdMigrationResource {
             // cause is another service. The message names the URL and the status it answered with,
             // because "is the gateway reachable from this container" and "is this caller an admin"
             // are the two things an operator will want to tell apart.
+            //
+            // This 503 keeps the generic `error.http.503` message key, while PatientServiceUnavailableException
+            // names its own `error.patientService.*` — backlog item 135, and deliberate rather than an
+            // oversight. That exception got a key because a *clinician* was reading its operator-facing detail
+            // untranslated; this endpoint has no client at all. It is an admin migration tool run by hand, and
+            // nothing in web/ or mobile/ requests this path. So this and the sibling exception are the only two
+            // producers of a 503 through ExceptionTranslator, and only one of them reaches a screen. If a
+            // surface is ever built for this, it needs a key of its own first: `error.http.503` is in the four
+            // catalogues only as a fallback that nothing currently reaches.
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage(), e);
         }
     }
