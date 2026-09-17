@@ -46,17 +46,24 @@ import tools.jackson.databind.node.ObjectNode;
  * <p><b>Because every read here names its subject in the path, and an endpoint that takes a subject
  * cannot be gated by authentication</b> — every caller is authenticated as somebody, and the subject
  * is whoever they ask for. Held at {@code .authenticated()} until 2026-09-17, a carer read a doctor's
- * whole profile through {@code /account/&#123;accountId&#125;} (21 fields: {@code cardNumber},
- * {@code birthDate}, {@code address}, {@code emergencyContact}, {@code mobilePhone}, {@code email},
- * {@code sex} among them), and the collection read handed over the clinician directory a page at a
- * time. The blast radius is not one product's: the three gateways share one signing key and not a
- * user store, so every account in hc-admin and hc-patient is authenticated here, and hc-admin dials
- * this service directly over {@code infranet} where the gateway's {@code /services/**} rule never
- * runs.
+ * whole profile through {@code /account/&#123;accountId&#125;} — <b>23 fields</b> when it was measured
+ * on the quality stack, including {@code cardNumber}, {@code birthDate}, {@code address},
+ * {@code emergencyContact}, {@code mobilePhone}, {@code email} and {@code sex} — and the collection
+ * read handed over the clinician directory a page at a time. <b>Do not treat that count as fixed:</b>
+ * item 143 recorded 21 and it was 23 by the time the fix landed, because the projection is the whole
+ * document and a field added to {@code Profile} is published here the day it is added, with no edit to
+ * this class and nothing to review. The blast radius is not one product's: the three gateways share one
+ * signing key and not a user store, so every account in hc-admin and hc-patient is authenticated here,
+ * and hc-admin dials this service directly over {@code infranet} where the gateway's
+ * {@code /services/**} rule never runs.
  *
- * <p><b>The gate that operates is {@code SecurityConfiguration}'s</b> —
- * {@code GET /api/profiles}, {@code /api/profiles/**} — because the filter chain is the layer that
- * was letting this through and because a rule on the path covers a GET added here later. The
+ * <p><b>The gate that operates is {@code SecurityConfiguration}'s</b> — {@code GET} <i>and</i>
+ * {@code HEAD} on {@code /api/profiles} and {@code /api/profiles/**} — because the filter chain is the
+ * layer that was letting this through and because a rule on the path covers a read added here later.
+ * <b>{@code HEAD} is listed because leaving it off was a real fail-open, caught in review:</b> Spring
+ * MVC dispatches a {@code HEAD} to the {@code @GetMapping} handler, and on this resource the oracle
+ * answers on the status line alone — a carer's {@code HEAD} of a known address returned 200 and of an
+ * unknown one 404, and {@code HEAD} of the collection returned 200 carrying {@code X-Total-Count}. The
  * {@code @PreAuthorize} on each handler is the same requirement made legible where the code is, the
  * way {@code AccountIdMigrationResource} carries one under {@code /api/admin}. Neither is the test:
  * {@code ProfileResourceIT} and {@code ClinicalAuthorityMatrixIT} assert the refusal, and this
