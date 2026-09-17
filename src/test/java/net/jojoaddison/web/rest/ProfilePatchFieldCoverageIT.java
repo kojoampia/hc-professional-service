@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static net.jojoaddison.security.WithMockGatewayUser.Factory.gatewayUser;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -304,9 +305,18 @@ class ProfilePatchFieldCoverageIT {
         stored.setPushMessagesEnabled(Boolean.FALSE);
         profileRepository.save(stored);
 
+        // The read is an administrator's since backlog.md item 143 — GET /api/profiles/** takes its
+        // subject from the path and is ROLE_ADMIN — while the PATCH below stays this class's doctor,
+        // because the mutation matrix is unchanged. Kept as a real HTTP read rather than serialising
+        // the stored document: what this test is about is a client round-tripping the body the
+        // service handed it, and a body built in the test is not that body.
         JsonNode readBack = om.readTree(
             restMockMvc
-                .perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(ENTITY_API_URL_ID, stored.getId()))
+                .perform(
+                    org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(ENTITY_API_URL_ID, stored.getId()).with(
+                        gatewayUser("item143.admin", "ROLE_ADMIN")
+                    )
+                )
                 .andReturn()
                 .getResponse()
                 .getContentAsString()

@@ -9,6 +9,7 @@ import java.util.Objects;
 import java.util.Optional;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.AuthoritiesConstants;
 import net.jojoaddison.service.ProfileService;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
 import org.slf4j.Logger;
@@ -19,6 +20,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -38,6 +40,45 @@ import tools.jackson.databind.node.ObjectNode;
 
 /**
  * REST controller for managing {@link net.jojoaddison.domain.Profile}.
+ *
+ * <h2>Every read here is {@code ROLE_ADMIN} (backlog.md item 143)</h2>
+ *
+ * <p><b>Because every read here names its subject in the path, and an endpoint that takes a subject
+ * cannot be gated by authentication</b> — every caller is authenticated as somebody, and the subject
+ * is whoever they ask for. Held at {@code .authenticated()} until 2026-09-17, a carer read a doctor's
+ * whole profile through {@code /account/&#123;accountId&#125;} — <b>23 fields</b> when it was measured
+ * on the quality stack, including {@code cardNumber}, {@code birthDate}, {@code address},
+ * {@code emergencyContact}, {@code mobilePhone}, {@code email} and {@code sex} — and the collection
+ * read handed over the clinician directory a page at a time. <b>Do not treat that count as fixed:</b>
+ * item 143 recorded 21 and it was 23 by the time the fix landed, because the projection is the whole
+ * document and a field added to {@code Profile} is published here the day it is added, with no edit to
+ * this class and nothing to review. The blast radius is not one product's: the three gateways share one
+ * signing key and not a user store, so every account in hc-admin and hc-patient is authenticated here,
+ * and hc-admin dials this service directly over {@code infranet} where the gateway's
+ * {@code /services/**} rule never runs.
+ *
+ * <p><b>The gate that operates is {@code SecurityConfiguration}'s</b> — {@code GET} <i>and</i>
+ * {@code HEAD} on {@code /api/profiles} and {@code /api/profiles/**} — because the filter chain is the
+ * layer that was letting this through and because a rule on the path covers a read added here later.
+ * <b>{@code HEAD} is listed because leaving it off was a real fail-open, caught in review:</b> Spring
+ * MVC dispatches a {@code HEAD} to the {@code @GetMapping} handler, and on this resource the oracle
+ * answers on the status line alone — a carer's {@code HEAD} of a known address returned 200 and of an
+ * unknown one 404, and {@code HEAD} of the collection returned 200 carrying {@code X-Total-Count}. The
+ * {@code @PreAuthorize} on each handler is the same requirement made legible where the code is, the
+ * way {@code AccountIdMigrationResource} carries one under {@code /api/admin}. Neither is the test:
+ * {@code ProfileResourceIT} and {@code ClinicalAuthorityMatrixIT} assert the refusal, and this
+ * service's ITs run with the filter chain switched on, so a rule deleted from either layer reddens.
+ *
+ * <p><b>Writes are unchanged</b> and still admit {@code CLINICAL_MUTATION}'s six. What item 143
+ * decided is who may read a profile that is not theirs.
+ *
+ * <p>⛔ <b>A clinician reading their own profile does not come through here, and no self-exception
+ * belongs here.</b> {@code GET /api/onboarding/profile} resolves the caller from the {@code uid}
+ * claim and takes no subject at all — {@code mobile/}'s {@code profile-api.service.ts} already calls
+ * exactly that, and {@code web/} calls this resource nowhere — so identity really is the boundary
+ * there and an authority check would constrain nothing further. Excusing the caller on a
+ * subject-addressed path means comparing caller against path, which is the shape that gets it wrong;
+ * the endpoint that cannot name anyone else is the one that cannot leak anyone else.
  */
 @RestController
 @RequestMapping("/api/profiles")
@@ -367,12 +408,17 @@ public class ProfileResource {
     }
 
     /**
-     * {@code GET  /profiles} : get all the profiles.
+     * {@code GET  /profiles} : get all the profiles. {@code ROLE_ADMIN} — see the class comment.
+     *
+     * <p><b>The widest of the four</b>: it names no subject because it returns every one of them. A
+     * caller who had to guess an account id to leak a colleague could page the whole directory here
+     * instead, which is why gating the one endpoint hc-admin calls would have settled nothing.
      *
      * @param pageable the pagination information.
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and the list of profiles in body.
      */
     @GetMapping
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ResponseEntity<List<Profile>> getAllProfiles(@org.springdoc.core.annotations.ParameterObject Pageable pageable) {
         log.debug("REST request to get a page of Profiles");
         Page<Profile> page = profileService.findAll(pageable);
@@ -381,12 +427,13 @@ public class ProfileResource {
     }
 
     /**
-     * {@code GET  /profiles/:id} : get the "id" profile.
+     * {@code GET  /profiles/:id} : get the "id" profile. {@code ROLE_ADMIN} — see the class comment.
      *
      * @param id the id of the profile to retrieve.
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the profile, or with status {@code 404 (Not Found)}.
      */
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ResponseEntity<Profile> getProfile(@PathVariable("id") String id) {
         log.debug("REST request to get Profile : {}", id);
         Optional<Profile> profile = profileService.findOne(id);
@@ -394,12 +441,19 @@ public class ProfileResource {
     }
 
     /**
-     * {@code GET  /profiles/account/:accountId} : get the "accountId" profile.
-
+     * {@code GET  /profiles/account/:accountId} : get the "accountId" profile. {@code ROLE_ADMIN} —
+     * see the class comment.
+     *
+     * <p><b>This is the one the estate is about to point at</b> (backlog.md item 140): the
+     * cross-product read contract is {@code GET [product]-service/api/profile/&#123;accountId&#125;},
+     * keyed on {@code account.id = Profile.accountId}, and this endpoint is functionally that under
+     * a different path. It is also the one measured leaking on the quality stack, by a carer.
+     *
      * @param accountId the accountId of the profile to retrieve.
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the profile, or with status {@code 404 (Not Found)}.
      */
     @GetMapping("/account/{accountId}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ResponseEntity<Profile> getProfileByAccountId(@PathVariable("accountId") String accountId) {
         log.debug("REST request to get Profile by accountId : {}", accountId);
         Optional<Profile> profile = profileService.findByAccountId(accountId);
@@ -407,12 +461,30 @@ public class ProfileResource {
     }
 
     /**
-     * {@code GET  /profiles/email/:email} : get the "email" profile.
+     * {@code GET  /profiles/email/:email} : get the "email" profile. {@code ROLE_ADMIN} — see the
+     * class comment.
+     *
+     * <p><b>Gated rather than deleted, and it should not survive long</b> (backlog.md item 143). It
+     * puts an address in a URL, and therefore in every access log on both sides of the call — the
+     * first and most serious of the three reasons the estate's cross-product decision retired the
+     * email key in favour of {@code accountId}. Open to any authenticated caller it was additionally
+     * an existence oracle on an address — a 200 or a 404 answers "does this person work here"
+     * without reading a single field, which is a disclosure the status line makes on its own.
+     *
+     * <p><b>Why this change gates it instead.</b> Removing a mapping is a contract change and item
+     * 143 decided a gate, not a deletion; no caller for it was found in this repository, in
+     * {@code web/}, {@code mobile/} or {@code quality/seed-data.py}, and hc-admin's only
+     * {@code /api/profiles/email/&#123;email&#125;} constant is on its {@code PatientServiceClient},
+     * pointed at {@code patientservice} rather than here — but "no caller I can see" is the reasoning
+     * that has to be checked against the repo it is about, and two of the three sibling stacks were
+     * read rather than run. Retiring it is its own backlog row, and the admin gate costs that row
+     * nothing.
      *
      * @param email the email of the profile to retrieve.
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the profile, or with status {@code 404 (Not Found)}.
      */
     @GetMapping("/email/{email}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ResponseEntity<Profile> getProfileByEmail(@PathVariable("email") String email) {
         log.debug("REST request to get Profile by email : {}", email);
         Optional<Profile> profile = profileService.findByEmail(email);

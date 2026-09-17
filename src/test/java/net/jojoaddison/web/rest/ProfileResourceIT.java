@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -258,7 +259,23 @@ class ProfileResourceIT {
             .isEqualTo(accountIdFor("item66.applicant"));
     }
 
+    /**
+     * The four reads on this resource are {@code ROLE_ADMIN} since backlog.md item 143, and the
+     * caller below is why this class could not simply keep its class-level {@code ROLE_DOCTOR}.
+     *
+     * <p>Every GET here names its subject in the path (or, for the collection, returns every subject
+     * there is), and a subject-taking read cannot be gated by authentication: every caller is
+     * authenticated as somebody and the subject is whoever they ask for. The refusal is asserted in
+     * {@link #aClinicianIsRefusedEveryReadOnThisResource}; these four are its positive controls, and
+     * they are the reason a green refusal cannot be a wrong path or a missing row.
+     */
+    private static final String ADMIN = "item143.admin";
+
+    /** The account whose profile the caller is not: never the login the annotation derives. */
+    private static final String SUBJECT_ACCOUNT_ID = "uid-item143.subject";
+
     @Test
+    @WithMockGatewayUser(login = ADMIN, authorities = { "ROLE_ADMIN" })
     void getAllProfiles() throws Exception {
         // Initialize the database
         profileRepository.save(profile);
@@ -282,6 +299,7 @@ class ProfileResourceIT {
     }
 
     @Test
+    @WithMockGatewayUser(login = ADMIN, authorities = { "ROLE_ADMIN" })
     void getProfile() throws Exception {
         // Initialize the database
         profileRepository.save(profile);
@@ -306,9 +324,178 @@ class ProfileResourceIT {
     }
 
     @Test
+    @WithMockGatewayUser(login = ADMIN, authorities = { "ROLE_ADMIN" })
     void getNonExistingProfile() throws Exception {
         // Get the profile
         restProfileMockMvc.perform(get(ENTITY_API_URL_ID, Long.MAX_VALUE)).andExpect(status().isNotFound());
+    }
+
+    /**
+     * The account read this class never had a test for, and the one that was measured leaking.
+     *
+     * <p>It is also the read hc-admin is about to build against — backlog.md item 140 designates
+     * {@code GET [product]-service/api/profile/&#123;accountId&#125;} the cross-product contract and
+     * this endpoint is functionally that under a different path. Asserted as a 200 <b>carrying the
+     * body, {@code cardNumber} included</b>, so {@link #aClinicianIsRefusedAProfileByAccountId}
+     * cannot be green because the path answers nothing to anybody.
+     */
+    @Test
+    @WithMockGatewayUser(login = ADMIN, authorities = { "ROLE_ADMIN" })
+    void anAdministratorReadsAProfileByAccountId() throws Exception {
+        storeTheSubject();
+
+        restProfileMockMvc
+            .perform(get(ENTITY_API_URL + "/account/{accountId}", SUBJECT_ACCOUNT_ID))
+            .andExpect(status().isOk())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON_VALUE))
+            .andExpect(jsonPath("$.id").value(profile.getId()))
+            .andExpect(jsonPath("$.cardNumber").value(DEFAULT_CARD_NUMBER));
+    }
+
+    /**
+     * The fourth read, likewise untested before item 143 — and open to any authenticated caller it
+     * was an existence oracle on an address: a 200 or a 404 answers "does this person work here"
+     * without reading a field.
+     *
+     * <p>The positive control for {@link #aClinicianIsRefusedAProfileByEmail}. See
+     * {@code ProfileResource.getProfileByEmail} for why this endpoint is gated here rather than
+     * retired — an address in a URL is an address in every access log, and retiring it is its own
+     * row.
+     */
+    @Test
+    @WithMockGatewayUser(login = ADMIN, authorities = { "ROLE_ADMIN" })
+    void anAdministratorReadsAProfileByEmail() throws Exception {
+        storeTheSubject();
+
+        restProfileMockMvc
+            .perform(get(ENTITY_API_URL + "/email/{email}", DEFAULT_EMAIL))
+            .andExpect(status().isOk())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON_VALUE))
+            .andExpect(jsonPath("$.id").value(profile.getId()))
+            .andExpect(jsonPath("$.cardNumber").value(DEFAULT_CARD_NUMBER));
+    }
+
+    // --- The four refusals, one test per endpoint ------------------------------------------------
+    //
+    // ONE TEST PER ENDPOINT, DELIBERATELY. Four assertions in one method redden together, so the
+    // failure could not distinguish "all four gated" from "one gated" — which is exactly the claim
+    // item 143 is about, since the resource had a gate on none of them and the estate was about to
+    // point another product at the third.
+    //
+    // THE CALLER IS THIS CLASS'S OWN ROLE_DOCTOR: one of the six CLINICAL_MUTATION authorities, so
+    // it is not a stripped-down principal, and if the widest clinical role is refused then the
+    // read-only three are refused by the same positive-list rule. On quality it was a carer.
+    //
+    // THE ROW IS STORED FIRST in each, which is what separates a refusal from a 404 — a gate that
+    // "passed" because nothing was there would prove nothing. And the assertion is 403, NOT 401: a
+    // 401 would mean the caller was never authenticated at all and would say nothing about
+    // authority. ClinicalAuthorityMatrixIT holds the carer, the applicant and the self path.
+
+    @Test
+    void aClinicianIsRefusedTheProfileCollection() throws Exception {
+        storeTheSubject();
+
+        restProfileMockMvc.perform(get(ENTITY_API_URL + "?sort=id,desc")).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void aClinicianIsRefusedAProfileById() throws Exception {
+        storeTheSubject();
+
+        restProfileMockMvc.perform(get(ENTITY_API_URL_ID, profile.getId())).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void aClinicianIsRefusedAProfileByAccountId() throws Exception {
+        storeTheSubject();
+
+        restProfileMockMvc.perform(get(ENTITY_API_URL + "/account/{accountId}", SUBJECT_ACCOUNT_ID)).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void aClinicianIsRefusedAProfileByEmail() throws Exception {
+        storeTheSubject();
+
+        restProfileMockMvc.perform(get(ENTITY_API_URL + "/email/{email}", DEFAULT_EMAIL)).andExpect(status().isForbidden());
+    }
+
+    /**
+     * <b>HEAD is refused too, and these two exist because the filter-chain rule originally missed it.</b>
+     *
+     * <p>Spring MVC dispatches a HEAD to the {@code @GetMapping} handler, so a rule scoped to
+     * {@code HttpMethod.GET} alone left HEAD falling through to {@code /api/**} →
+     * {@code .authenticated()}. The {@code @PreAuthorize} layer refused it regardless — method
+     * security intercepts the invocation whatever the verb — so nothing ever leaked from the
+     * committed code; what was wrong was that the layer {@code SecurityConfiguration} advertises as
+     * the operative, future-proof one did not hold, and deleting the annotations on the strength of
+     * that paragraph would have reopened this with every other test still green.
+     *
+     * <p><b>On this resource HEAD is not a technicality, because the oracle lives on the status
+     * line.</b> Measured on the quality stack before the fix, a {@code carer}'s HEAD of a known
+     * address returned {@code 200} and of an unknown one {@code 404} — so "does this person work
+     * here" is answerable with no body at all — and HEAD of the collection returned {@code 200}
+     * carrying {@code X-Total-Count}, the size of the clinician directory.
+     *
+     * <p>Two tests rather than one combined: a single method asserting both would redden together
+     * and could not distinguish the collection being gated from the email path being gated.
+     */
+    @Test
+    void aClinicianIsRefusedTheProfileCollectionByHead() throws Exception {
+        storeTheSubject();
+
+        restProfileMockMvc.perform(head(ENTITY_API_URL)).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void aClinicianIsRefusedAProfileByEmailByHead() throws Exception {
+        storeTheSubject();
+
+        restProfileMockMvc.perform(head(ENTITY_API_URL + "/email/{email}", DEFAULT_EMAIL)).andExpect(status().isForbidden());
+    }
+
+    /**
+     * The positive control for the two above: HEAD is refused to a clinician because of the
+     * authority, not because HEAD is broken on this resource for everybody.
+     */
+    @Test
+    @WithMockGatewayUser(login = ADMIN, authorities = { "ROLE_ADMIN" })
+    void anAdministratorMayHeadAProfileByEmail() throws Exception {
+        storeTheSubject();
+
+        restProfileMockMvc.perform(head(ENTITY_API_URL + "/email/{email}", DEFAULT_EMAIL)).andExpect(status().isOk());
+    }
+
+    /**
+     * <b>The behaviour item 143 had to leave standing: a clinician still reads their own profile.</b>
+     *
+     * <p>Not through this resource, and never through it — {@code GET /api/onboarding/profile}
+     * resolves the caller from the {@code uid} claim and takes no subject at all, which is why it
+     * stays {@code .authenticated()} while every path that names a subject does not. It is also
+     * where {@code mobile/}'s {@code profile-api.service.ts} has always read it from. The same
+     * {@code ROLE_DOCTOR} refused all four reads above is handed their own document here,
+     * {@code cardNumber} included.
+     *
+     * <p>The row is seeded through the repository under the account id the annotation derives, so
+     * what is exercised is the read rather than the onboarding write that creates one.
+     */
+    @Test
+    @WithMockGatewayUser(login = "item143.clinician", authorities = { "ROLE_DOCTOR" })
+    void aClinicianReadsTheirOwnProfileThroughTheEndpointThatCannotNameAnyoneElse() throws Exception {
+        profile.setAccountId(accountIdFor("item143.clinician"));
+        profileRepository.save(profile);
+
+        restProfileMockMvc
+            .perform(get("/api/onboarding/profile"))
+            .andExpect(status().isOk())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON_VALUE))
+            .andExpect(jsonPath("$.id").value(profile.getId()))
+            .andExpect(jsonPath("$.cardNumber").value(DEFAULT_CARD_NUMBER));
+    }
+
+    /** The subject of the reads above: somebody other than the caller, stored and therefore findable. */
+    private void storeTheSubject() {
+        profile.setAccountId(SUBJECT_ACCOUNT_ID);
+        profileRepository.save(profile);
     }
 
     @Test
