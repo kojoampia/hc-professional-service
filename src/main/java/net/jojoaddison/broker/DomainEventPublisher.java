@@ -5,9 +5,15 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Executor;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import net.jojoaddison.config.ApplicationProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cloud.stream.function.StreamBridge;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.support.MessageBuilder;
@@ -15,7 +21,10 @@ import org.springframework.stereotype.Component;
 
 /**
  * Publishes {@code entity.created} events to {@code hc.professional.entity}
- * for the admin portal (professional-onboarding-workflow.md § Domain events).
+ * for the admin portal (professional-onboarding-workflow.md § Domain events), and — since
+ * backlog.md item 141 — every document change to {@code professional.event}; see
+ * {@link #publishEntityChange}, which is the one method here that does not run on its caller's
+ * thread.
  * Records are keyed by entityId so per-entity ordering holds; delivery is
  * at-least-once and consumers dedupe on eventId. Publishing must never break
  * the write path — failures are logged, not propagated.
@@ -29,15 +38,40 @@ public class DomainEventPublisher {
 
     public static final String ENTITY_TOPIC_BINDING = "entityEvents-out-0";
     public static final String ONBOARDING_STATE_BINDING = "onboardingStateEvents-out-0";
+
+    /**
+     * The binding behind {@code professional.event} — backlog.md item 141.
+     *
+     * <p><b>It is declared in {@code config/application.yml} and must stay declared.</b> StreamBridge
+     * creates a <em>dynamic</em> destination for a binding it cannot find, so a misspelling here does
+     * not fail: it silently opens a topic named after the typo, which nothing consumes and nothing
+     * reports. hc-admin shipped exactly that as {@code roster-events} and it published into nowhere
+     * until somebody went looking. {@code EntityChangeBindingTest} pins this constant against the
+     * shipped YAML and against the literal {@code professional.event}, which is a cross-product name
+     * and therefore earns an enumeration where an internal one would not.
+     */
+    public static final String ENTITY_CHANGE_BINDING = "entityChangeEvents-out-0";
+
     private static final String SOURCE = "hc-professional-service";
 
     private static final Logger log = LoggerFactory.getLogger(DomainEventPublisher.class);
 
     private final StreamBridge streamBridge;
     private final boolean enabled;
+    private final Executor entityChangeExecutor;
 
+    @Autowired
     public DomainEventPublisher(StreamBridge streamBridge, ApplicationProperties properties) {
+        this(streamBridge, properties, entityChangeExecutor());
+    }
+
+    /**
+     * Test seam: the same publisher with a caller-supplied executor, so a unit test can pass
+     * {@code Runnable::run} and assert on the frame without racing a background thread.
+     */
+    DomainEventPublisher(StreamBridge streamBridge, ApplicationProperties properties, Executor entityChangeExecutor) {
         this.streamBridge = streamBridge;
+        this.entityChangeExecutor = entityChangeExecutor;
         this.enabled = properties.getKafka().isEnabled();
         if (!enabled) {
             log.info(
@@ -46,6 +80,63 @@ public class DomainEventPublisher {
             );
         }
     }
+
+    /**
+     * One thread, a bounded queue, and <b>{@link ThreadPoolExecutor.AbortPolicy}</b> — the shape
+     * hc-admin's {@code OutboundEventPublisher} arrived at, for a reason this channel makes sharper
+     * than any other.
+     *
+     * <p><b>Why the hop exists at all.</b> StreamBridge creates an output binding lazily, inside the
+     * <em>first</em> {@code send()} for that destination, and that creation opens an AdminClient
+     * bounded by {@code default.api.timeout.ms}. Against a broker that is not there it blocks for
+     * <b>sixty seconds</b>, under a lock every later publisher then queues on — measured by hc-admin
+     * at 60.6s for the first request and 15ms for the second, with the row written, a 201 returned
+     * and nothing failing. The other publishers on this class ride request handlers, so that cost
+     * lands on one endpoint. <b>This one rides a persistence callback, so it would land on every
+     * write in the deployment</b>, including the first save of a startup runner.
+     *
+     * <p>⚠ <b>{@code CallerRunsPolicy} would silently restore the defect.</b> It is the conventional
+     * choice for a bounded queue, it looks like back-pressure, and it hands the blocking send straight
+     * back to the thread this exists to protect. {@code AbortPolicy} is deliberate and
+     * {@code EntityChangeEventTest} pins it.
+     *
+     * <p>The queue is bounded rather than unbounded for the ordinary reason — an unbounded one turns a
+     * dead broker into heap exhaustion — and the cost of the bound is stated rather than hidden: past
+     * {@link #ENTITY_CHANGE_QUEUE} pending frames, a change is <b>dropped and logged as a warning</b>.
+     * That is the right way round for an audit stream against a broker that is already failing; the
+     * write it describes has been persisted either way, and losing the trail is recoverable where
+     * losing the service is not.
+     */
+    static Executor entityChangeExecutor() {
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+            1,
+            1,
+            // Nonzero because allowCoreThreadTimeOut below rejects a zero keep-alive outright
+            // ("Core threads must have nonzero keep alive times"). The thread retires after a minute
+            // of quiet rather than being held for the life of a service that may never write again.
+            60L,
+            TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(ENTITY_CHANGE_QUEUE),
+            runnable -> {
+                Thread thread = new Thread(runnable, "hc-professional-entity-change");
+                thread.setDaemon(true);
+                return thread;
+            },
+            new ThreadPoolExecutor.AbortPolicy()
+        );
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
+    }
+
+    /**
+     * How many entity changes may be waiting on the broker before a further one is refused.
+     *
+     * <p>It is the <b>arriving</b> frame that is dropped, not the oldest queued one — that is what
+     * {@link ThreadPoolExecutor.AbortPolicy} does, and it is the right way round here: the frames
+     * already queued are older changes, and an audit trail that discards its history to make room for
+     * the present is worse than one with a gap at the end that was logged.
+     */
+    static final int ENTITY_CHANGE_QUEUE = 1000;
 
     /**
      * Sends the envelope, or does nothing at all when publishing is disabled.
@@ -303,6 +394,134 @@ public class DomainEventPublisher {
     }
 
     /**
+     * One document changed — the whole of {@code professional.event}, backlog.md item 141.
+     *
+     * <h2>Five fields, because one audit row needs five things — and where each one sits</h2>
+     *
+     * <p>hc-admin's item 109 turns each frame into a single {@code AuditLog} row and needs exactly:
+     * <b>what kind of thing</b> ({@code entityType}), <b>which one</b> ({@code entityId}),
+     * <b>what happened</b> ({@code action}), <b>when</b> — the envelope's {@code occurredAt}, not a
+     * sixth data key — and <b>who</b> ({@code actorAccountId}).
+     *
+     * <p><b>The first two ride {@code subject} and the last two ride {@code data}</b>, per hc-admin's
+     * item 124, decided by the architect on 2026-09-18:
+     *
+     * <pre>
+     * subject : { entityType, entityId }
+     * data    : { action, actorAccountId }
+     * </pre>
+     *
+     * <p>All four of these keys sat in {@code data} until then, with {@code subject} left null — one
+     * of the three shapes the estate's four producers shipped under one {@code type} on the day they
+     * were all built. See {@link EntityChangeEvent} for the decision and for the two readings it
+     * rejected.
+     *
+     * <p>⛔ <b>Nothing else may be added to this payload, and in particular no changed values.</b> The
+     * rule has two independent origins that happen to agree: {@link DomainEventEnvelope} states
+     * identifiers-only for this subsystem, and hc-admin's item 110 arrives at the same payload from
+     * the other side, because a channel carrying document contents rebuilds the local mirror their
+     * item 107 exists to delete. A field-level diff here would also be the one thing on this wire
+     * capable of carrying a card number or a home address, since this callback fires for
+     * {@code Profile} like it fires for everything else.
+     *
+     * <h2>The actor is an {@code accountId}, and that is not the value the auditor holds</h2>
+     *
+     * <p><b>This is the trap this subsystem has already sprung once.</b> {@code ProfileStatus} carries
+     * a {@code lastModifiedBy} that the written contract calls an account identifier and that
+     * {@code SpringSecurityAuditorAware} in fact fills from the JWT <em>subject</em> — the login. That
+     * is harmless there and is documented as such, because the field is an audit value hc-admin
+     * displays verbatim and joins to nothing. <b>It would not be harmless here.</b> This field is the
+     * actor on rows hc-admin stores rather than renders, and item 107 D1 makes {@code accountId} the
+     * estate's join key, so a login arriving under that name is a value that looks joinable, is not,
+     * and disagrees with every other product's answer to "who did this".
+     *
+     * <p>So the caller resolves this from {@link net.jojoaddison.security.SecurityUtils#getCurrentAccountId()},
+     * which reads the {@code uid} claim and filters on the minting issuer — never from
+     * {@code getCurrentUserLogin()}. A login on this channel is a defect and
+     * {@code EntityChangeEventTest} fails on one.
+     *
+     * <p><b>Absent rather than {@code "system"} when there is no account behind the write.</b> A
+     * scheduler, a startup runner, a Kafka consumer and a migration all write with no security
+     * context, and a token minted by hc-admin or hc-patient resolves to nobody here by design. The
+     * key is then omitted, following {@link #publishProfileStatus}'s rule that an unknown identifier
+     * is left out rather than sent present-and-null: a literal in an identifier space is a value a
+     * consumer can compare against stored data and match, where an absent one is the only unambiguous
+     * "no account did this".
+     *
+     * <h2>Keyed on the entity, and about no clinician in particular</h2>
+     *
+     * <p>The Kafka key is {@code entityId}, so every frame for one document lands on one partition and
+     * an audit trail reads {@code CREATED} before the {@code UPDATED} that followed it. That is the
+     * same rule {@code entity.created} already follows on the other topic.
+     *
+     * <p><b>The subject names the row, and it is an {@link EntityChangeEvent.Subject} rather than a
+     * {@link ProfessionalEvent.Subject}.</b> That is the part worth reading twice: this event is about
+     * a <em>document</em>, and most of the collections it fires for have no clinician behind them at
+     * all, so the clinician-shaped subject the registration topic uses cannot describe it. The two
+     * records exist so that one channel can mean "the row" while the other goes on meaning "the
+     * person" — see {@link EstateEventEnvelope}.
+     *
+     * <p>⛔ <b>The actor does not go in {@code subject}.</b> That was one of the two readings item 124
+     * rejected, and it would render "who did this" in the field the rest of the estate uses for "who
+     * this is about" — the same category error as the {@code lastModifiedBy} one above, one field
+     * along. It lives in {@code data.actorAccountId} and nowhere else.
+     *
+     * <p>Publishing is handed to {@link #entityChangeExecutor} and never runs on the caller's thread;
+     * see that method for the sixty seconds this is avoiding. The caller must therefore resolve the
+     * actor and the timestamp <b>before</b> calling, because neither the security context nor "now"
+     * survives the hop.
+     *
+     * @param entityType the document's simple class name, e.g. {@code Profile}.
+     * @param entityId the document's own id.
+     * @param action which of created, updated or deleted; see {@link EntityChangeAction} for the
+     *     limit on telling the first two apart.
+     * @param actorAccountId the gateway's {@code User.id} for whoever caused the write, or null when
+     *     no account did — never a login, and never a placeholder.
+     * @param occurredAt when the change happened, read on the calling thread.
+     */
+    public void publishEntityChange(
+        String entityType,
+        String entityId,
+        EntityChangeAction action,
+        String actorAccountId,
+        Instant occurredAt
+    ) {
+        if (!enabled) {
+            log.debug("Skipping {} {} {} — publishing disabled", action, entityType, entityId);
+            return;
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("action", action.name());
+        // OMITTED, not "system" and not null — see the javadoc. Absence is the only unambiguous way
+        // to say that no account was behind this write.
+        if (actorAccountId != null) {
+            data.put("actorAccountId", actorAccountId);
+        }
+        EntityChangeEvent event = new EntityChangeEvent(
+            UUID.randomUUID().toString(),
+            ProfessionalEventType.ENTITY_CHANGED,
+            EntityChangeEvent.VERSION,
+            occurredAt,
+            SOURCE,
+            // THE SUBJECT IS THE RECORD THAT CHANGED — hc-admin item 124, decided 2026-09-18. These
+            // two keys sat in `data` with the subject left null until then, which was one of three
+            // shapes the four products shipped under one `type`. See EntityChangeEvent.
+            new EntityChangeEvent.Subject(entityType, entityId),
+            data
+        );
+        String description = action + " " + entityType + " " + entityId;
+        try {
+            entityChangeExecutor.execute(
+                () -> publishShared(ENTITY_CHANGE_BINDING, ProfessionalEventType.ENTITY_CHANGED, entityId, event, description)
+            );
+        } catch (RejectedExecutionException e) {
+            // The bound, doing its job. Loud, because a gap in an audit trail that nobody was told
+            // about is indistinguishable from a period in which nothing happened.
+            log.warn("Dropped {} — the entity-change publish queue is full, so the broker is not keeping up", description);
+        }
+    }
+
+    /**
      * {@link #publish} for the estate-shaped envelope.
      *
      * <p>A near-twin rather than a generalisation of the existing one, because the existing one is
@@ -310,14 +529,19 @@ public class DomainEventPublisher {
      * thing stopping an arbitrary payload reaching these bindings. Both honour
      * {@code application.kafka.enabled=false} the same way — returning <em>before</em> the send, so
      * no binding is created and {@code BindingService} never enters its retry loop.
+     *
+     * <p>The parameter is {@link EstateEventEnvelope} rather than either record, because the two
+     * estate-shaped envelopes disagree about what {@code subject} means and must stay separate types
+     * — see that interface. It is <b>sealed</b>, so this stays a closed list rather than the
+     * {@code Object} the paragraph above rules out.
      */
-    private void publishShared(String binding, String eventType, String key, ProfessionalEvent envelope, String subject) {
+    private void publishShared(String binding, String eventType, String key, EstateEventEnvelope envelope, String subject) {
         if (!enabled) {
             log.debug("Skipping {} for {} — publishing disabled", eventType, subject);
             return;
         }
         try {
-            MessageBuilder<ProfessionalEvent> message = MessageBuilder.withPayload(envelope);
+            MessageBuilder<EstateEventEnvelope> message = MessageBuilder.withPayload(envelope);
             if (key == null) {
                 // No key rather than a null one. `key.getBytes()` NPEs, and the catch below would
                 // swallow it and log "Failed to publish" — a missing identifier reported as a broker

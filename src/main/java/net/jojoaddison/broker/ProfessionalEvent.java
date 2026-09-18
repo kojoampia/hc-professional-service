@@ -15,6 +15,12 @@ import java.util.Map;
  * applications should not have their release cycles coupled to make a seven-field record less
  * repetitive. What has to agree is the wire shape, and the field names are that agreement.
  *
+ * <p>⚠ <b>{@code subject} here is a CLINICIAN, and that is not what it means on
+ * {@code professional.event}.</b> There the subject is the row that changed, per hc-admin's item 124,
+ * and it is carried by {@link EntityChangeEvent} — a separate record for exactly this reason. Do not
+ * merge the two: this topic is live and hc-admin consumes it, so {@code subject} must go on naming a
+ * person here whatever the entity channel does. {@link EstateEventEnvelope} is what they share.
+ *
  * <p>It sits beside {@link DomainEventEnvelope}, which is this stack's original
  * {@code eventType}/{@code actor}/{@code payload} shape and is not being retired: {@code
  * entity.created}, {@code compliance.alert}, {@code message.created} and {@code onboarding.state}
@@ -45,7 +51,8 @@ public record ProfessionalEvent(
     String source,
     Subject subject,
     Map<String, Object> data
-) {
+)
+    implements EstateEventEnvelope {
     public static final int VERSION = 1;
 
     /**
