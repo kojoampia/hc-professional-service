@@ -1,10 +1,15 @@
 package net.jojoaddison.broker;
 
 /**
- * The estate-shaped types on {@code hc.professional.registration}, and which application sends
- * which.
+ * The estate-shaped types this subsystem puts on the wire, and which application sends which.
  *
- * <p>The three of them are one clinician's arrival told in two halves. {@link #ACCOUNT_CREATED} and
+ * <p><b>Two channels, and they divide by subject rather than by shape.</b> The first three names
+ * below ride {@code hc.professional.registration} and are each about <em>a clinician</em>;
+ * {@link #ENTITY_CHANGED} rides {@code professional.event} and is about <em>a document</em>. They
+ * share the {@link ProfessionalEvent} envelope because every reader in the estate dispatches on
+ * {@code type}, so one shape costs a consumer nothing while a second shape would cost it a parser.
+ *
+ * <p>The first three are one clinician's arrival told in two halves. {@link #ACCOUNT_CREATED} and
  * {@link #ACCOUNT_ACTIVATED} are the account — published by the gateway, which owns users and
  * authentication, and carrying nothing clinical because at those moments nothing clinical exists.
  * {@link #PROFILE_UPDATED} is the second half, published here, because this service owns the domain
@@ -52,6 +57,48 @@ public final class ProfessionalEventType {
      * {@code hc.professional.entity} at all, so an event published there would be heard by nobody.
      */
     public static final String PROFILE_STATUS = "ProfileStatus";
+
+    /**
+     * Published by this service on {@code professional.event} for <b>every</b> document written or
+     * removed, in every collection — backlog.md item 141, and hc-admin's item 110 for the estate-wide
+     * decision that produced it.
+     *
+     * <p><b>The only {@code type} on that channel</b>, deliberately. Which of created, updated or
+     * deleted it was is {@link EntityChangeAction} in {@code data.action}, for the reason that enum
+     * and {@link DomainEventPublisher#publishOnboardingState} both give: a consumer should switch on
+     * one field rather than match a family of event names that grows with every collection.
+     *
+     * <p><b>The literal is {@code "EntityChanged"} — past tense — and it is the estate's, not this
+     * service's.</b> All four products' {@code .event} channels carry this one value, decided by the
+     * architect on 2026-09-18 (hc-admin item 124). This service published {@code "EntityChange"}
+     * until then and hc-vendor published a <em>family</em> of three, {@code EntityCreated} /
+     * {@code EntityUpdated} / {@code EntityDeleted}; item 124's own text had asserted that all four
+     * already agreed, which was wrong about both. The family reading is idiomatic and lets a consumer
+     * subscribe to one kind, and it lost because it costs three products a change rather than two and
+     * makes a consumer match a set of literals instead of one.
+     *
+     * <p>⚠ <b>The constant's name tracks the value, and that is why it is {@code ENTITY_CHANGED}.</b>
+     * Every other constant in this class is the value in screaming snake — {@code ACCOUNT_CREATED} is
+     * {@code "AccountCreated"} — and a constant reading {@code ENTITY_CHANGE} while holding
+     * {@code "EntityChanged"} is a stale reference frozen into the declaration, which is the rename
+     * hazard this estate keeps finding. Note that the <em>concept</em> keeps the present tense
+     * throughout — {@link EntityChangeEvent}, {@link EntityChangeAction},
+     * {@code EntityChangeAnnouncer}, {@code publishEntityChange} — because those name an entity
+     * change, not this wire literal. Only the type constant follows the wire.
+     *
+     * <p><b>Not an enrichment of {@link #PROFILE_STATUS} and not a replacement for it.</b> That frame
+     * is a <em>snapshot of a clinician's published state</em> for a directory to render; this one is
+     * a <em>record that a row changed</em> for an audit trail to append. The first is idempotent and
+     * lossy on purpose — replaying it twice yields the same directory — while the second is neither,
+     * because "it changed twice" is the fact it exists to carry. Nothing about one can be derived
+     * from the other, which is why both channels stand.
+     *
+     * <p><b>The payload is identifiers and metadata only — never the changed values.</b> That rule
+     * has two independent origins and both apply here: {@link DomainEventEnvelope} states it for this
+     * subsystem, and hc-admin's item 110 reaches the same payload from the other direction, because a
+     * channel carrying document contents rebuilds the local mirror their item 107 exists to delete.
+     */
+    public static final String ENTITY_CHANGED = "EntityChanged";
 
     private ProfessionalEventType() {}
 }

@@ -159,6 +159,22 @@ spring:
         onboardingStateEvents-out-0:
           destination: hc.professional.registration
           content-type: application/json
+        # EVERY document written or removed, for hc-admin's audit trail (backlog.md item 141).
+        #
+        # The name is the estate's, decided 2026-09-17: one channel per product carrying all entity
+        # CRUD — patient.event, professional.event, vendor.event, admin.event. It is NOT
+        # hc.professional.entity renamed. That topic keeps running and hc-admin keeps consuming it;
+        # retiring either of the older two is backlog.md item 142 and is sequenced behind this.
+        #
+        # DECLARED HERE ON PURPOSE. StreamBridge creates a dynamic destination for a binding it
+        # cannot resolve, so deleting or misspelling this line does not fail the build or the
+        # startup — it silently publishes to a topic named after the mistake, which nothing consumes
+        # and nothing reports. hc-admin shipped exactly that as roster-events. EntityChangeBindingTest
+        # asserts this file's literal rather than deriving it, because a cross-product topic name is
+        # one where a typo is a real topic on both sides and silent on both.
+        entityChangeEvents-out-0:
+          destination: professional.event
+          content-type: application/json
         # Consumes the same topic this service publishes to, so a message.created event becomes a
         # websocket nudge for its recipient. A group is set on purpose: with one, a multi-instance
         # deployment delivers each event to a single instance. That is correct only while every
