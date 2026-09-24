@@ -438,7 +438,62 @@ public class DomainEventPublisher {
      * <p>So the caller resolves this from {@link net.jojoaddison.security.SecurityUtils#getCurrentAccountId()},
      * which reads the {@code uid} claim and filters on the minting issuer — never from
      * {@code getCurrentUserLogin()}. A login on this channel is a defect and
-     * {@code EntityChangeEventTest} fails on one.
+     * {@code EntityChangeAnnouncerTest} fails on one — <b>not</b> {@code EntityChangeEventTest},
+     * which this sentence named until backlog.md item 218 and which cannot fail on one; see below.
+     *
+     * <p><b>hc-admin's audit row wants a login, and this frame still does not carry one — the
+     * consumer resolves it.</b> Their item 109 <em>will</em> turn each frame into one
+     * {@code AuditLog} row whose {@code user_id} is {@code @NotNull} and holds a login — will, not
+     * does: that consumer is not built, and no frame from any product has yet crossed a real broker
+     * into hc-admin. This frame sends an account id and
+     * never a login. That gap is deliberate, and the paragraph above gives the reason that
+     * discriminates: under item 107 D1 a login arriving under an {@code accountId} name looks
+     * joinable and is not. A second and independent reason agrees with it — the estate's four
+     * {@code .event} channels carry identifiers and metadata only, and a login <em>is</em> a person's
+     * handle. <b>Neither reason is sufficient on its own to acquit
+     * {@code ProfileStatus.lastModifiedBy}</b>: that
+     * field is tolerable because hc-admin renders it and joins it to nothing, which is a fact about
+     * that field and not about the wire.
+     *
+     * <p>So the consumer is expected to resolve the id to a login itself, and the endpoint it calls
+     * is <b>this repository's own</b> — {@code GET /api/admin/users/id/&#123;id&#125;}, {@code UserResource#getUserById}
+     * in {@code hc-professional/gateway}, added by {@code 187dcee} for hc-admin's item 123
+     * {@code accountId} migration and on {@code main} since 2026-09-18. ⛔ <b>It is therefore a
+     * cross-product dependency this team owns and can break by itself</b> — re-gate it, rename it or
+     * delete it and hc-admin's audit trail silently loses every {@code user_id}. One cacheable read
+     * there beats an identifier that would otherwise sit on a durable cross-product wire for ever.
+     * Decided 2026-09-25, backlog.md item 218.
+     *
+     * <p>⛔ <b>The key name {@code actorAccountId} is load-bearing — do not shorten it to
+     * {@code accountId}.</b> hc-patient ({@code EntityEvent.ACTOR_ACCOUNT_ID}) and hc-vendor
+     * ({@code VendorEvent.Data}) publish the very same spelling on their own {@code .event} channels,
+     * both measured at their {@code origin/main} on 2026-09-25, so a consumer of all three streams
+     * keys on one name — and renaming ours alone would <em>create</em> the divergence such a rename
+     * would claim to remove. That is not hypothetical: item 218 took the rename first and reversed it
+     * on this measurement. The {@code actor} prefix is also doing work of its own: it distinguishes
+     * <em>who caused the write</em> from <em>who the record is about</em>, and that matters most
+     * exactly where {@code subject.entityType} is {@code Profile} — a document with an
+     * {@code accountId} field of its own, naming a routinely different person, as when an
+     * administrator edits a clinician's profile.
+     *
+     * <p>⛔ <b>Do not "align" the next paragraph's omission to hc-patient's explicit null.</b> The two
+     * producers really do disagree, and it looks like drift — but it was decided rather than left:
+     * hc-admin's item 129, 2026-09-24, <b>omit the key everywhere</b>, quoting this class's own
+     * comment back as the estate's answer and going against the explicit-null recommendation put to
+     * the architect. <b>This producer is the one that is already correct</b>; hc-patient changes,
+     * hc-admin changes (its own integration test pins present-with-null against its javadoc), and
+     * hc-vendor is unmeasured.
+     *
+     * <p>⚠ <b>The guard that actually refuses a login is {@code EntityChangeAnnouncerTest}</b>
+     * (in {@code net.jojoaddison.service}), not {@code EntityChangeEventTest}, as the paragraph above
+     * now says. {@code EntityChangeEventTest} passes the actor in itself, so it pins the
+     * <em>field name</em> the value arrives under and would stay green if the announcer started
+     * resolving a login. <b>Two announcer cases hold the property and only one of
+     * them means to</b>: {@code theActorIsTheAccountIdAndNeverTheLogin} names the defect, and
+     * {@code aForeignIssuersAccountIdIsNotPublishedAsOurs} catches the same regression by accident,
+     * because its fixture's JWT subject is a login and it asserts no actor at all. Trim both and a
+     * login rides the wire with {@code EntityChangeEventTest} still green. Backlog.md item 220 is
+     * whether that second, accidental guard should be replaced by a deliberate one.
      *
      * <p><b>Absent rather than {@code "system"} when there is no account behind the write.</b> A
      * scheduler, a startup runner, a Kafka consumer and a migration all write with no security
