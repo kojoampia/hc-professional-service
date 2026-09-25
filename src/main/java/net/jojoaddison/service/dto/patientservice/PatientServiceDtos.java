@@ -50,13 +50,39 @@ public final class PatientServiceDtos {
     /**
      * A patient's demographics, from {@code GET /api/profiles}.
      *
-     * <p>{@code patientId} is the join key. {@code id} is the profile's own identifier and is not
-     * used for joining — reading it as the patient id silently produces an empty directory.
+     * <p>{@code patientId} is the join key <b>today</b>. {@code id} is the profile's own identifier and
+     * is not used for joining — reading it as the patient id silently produces an empty directory.
+     *
+     * <h2>Two join keys during a migration, and which one is which</h2>
+     *
+     * <p><b>{@code accountId} is the join key the estate is moving to; {@code patientId} is the one it
+     * is moving off.</b> backlog.md row 212 decided that a round's customer is named by the gateway
+     * account id, and row 221 is that migration. Both components are present on purpose while it runs.
+     *
+     * <p>⛔ <b>{@code patientId} is going away, and not on this product's schedule.</b> hc-patient's
+     * {@code Profile} javadoc says it *"coexists with {@code accountId} on purpose, and only for now"*
+     * and that their item 54 removes it. So a new caller should key on {@code accountId}; a caller
+     * keyed on {@code patientId} is a caller with a deadline.
+     *
+     * <p><b>Both may be null and they fail differently.</b> {@code accountId} is null for any patient
+     * whose profile predates hc-patient's item 44 — there is no backfill on their side that this
+     * product knows of — so a null here means "not linked yet", not "no such patient". Treat it the way
+     * {@code DutyRosterService} does: record what you have and leave the rest alone.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record PatientProfile(
         String id,
         String patientId,
+        /**
+         * The patient gateway's {@code User.id} — the estate's join key, and what row 221 re-keys onto.
+         *
+         * <p>Read-only over there ({@code @JsonProperty(access = READ_ONLY)} on their {@code Profile}),
+         * which is a security control rather than a modelling preference: a writable one would let a
+         * patient point their profile at somebody else's account and be served in their place. This
+         * product shipped exactly that defect on its own {@code Profile.accountId} and closed it as
+         * item 54, so there is no reason to rediscover it from the client side either.
+         */
+        String accountId,
         String firstName,
         String middleNames,
         String lastName,

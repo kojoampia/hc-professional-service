@@ -127,7 +127,21 @@ class CustomerDayPlanIT {
     }
 
     private static PatientProfile profile(String patientId) {
-        return new PatientProfile("profile-" + patientId, patientId, "Kojo", null, "Mensah", null, null, null, null, null, null, null);
+        return new PatientProfile(
+            "profile-" + patientId,
+            patientId,
+            null,
+            "Kojo",
+            null,
+            "Mensah",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+        );
     }
 
     /** A patient token: a real Jwt principal carrying the email claim hc-patient's gateway mints. */

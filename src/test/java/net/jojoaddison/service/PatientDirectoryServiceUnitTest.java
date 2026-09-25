@@ -145,6 +145,7 @@ class PatientDirectoryServiceUnitTest {
         return new PatientProfile(
             "profile-" + patientId,
             patientId,
+            "account-" + patientId, // accountId — see row 221; the directory does not key on it yet
             first,
             null,
             last,

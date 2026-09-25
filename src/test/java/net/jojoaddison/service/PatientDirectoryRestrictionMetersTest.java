@@ -153,6 +153,7 @@ class PatientDirectoryRestrictionMetersTest {
         return new PatientProfile(
             "profile-p-task",
             "p-task",
+            null, // accountId — this test is about restriction meters, not the row 221 join
             "Ama",
             null,
             "Mensah",

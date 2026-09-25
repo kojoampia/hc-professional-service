@@ -284,6 +284,61 @@ public class PatientServiceClient {
     }
 
     /**
+     * The one profile belonging to a gateway account id — {@code GET /api/profile/{accountId}}.
+     *
+     * <p><b>The estate's join key, read the estate's way.</b> backlog.md row 140 specifies this endpoint
+     * as the cross-product profile read, and row 212 decided that a round's customer is named by this
+     * value. hc-patient already serves it: measured through this gateway on quality, 2026-09-25, <b>200</b>.
+     *
+     * <p>⚠ <b>The path is singular and that is not a typo.</b> {@code /api/profiles/{id}} already means
+     * <em>the profile's own id</em> in every product, so {@code /api/profiles/{accountId}} would collide on
+     * one pattern. Row 140 records the singular path as how that ambiguity was removed rather than routed
+     * around.
+     *
+     * <p><b>{@code ROLE_ADMIN} on the far side, because the path names a subject.</b> An endpoint that can
+     * name somebody other than the caller is admin-gated across this estate, and this one names a patient —
+     * so a clinician's token is refused here, and must be. That is the opposite of {@link #profileByEmail},
+     * which the sibling scopes to the <em>token's own</em> address and which a patient may therefore call
+     * for themselves.
+     *
+     * <p>⛔ <b>Do not reach for this to resolve a caller.</b> It answers "who is this account", not "who is
+     * asking". Using it for the latter needs an account id taken from the caller's token, which this service
+     * may not do when the token was minted elsewhere (item 50) — and the day plan's caller always holds an
+     * hc-patient token. That gap is row 222 and it is an ask on hc-patient, not a use of this method.
+     *
+     * <p><b>Empty on any failure, like {@link #profileByEmail} and for the same reason:</b> every caller so
+     * far turns an unresolved subject into a refusal. A 403 for a non-administrator and a 404 for an unknown
+     * account arrive here indistinguishably from an outage. A caller that must tell those apart cannot use
+     * this method as written — say so rather than reading the empty as absence.
+     */
+    public Optional<PatientProfile> profileByAccountId(String accountId) {
+        if (!enabled || accountId == null || accountId.isBlank()) {
+            return Optional.empty();
+        }
+        String token = SecurityUtils.getCurrentUserJWT().orElse(null);
+        if (token == null) {
+            LOG.warn("No caller token available; cannot resolve a patientservice profile by account id");
+            return Optional.empty();
+        }
+        try {
+            return Optional.ofNullable(
+                restClient
+                    .get()
+                    .uri("/api/profile/{accountId}", accountId)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                    .retrieve()
+                    .body(PatientProfile.class)
+            );
+        } catch (Exception e) {
+            // The account id is omitted deliberately: it identifies a patient, and this line is read out
+            // of support tickets. A 403 arrives here when the caller is not an administrator, which is the
+            // far side's rule rather than a fault on this one.
+            LOG.warn("patientservice profile lookup by account id failed ({}); treating the subject as unresolved", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
      * Every clinical case, archived ones excluded — the sibling's {@code includeArchived} defaults to
      * false and this client does not override it.
      *
