@@ -362,6 +362,7 @@ class PatientDirectoryRestrictionHeaderTest {
                 new PatientProfile(
                     "profile-p-task",
                     "p-task",
+                    null, // accountId — this test is about restriction headers, not the row 221 join
                     "Ama",
                     null,
                     "Mensah",

@@ -19,6 +19,7 @@ import net.jojoaddison.domain.enumeration.ShiftType;
 import net.jojoaddison.repository.AbsenceRepository;
 import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.service.DutyRosterService.InvalidRoundException;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.PatientProfile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -318,5 +319,85 @@ class DutyRosterServiceUnitTest {
         assertThatCode(
             () -> service.validateRound(round(ShiftType.DAY, visit("shared-customer", "09:00", "10:00")))
         ).doesNotThrowAnyException();
+    }
+
+    // ------------------------------------------------- the row 221 dual-write
+    //
+    // backlog.md row 212 decided a round's customer is named by the gateway account id; row 221 is the
+    // migration and this is its add-before-remove half. Four properties, asserted one at a time,
+    // because an aggregate "the account id is handled" cannot tell filling in from overwriting from
+    // clearing — and those are three different behaviours with three different consequences.
+
+    private static PatientProfile patientProfile(String patientId, String accountId) {
+        return new PatientProfile(
+            "profile-" + patientId,
+            patientId,
+            accountId,
+            "Ama",
+            null,
+            "Mensah",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+    }
+
+    @Test
+    void theWritePathStoresTheAccountIdBesideTheCustomerId() {
+        when(patientServiceClient.profiles()).thenReturn(List.of(patientProfile("patient-9", "acct-9")));
+        when(dutyRosterRepository.save(any())).thenAnswer(call -> call.getArgument(0));
+
+        DutyRoster saved = service.assign(round(ShiftType.DAY, visit("patient-9", "09:00", "10:00")));
+
+        // Both, and they are different values: the point of the dual-write is that neither replaces
+        // the other while readers are still on the old key.
+        assertThat(saved.getVisits().get(0).getCustomerId()).isEqualTo("patient-9");
+        assertThat(saved.getVisits().get(0).getAccountId()).isEqualTo("acct-9");
+    }
+
+    @Test
+    void theWritePathLeavesTheAccountIdNullWhenTheSiblingHasNotLinkedOne() {
+        // hc-patient's item 44 added accountId and backfilled nothing this product knows of, so an
+        // unlinked patient is ordinary rather than exceptional. The round must still save.
+        when(patientServiceClient.profiles()).thenReturn(List.of(patientProfile("patient-9", null)));
+        when(dutyRosterRepository.save(any())).thenAnswer(call -> call.getArgument(0));
+
+        DutyRoster saved = service.assign(round(ShiftType.DAY, visit("patient-9", "09:00", "10:00")));
+
+        assertThat(saved.getVisits().get(0).getCustomerId()).isEqualTo("patient-9");
+        assertThat(saved.getVisits().get(0).getAccountId()).isNull();
+    }
+
+    @Test
+    void theReadPathBackfillsAnAbsentAccountIdOnAnExistingRound() {
+        // Every visit written before the field existed is null here, and opening a day view is the
+        // cheapest migration this service has: the profiles are already being fetched for the snapshot.
+        when(patientServiceClient.profiles()).thenReturn(List.of(patientProfile("patient-9", "acct-9")));
+        DutyRoster stored = round(ShiftType.DAY, visit("patient-9", "09:00", "10:00"));
+
+        int refreshed = service.refreshSnapshots(new java.util.ArrayList<>(List.of(stored)));
+
+        assertThat(stored.getVisits().get(0).getAccountId()).isEqualTo("acct-9");
+        assertThat(refreshed).isEqualTo(1);
+        verify(dutyRosterRepository).save(stored);
+    }
+
+    @Test
+    void theReadPathNeverClearsAnAccountIdTheSiblingHasStoppedReturning() {
+        // The one-directional rule, and the reason for it: an unreachable or newly-unlinked patient
+        // must not be able to undo a migrated row. Clearing would make "the sibling did not say" and
+        // "this row was never migrated" the same state, which is the distinction the whole migration
+        // rests on. Same argument the snapshot fields make, applied to a key rather than a name.
+        when(patientServiceClient.profiles()).thenReturn(List.of(patientProfile("patient-9", null)));
+        DutyRoster stored = round(ShiftType.DAY, visit("patient-9", "09:00", "10:00"));
+        stored.getVisits().get(0).setAccountId("acct-9");
+
+        service.refreshSnapshots(new java.util.ArrayList<>(List.of(stored)));
+
+        assertThat(stored.getVisits().get(0).getAccountId()).isEqualTo("acct-9");
     }
 }

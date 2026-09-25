@@ -53,6 +53,16 @@ class DutyRosterRoundsIT {
 
     private static final String PRO = "round-nurse";
     private static final String CUSTOMER = "patient-7";
+
+    /**
+     * The same customer's gateway account id — the key backlog.md row 221 re-keys onto.
+     *
+     * <p><b>Deliberately a different string from {@link #CUSTOMER}.</b> A fixture whose two id spaces
+     * hold the same value cannot tell a reader keyed on one from a reader keyed on the other, which is
+     * exactly the property the dual-write has to preserve.
+     */
+    private static final String CUSTOMER_ACCOUNT = "acct-7";
+
     private static final LocalDate TOMORROW = LocalDate.now().plusDays(1);
 
     @Autowired
@@ -101,6 +111,7 @@ class DutyRosterRoundsIT {
         return new PatientProfile(
             "profile-7",
             CUSTOMER,
+            CUSTOMER_ACCOUNT,
             "Akosua",
             null,
             "Mensah",
@@ -572,6 +583,11 @@ class DutyRosterRoundsIT {
         visit.setCustomerName("Akosua Mensah");
         visit.setCustomerAddress("GA-123-4567, 5 Ankobra River Street, Osu, Greater Accra");
         visit.setCustomerPhone("0244000111");
+        // The account id joined the definition of "already current" with backlog.md row 221: the read
+        // path now derives one more field from the same profile, so a round missing it is NOT current
+        // and SHOULD be rewritten once. That is asserted next door in
+        // backfillsTheAccountIdOnceAndThenStopsRewriting; this case is about the steady state.
+        visit.setAccountId(CUSTOMER_ACCOUNT);
         store(TOMORROW, ShiftType.DAY, "Ward 3", visit);
         when(patientServiceClient.profiles()).thenReturn(List.of(patientProfile()));
         Instant before = roundNamed("Ward 3").getLastModifiedDate();
@@ -581,6 +597,41 @@ class DutyRosterRoundsIT {
         // A write on a read path is acceptable only if it is rare. Opening the same day twice must
         // not churn the collection or the audit fields.
         assertThat(roundNamed("Ward 3").getLastModifiedDate()).isEqualTo(before);
+    }
+
+    /**
+     * The row 221 backfill writes once and then stops — the half that makes it a migration rather than
+     * churn.
+     *
+     * <p><b>This case exists because adding the backfill broke the test above, and the break was
+     * right.</b> A round written before {@code Visit.accountId} existed is genuinely not current, so the
+     * first day-view open should fill it in and save; every open after that must find it equal and leave
+     * the round alone. Asserting only the second half — which is what fixing the fixture next door does
+     * on its own — would pass for a backfill that never wrote at all.
+     */
+    @Test
+    @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
+    void backfillsTheAccountIdOnceAndThenStopsRewriting() throws Exception {
+        // No account id: every visit written before the field existed looks like this.
+        Visit visit = new Visit().customerId(CUSTOMER).startTime(LocalTime.of(9, 0)).endTime(LocalTime.of(10, 0));
+        visit.setCustomerName("Akosua Mensah");
+        visit.setCustomerAddress("GA-123-4567, 5 Ankobra River Street, Osu, Greater Accra");
+        visit.setCustomerPhone("0244000111");
+        store(TOMORROW, ShiftType.DAY, "Ward 3", visit);
+        when(patientServiceClient.profiles()).thenReturn(List.of(patientProfile()));
+
+        restMockMvc.perform(get("/api/duty-roster/day/" + TOMORROW)).andExpect(status().isOk());
+
+        // Filled in, and the round was rewritten to store it.
+        assertThat(roundNamed("Ward 3").getVisits().get(0).getAccountId()).isEqualTo(CUSTOMER_ACCOUNT);
+        Instant afterBackfill = roundNamed("Ward 3").getLastModifiedDate();
+
+        restMockMvc.perform(get("/api/duty-roster/day/" + TOMORROW)).andExpect(status().isOk());
+
+        // And now it is current, so the second open must not touch it. Without this assertion the
+        // backfill would be free to re-save the same value on every day-view open for ever.
+        assertThat(roundNamed("Ward 3").getLastModifiedDate()).isEqualTo(afterBackfill);
+        assertThat(roundNamed("Ward 3").getVisits().get(0).getAccountId()).isEqualTo(CUSTOMER_ACCOUNT);
     }
 
     @Test

@@ -69,6 +69,35 @@ public class Visit implements Serializable {
     @Field("customer_id")
     private String customerId;
 
+    /**
+     * The customer's gateway account id — <b>what a visit's customer will be named by</b>.
+     *
+     * <p>backlog.md row 212 decided that a round's customer is the gateway {@code User.id}, and row 221
+     * is the migration. This field is the <em>add</em> half of add-before-remove: it is written beside
+     * {@code customerId} and read by nothing yet.
+     *
+     * <p><b>Why a second field rather than changing what {@code customerId} holds.</b> One column
+     * holding two id spaces is the defect, not the shortcut — hc-admin's item 123 spent a day migrating
+     * out of exactly that and their item 130 closed it. Re-pointing {@code customerId} at account ids
+     * would leave no way to tell a migrated row from an unmigrated one; with two fields a row's state is
+     * readable from the row.
+     *
+     * <p><b>Nullable, and null means "not linked yet" rather than "no such customer".</b> Three
+     * populations are null here and each is ordinary: every visit written before this field existed;
+     * every visit whose patient profile hc-patient has not linked to an account (their item 44 added
+     * {@code accountId} and backfilled nothing this product knows of); and every visit written while the
+     * patient stack was unreachable, which {@code DutyRosterService} tolerates by design rather than
+     * failing the write. <b>Do not make this {@code @NotNull} until a migration has run and been
+     * measured</b> — the annotation would reject writes the service completes today.
+     *
+     * <p>⛔ <b>It is an identifier, not a snapshot.</b> The 90-day purge clears {@code customerName},
+     * {@code customerAddress} and {@code customerPhone} and keeps {@code customerId}; this belongs with
+     * the kept half, for the same reason. A purge that cleared it would destroy the key this migration
+     * exists to establish.
+     */
+    @Field("account_id")
+    private String accountId;
+
     @NotNull
     @Field("start_time")
     private LocalTime startTime;
@@ -113,6 +142,20 @@ public class Visit implements Serializable {
 
     public void setCustomerId(String customerId) {
         this.customerId = customerId;
+    }
+
+    /** The customer's gateway account id, or null where it is not linked yet — see the field. */
+    public String getAccountId() {
+        return this.accountId;
+    }
+
+    public Visit accountId(String accountId) {
+        this.accountId = accountId;
+        return this;
+    }
+
+    public void setAccountId(String accountId) {
+        this.accountId = accountId;
     }
 
     public LocalTime getStartTime() {

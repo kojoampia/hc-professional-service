@@ -48,7 +48,7 @@ class CustomerDayPlanServiceTest {
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(token, token, List.of()));
         when(patientServiceClient.profileByEmail(anyString())).thenReturn(Optional.empty());
         when(patientServiceClient.profileByEmail("me@abofonsa.care")).thenReturn(
-            Optional.of(new PatientProfile("p", ME, "K", null, "M", null, null, null, null, null, null, null))
+            Optional.of(new PatientProfile("p", ME, null, "K", null, "M", null, null, null, null, null, null, null))
         );
         when(rounds.findRoundsForCustomer(anyString(), any(), any())).thenReturn(List.of());
     }

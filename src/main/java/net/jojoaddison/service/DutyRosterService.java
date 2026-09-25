@@ -377,6 +377,16 @@ public class DutyRosterService {
                     visit.setCustomerPhone(phone);
                     changed = true;
                 }
+                // The row 221 backfill, and it is deliberately one-directional: an absent account id is
+                // filled in, a present one is left alone, and a present one is NEVER cleared because the
+                // sibling stopped returning it. Clearing would make an unreachable-or-unlinked patient
+                // indistinguishable from a migrated row that has come undone — the same argument the
+                // snapshot fields make three lines up, applied to a key rather than to a name.
+                String account = blankToNull(profile.accountId());
+                if (account != null && !Objects.equals(account, visit.getAccountId())) {
+                    visit.setAccountId(account);
+                    changed = true;
+                }
             }
             if (changed) {
                 // Identifiers only in the log line — the snapshot is exactly what must not reach one.
@@ -587,6 +597,11 @@ public class DutyRosterService {
             visit.setCustomerName(blankToNull(profile.fullName()));
             visit.setCustomerAddress(profile.formattedAddress());
             visit.setCustomerPhone(blankToNull(profile.contactPhone()));
+            // The row 221 dual-write. This lookup already holds the profile, so the account id costs
+            // nothing extra — and writing it in the same pass as the snapshot means a round is never
+            // stored with a fresh name beside a stale key. Null stays null rather than being defaulted:
+            // see Visit#getAccountId for the three ordinary reasons it can be absent.
+            visit.setAccountId(blankToNull(profile.accountId()));
         }
     }
 
