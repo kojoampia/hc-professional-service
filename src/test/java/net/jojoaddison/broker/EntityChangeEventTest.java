@@ -145,6 +145,34 @@ class EntityChangeEventTest {
     }
 
     /**
+     * The actor is published <b>exactly as given</b> — this publisher derives no identity of its own.
+     *
+     * <p><b>Added by backlog.md row 220, to pin the boundary rather than the value.</b> The case above
+     * pins the <em>field name</em> the actor arrives under; it cannot pin where the value came from,
+     * because this class is handed one. Measured 2026-09-25: regressing {@code EntityChangeAnnouncer} to
+     * {@code SecurityUtils.getCurrentUserLogin()} leaves <b>all 13 of this file's cases green</b> and
+     * reddens two in {@code EntityChangeAnnouncerTest}. The provenance guard is entirely over there, and
+     * this file must not be read as sharing it.
+     *
+     * <p>⛔ <b>What this asserts is the property that makes that division correct:</b> a login on the wire
+     * could only ever be the announcer's fault, because this publisher neither resolves nor rewrites an
+     * actor. Should that stop being true — if this class began deriving an identity when the argument is
+     * blank, say — this case fails, and the division of labour above stops being safe to rely on.
+     *
+     * <p>A login-shaped value is used deliberately: it is the one input a reader might expect this class
+     * to reject, and it does not. Refusing it here would put the estate's identifier rules in two places
+     * and let them drift.
+     */
+    @Test
+    void thePublisherPassesTheActorThroughAndResolvesNothingItself() {
+        publisher.publishEntityChange("Profile", "profile-7", EntityChangeAction.UPDATED, "jdoe", OCCURRED);
+
+        // Verbatim: not normalised, not replaced, not refused. Whatever the announcer resolved is what
+        // ships — which is why "never a login" has to be held on the announcer's side.
+        assertThat(capture().data()).containsEntry("actorAccountId", "jdoe");
+    }
+
+    /**
      * No account behind the write means no key, rather than {@code null} or {@code "system"}.
      *
      * <p>Following {@code publishProfileStatus}: a placeholder in an identifier space is a value a
