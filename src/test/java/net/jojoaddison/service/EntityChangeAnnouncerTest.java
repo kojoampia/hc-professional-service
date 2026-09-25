@@ -144,6 +144,23 @@ class EntityChangeAnnouncerTest {
      * <p>The fixture's subject and {@code uid} differ on purpose; see the class comment. A regression
      * to {@code getCurrentUserLogin()} — or to {@code SpringSecurityAuditorAware}, which is what fills
      * the field this subsystem already got wrong — puts {@code "jdoe"} here and fails.
+     *
+     * <p><b>⛔ This is the case that MEANS to hold "never a login". Do not trim it.</b> Backlog row 220
+     * measured what actually covers the property, by regressing the announcer to
+     * {@code getCurrentUserLogin()} on 2026-09-25 and running each file:
+     *
+     * <ul>
+     *   <li><b>this case — fails.</b> The intentional guard.</li>
+     *   <li>{@code aForeignIssuersAccountIdIsNotPublishedAsOurs} — <b>also fails, but incidentally.</b>
+     *       Its fixture happens to use a login as the JWT subject while asserting {@code eq(null)}; its
+     *       actual subject is issuer filtering. Correctly scoped for its own question, so it must not be
+     *       relied on for this one and must not be rewritten into a login test.</li>
+     *   <li>{@code EntityChangeEventTest} — <b>all 13 cases stay green.</b> That file pins the field name
+     *       the actor arrives under, and the publisher's pass-through; it cannot see provenance.</li>
+     * </ul>
+     *
+     * <p>So: <b>one intentional guard, one accident, and a neighbouring file that cannot see the property
+     * at all.</b> Anyone trimming this because "another test covers it" would be leaning on the accident.
      */
     @Test
     void theActorIsTheAccountIdAndNeverTheLogin() {
