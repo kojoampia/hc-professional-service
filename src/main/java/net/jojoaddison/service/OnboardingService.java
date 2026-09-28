@@ -205,7 +205,6 @@ public class OnboardingService {
         profile
             .accountId(accountId)
             .firstName(incoming.getFirstName())
-            .middleNames(incoming.getMiddleNames())
             .lastName(incoming.getLastName())
             .birthDate(incoming.getBirthDate())
             .sex(incoming.getSex())
