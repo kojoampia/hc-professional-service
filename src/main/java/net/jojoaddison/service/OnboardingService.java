@@ -199,14 +199,18 @@ public class OnboardingService {
         if (created) {
             profile = new Profile();
         }
+        User user = userRepository.findOneByAccountId(accountId).orElse(null);
+        String firstName = hasText(incoming.getFirstName()) ? incoming.getFirstName() : user.getFirstName();
+        String middleNames = hasText(incoming.getMiddleNames()) ? incoming.getMiddleNames() : user.getMiddleNames();
+        String lastName = hasText(incoming.getLastName()) ? incoming.getLastName() : user.getLastName();
         // accountUid used to be stamped here, beside a login-valued accountId. Item 50 removed the
         // field: accountId now holds the very value accountUid held, so keeping both would be the
         // second join key that item exists to remove, spelled twice in one document.
         profile
             .accountId(accountId)
-            .firstName(incoming.getFirstName())
-            .middleNames(incoming.getMiddleNames())
-            .lastName(incoming.getLastName())
+            .firstName(firstName)
+            .middleNames(middleNames)
+            .lastName(lastName)
             .birthDate(incoming.getBirthDate())
             .sex(incoming.getSex())
             .mobilePhone(incoming.getMobilePhone())
