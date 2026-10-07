@@ -20,7 +20,7 @@ import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
 import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
@@ -187,7 +187,7 @@ class OnboardingContractsIT {
                 .accountId("account-2")
                 .login("ama.serwaa")
                 .requestedRole("ROLE_NURSE")
-                .status(OnboardingStatus.APPLICATION_STARTED)
+                .status(ProfileStatus.APPLICATION_STARTED)
                 .consentAcceptedAt(Instant.parse("2026-07-28T07:00:00Z"))
         );
 
@@ -204,18 +204,18 @@ class OnboardingContractsIT {
             new OnboardingEvent()
                 .applicationId("app-1")
                 .actor("ama.serwaa")
-                .fromStatus(OnboardingStatus.APPLICATION_STARTED)
-                .toStatus(OnboardingStatus.PROFILE_COMPLETED)
+                .fromStatus(ProfileStatus.APPLICATION_STARTED)
+                .toStatus(ProfileStatus.PROFILE_COMPLETED)
                 .at(base.plus(1, ChronoUnit.HOURS))
         );
         onboardingEventRepository.save(
-            new OnboardingEvent().applicationId("app-1").actor("system").toStatus(OnboardingStatus.APPLICATION_STARTED).at(base)
+            new OnboardingEvent().applicationId("app-1").actor("system").toStatus(ProfileStatus.APPLICATION_STARTED).at(base)
         );
         onboardingEventRepository.save(new OnboardingEvent().applicationId("app-other").actor("x").at(base));
 
         List<OnboardingEvent> trail = onboardingEventRepository.findByApplicationIdOrderByAtAsc("app-1");
         assertThat(trail).hasSize(2);
-        assertThat(trail.get(0).getToStatus()).isEqualTo(OnboardingStatus.APPLICATION_STARTED);
-        assertThat(trail.get(1).getToStatus()).isEqualTo(OnboardingStatus.PROFILE_COMPLETED);
+        assertThat(trail.get(0).getToStatus()).isEqualTo(ProfileStatus.APPLICATION_STARTED);
+        assertThat(trail.get(1).getToStatus()).isEqualTo(ProfileStatus.PROFILE_COMPLETED);
     }
 }

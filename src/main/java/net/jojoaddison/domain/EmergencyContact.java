@@ -18,6 +18,10 @@ public class EmergencyContact implements Serializable {
 
     private String phone;
 
+    private String email;
+
+    private String address;
+
     public String getName() {
         return name;
     }
@@ -48,6 +52,32 @@ public class EmergencyContact implements Serializable {
         return phone;
     }
 
+    public String getEmail() {
+        return email;
+    }
+
+    public EmergencyContact email(String email) {
+        this.email = email;
+        return this;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
+    }
+
+    public String getAddress() {
+        return address;
+    }
+
+    public EmergencyContact address(String address) {
+        this.address = address;
+        return this;
+    }
+
+    public void setAddress(String address) {
+        this.address = address;
+    }
+
     public EmergencyContact phone(String phone) {
         this.phone = phone;
         return this;
@@ -66,12 +96,18 @@ public class EmergencyContact implements Serializable {
             return false;
         }
         EmergencyContact other = (EmergencyContact) o;
-        return Objects.equals(name, other.name) && Objects.equals(relationship, other.relationship) && Objects.equals(phone, other.phone);
+        return (
+            Objects.equals(name, other.name) &&
+            Objects.equals(relationship, other.relationship) &&
+            Objects.equals(phone, other.phone) &&
+            Objects.equals(email, other.email) &&
+            Objects.equals(address, other.address)
+        );
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(name, relationship, phone);
+        return Objects.hash(name, relationship, phone, email, address);
     }
 
     // prettier-ignore
@@ -81,6 +117,8 @@ public class EmergencyContact implements Serializable {
                 "name='" + getName() + "'" +
                 ", relationship='" + getRelationship() + "'" +
                 ", phone='" + getPhone() + "'" +
+                ", email='" + getEmail() + "'" +
+                ", address='" + getAddress() + "'" +
                 "}";
     }
 }

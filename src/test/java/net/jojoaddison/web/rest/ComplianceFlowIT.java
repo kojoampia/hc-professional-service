@@ -17,7 +17,7 @@ import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
 import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
@@ -99,7 +99,7 @@ class ComplianceFlowIT {
         cleanup();
         profile = profileRepository.save(CompleteOnboardingFixture.completeProfile(accountIdFor(PRO)));
         application = applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(accountIdFor(PRO), OnboardingStatus.ACTIVE)
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(PRO), ProfileStatus.ACTIVE)
                 .login(PRO)
                 .profileId(profile.getId())
                 .requestedRole("ROLE_NURSE")
@@ -142,7 +142,7 @@ class ComplianceFlowIT {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.expiredLicenses").value(1))
             .andExpect(jsonPath("$.applicationsSuspended").value(1));
-        assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(OnboardingStatus.SUSPENDED);
+        assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(ProfileStatus.SUSPENDED);
         assertThat(eventRepository.findByApplicationIdOrderByAtAsc(application.getId()))
             .extracting(OnboardingEvent::getReason)
             .anyMatch(reason -> reason != null && reason.startsWith(ComplianceService.LICENSE_EXPIRED_REASON));
@@ -205,7 +205,7 @@ class ComplianceFlowIT {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.expiredLicenses").value(1))
             .andExpect(jsonPath("$.applicationsSuspended").value(0));
-        assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(OnboardingStatus.ACTIVE);
+        assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(ProfileStatus.ACTIVE);
         // Skipped, not merely un-suspended: no second audit event, and by the same `continue` no
         // second `compliance.alert` on the broker either.
         assertThat(eventRepository.findByApplicationIdOrderByAtAsc(application.getId()))
@@ -216,13 +216,13 @@ class ComplianceFlowIT {
         // full audit chain: suspension and reactivation are both events
         assertThat(eventRepository.findByApplicationIdOrderByAtAsc(application.getId()))
             .extracting(OnboardingEvent::getToStatus)
-            .containsSubsequence(OnboardingStatus.SUSPENDED, OnboardingStatus.ACTIVE);
+            .containsSubsequence(ProfileStatus.SUSPENDED, ProfileStatus.ACTIVE);
     }
 
     @Test
     @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void metricsCountFunnelByStatusAndSource() throws Exception {
-        applicationRepository.save(new ProfessionalApplication().accountId("direct-1").status(OnboardingStatus.CREDENTIAL_REVIEW));
+        applicationRepository.save(new ProfessionalApplication().accountId("direct-1").status(ProfileStatus.CREDENTIAL_REVIEW));
         restMockMvc
             .perform(get("/api/onboarding/compliance/metrics"))
             .andExpect(status().isOk())

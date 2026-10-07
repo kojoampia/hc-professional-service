@@ -37,7 +37,7 @@ import org.junit.jupiter.api.Test;
  *
  * <p><b>"Any enum a generator input names" is narrower than "any enum in this package", and the
  * difference is the point.</b> Four of the seven enums here are reached — {@code ShiftType},
- * {@code DutyRole}, {@code DocumentType}, {@code VerificationStatus}. {@code OnboardingStatus},
+ * {@code DutyRole}, {@code DocumentType}, {@code VerificationStatus}. {@code ProfileStatus},
  * {@code AbsenceStatus} and {@code AbsenceType} are named by no {@code .jhipster} file, so adding a
  * value to one of them fails nothing here, and nothing else covers them either. That is the honest
  * state rather than a gap to paper over: their entities are hand-written and have no generator input

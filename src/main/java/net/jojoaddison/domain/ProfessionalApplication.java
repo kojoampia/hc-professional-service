@@ -2,7 +2,7 @@ package net.jojoaddison.domain;
 
 import java.io.Serializable;
 import java.time.Instant;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -38,7 +38,7 @@ public class ProfessionalApplication extends AbstractAuditingEntity<String> impl
     private String requestedRole;
 
     @Field("status")
-    private OnboardingStatus status;
+    private ProfileStatus status;
 
     @Field("consent_accepted_at")
     private Instant consentAcceptedAt;
@@ -132,16 +132,16 @@ public class ProfessionalApplication extends AbstractAuditingEntity<String> impl
         this.requestedRole = requestedRole;
     }
 
-    public OnboardingStatus getStatus() {
+    public ProfileStatus getStatus() {
         return this.status;
     }
 
-    public ProfessionalApplication status(OnboardingStatus status) {
+    public ProfessionalApplication status(ProfileStatus status) {
         this.status = status;
         return this;
     }
 
-    public void setStatus(OnboardingStatus status) {
+    public void setStatus(ProfileStatus status) {
         this.status = status;
     }
 

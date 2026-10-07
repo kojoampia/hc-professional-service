@@ -12,7 +12,7 @@ import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.DeviceToken;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.repository.DeviceTokenRepository;
 import net.jojoaddison.repository.OrphanedAccountRowRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
@@ -109,7 +109,7 @@ class AccountIdMigrationIT {
     @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void theApplicationAndTheDeviceTokenMoveWithTheProfile() throws Exception {
         profileRepository.save(new Profile().accountId(KNOWN_LOGIN).firstName("Ama"));
-        applicationRepository.save(new ProfessionalApplication().accountId(KNOWN_LOGIN).login(KNOWN_LOGIN).status(OnboardingStatus.ACTIVE));
+        applicationRepository.save(new ProfessionalApplication().accountId(KNOWN_LOGIN).login(KNOWN_LOGIN).status(ProfileStatus.ACTIVE));
         DeviceToken device = new DeviceToken();
         device.setToken("fcm-token-1");
         device.setAccountId(KNOWN_LOGIN);

@@ -59,11 +59,12 @@ public class PersonalDocumentResource {
         if (personalDocument.getId() != null) {
             throw new BadRequestAlertException("A new personalDocument cannot already have an ID", ENTITY_NAME, "idexists");
         }
+
         personalDocument = personalDocumentService.save(personalDocument);
         domainEventPublisher.publishEntityCreated(
             "PersonalDocument",
             personalDocument.getId(),
-            null,
+            personalDocument.getProfileId(),
             net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
         );
         return ResponseEntity.created(LocationUri.of(personalDocument.getId()))
@@ -160,6 +161,18 @@ public class PersonalDocumentResource {
         log.debug("REST request to get PersonalDocument : {}", id);
         Optional<PersonalDocument> personalDocument = personalDocumentService.findOne(id);
         return ResponseUtil.wrapOrNotFound(personalDocument);
+    }
+
+    /**
+     * {@code GET  /personal-documents/profile/:profileId} : get all the personalDocuments for a specific profile.
+     *
+     * @param profileId the id of the profile to retrieve personalDocuments for.
+     * @return the {@link ResponseEntity} with status {@code 200 (OK)} and the list of personalDocuments in body.
+     */
+    @GetMapping("/profile/{profileId}")
+    public List<PersonalDocument> getPersonalDocumentsByProfile(@PathVariable("profileId") String profileId) {
+        log.debug("REST request to get all PersonalDocuments for profile : {}", profileId);
+        return personalDocumentService.findAllByProfileId(profileId);
     }
 
     /**

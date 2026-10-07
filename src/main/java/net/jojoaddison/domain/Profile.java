@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedBy;
@@ -59,26 +60,8 @@ public class Profile implements Serializable {
     @Field("account_id")
     private String accountId;
 
-    /**
-     * Push notification preferences (MOB9).
-     *
-     * <p>They live on the Profile rather than on DeviceToken so they follow the clinician across
-     * devices — someone who turns off compliance nudges on their phone means it for their tablet
-     * too. Null is treated as opted in for the two delivery flags, so existing profiles keep
-     * receiving notifications without a migration.
-     *
-     * <p>{@code pushShowSenderName} is the exception and defaults to OFF: a lock screen is visible
-     * to anyone holding the phone, and even a colleague's name is more than the default should
-     * disclose.
-     */
-    @Field("push_messages_enabled")
-    private Boolean pushMessagesEnabled;
-
-    @Field("push_compliance_enabled")
-    private Boolean pushComplianceEnabled;
-
-    @Field("push_show_sender_name")
-    private Boolean pushShowSenderName;
+    @Field("title")
+    private String title;
 
     @Field("first_name")
     private String firstName;
@@ -104,26 +87,47 @@ public class Profile implements Serializable {
     @Field("email")
     private String email;
 
+    @Field("address")
+    private Address address;
+
     @Field("card_type")
     private String cardType;
 
     @Field("card_number")
     private String cardNumber;
 
-    @Field("address")
-    private Address address;
-
-    @Field("title")
-    private String title;
-
     @Field("emergency_contact")
     private EmergencyContact emergencyContact;
+
+    @Field("status")
+    private ProfileStatus status;
 
     @Field("specialty_category_id")
     private String specialtyCategoryId;
 
     @Field("team_ids")
     private List<String> teamIds = new ArrayList<>();
+
+    /**
+     * Push notification preferences (MOB9).
+     *
+     * <p>They live on the Profile rather than on DeviceToken so they follow the clinician across
+     * devices — someone who turns off compliance nudges on their phone means it for their tablet
+     * too. Null is treated as opted in for the two delivery flags, so existing profiles keep
+     * receiving notifications without a migration.
+     *
+     * <p>{@code pushShowSenderName} is the exception and defaults to OFF: a lock screen is visible
+     * to anyone holding the phone, and even a colleague's name is more than the default should
+     * disclose.
+     */
+    @Field("push_messages_enabled")
+    private Boolean pushMessagesEnabled;
+
+    @Field("push_compliance_enabled")
+    private Boolean pushComplianceEnabled;
+
+    @Field("push_show_sender_name")
+    private Boolean pushShowSenderName;
 
     /**
      * When this profile first existed, and when it last changed, and who changed it.
@@ -409,6 +413,19 @@ public class Profile implements Serializable {
         this.teamIds = teamIds;
     }
 
+    public ProfileStatus getStatus() {
+        return this.status;
+    }
+
+    public Profile status(ProfileStatus status) {
+        this.setStatus(status);
+        return this;
+    }
+
+    public void setStatus(ProfileStatus status) {
+        this.status = status;
+    }
+
     // jhipster-needle-entity-add-getters-setters - JHipster will add getters and
     // setters here
 
@@ -450,6 +467,7 @@ public class Profile implements Serializable {
                 ", emergencyContact='" + getEmergencyContact() + "'" +
                 ", specialtyCategoryId='" + getSpecialtyCategoryId() + "'" +
                 ", teamIds='" + getTeamIds() + "'" +
+                ", status='" + getStatus() + "'" +
                 "}";
     }
 

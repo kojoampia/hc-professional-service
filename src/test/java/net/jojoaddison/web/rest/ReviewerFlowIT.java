@@ -13,7 +13,7 @@ import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
@@ -62,7 +62,7 @@ class ReviewerFlowIT {
                 .login("candidate")
                 .profileId(profile.getId())
                 .requestedRole("ROLE_NURSE")
-                .status(OnboardingStatus.CREDENTIAL_REVIEW)
+                .status(ProfileStatus.CREDENTIAL_REVIEW)
                 .submittedAt(Instant.parse("2026-07-29T08:00:00Z"))
                 .source("web-careers")
         );
@@ -85,7 +85,7 @@ class ReviewerFlowIT {
     @Test
     @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void adminListsApplicationsWithAttributionAndFilters() throws Exception {
-        applicationRepository.save(new ProfessionalApplication().accountId("other").status(OnboardingStatus.APPLICATION_STARTED));
+        applicationRepository.save(new ProfessionalApplication().accountId("other").status(ProfileStatus.APPLICATION_STARTED));
         restMockMvc.perform(get("/api/onboarding/applications")).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
         restMockMvc
             .perform(get("/api/onboarding/applications").param("status", "CREDENTIAL_REVIEW"))

@@ -27,7 +27,7 @@ import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
 import net.jojoaddison.repository.CategoryRepository;
 import net.jojoaddison.repository.OnboardingEventRepository;
@@ -284,7 +284,7 @@ class ProfileStatusOnEveryWriteIT {
     @Test
     void assigningAnOrganisationAnnouncesOnce() throws Exception {
         ProfessionalApplication application = applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(accountIdFor(CLINICIAN), OnboardingStatus.APPROVED).profileId(profile.getId())
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(CLINICIAN), ProfileStatus.APPROVED).profileId(profile.getId())
         );
         categoryRepository.save(new Category().id("cardiology").name("Cardiology"));
         clearInvocations(events);
@@ -329,7 +329,7 @@ class ProfileStatusOnEveryWriteIT {
         // requirements and it lives on the application, not on the profile or on any document.
         clearInvocations(events);
         applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(accountIdFor(CLINICIAN), OnboardingStatus.APPLICATION_STARTED).profileId(
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(CLINICIAN), ProfileStatus.APPLICATION_STARTED).profileId(
                 profile.getId()
             )
         );

@@ -42,21 +42,25 @@ import org.springframework.test.web.servlet.MockMvc;
  * Reproduced on the quality stack on 2026-09-09 with a positive control in the same request:
  * {@code firstName} changed, {@code title} stayed null, one 200.
  *
- * <p><b>Why the split is 2 / 5 rather than all-copy or all-refuse.</b> The seven are not alike, and
- * the argument is in {@link ProfileResource#PATCH_REFUSED_FIELDS}. In short: {@code title} and
- * {@code emergencyContact} are the clinician's own data, written by
+ * <p><b>Why some are applied and some refused, rather than all-copy or all-refuse.</b> They are not
+ * alike, and the argument is in {@code ProfileResource.PATCH_REFUSED_FIELDS} — read that map rather
+ * than any count written here, which is how {@code status} found this class's prose saying "2 / 5".
+ * In short: {@code title} and {@code emergencyContact} are the clinician's own data, written by
  * {@code OnboardingService.upsertOwnProfile} on exactly the same footing as the eleven already
- * copied; the other five have an owning endpoint with narrower authority than this one, and copying
- * them here would create a second writer that skips it.
+ * copied; every refused field has an owning endpoint with narrower authority than this one, and
+ * copying it here would create a second writer that skips that endpoint's checks — a 400 is the only
+ * answer that neither drops the write nor performs it unchecked.
  *
- * <p><b>The last test is the one that will still be right next year.</b> The seven named tests pin
- * today's seven; {@link #everyProfileFieldIsEitherAppliedOrRefused} reflects over {@code Profile}
+ * <p><b>The last test is the one that will still be right next year.</b> The named tests pin today's
+ * decisions one by one; {@link #everyProfileFieldIsEitherAppliedOrRefused} reflects over {@code Profile}
  * and requires an answer for <em>every</em> field, so a field added later — or restored by a
- * regeneration, since {@code .jhipster/Profile.json} lists all seven and would re-emit them into
+ * regeneration, since {@code .jhipster/Profile.json} lists all of them and would re-emit them into
  * {@code partialUpdate} — fails here until somebody decides which side it falls on. (It listed
- * <em>four</em> of the seven until backlog.md item 21 added the three push preferences that file had
- * been missing since MOB9, so the regeneration hazard named here is now larger than when it was
- * written, not smaller.) That is the
+ * <em>four</em> of the original seven until backlog.md item 21 added the three push preferences that
+ * file had been missing since MOB9, and {@code status} is in it too, so the regeneration hazard named
+ * here keeps growing rather than shrinking.) <b>It has now done its job once:</b> {@code status} was
+ * added to {@code Profile} with no writer anywhere in the service and no decision attached, and this
+ * test is what refused to let that reach the HTTP surface undecided. That is the
  * same reasoning as {@code TechnicalStructureTest.locationHeadersAreBuiltFromTheRequest}: a rule that
  * needs no maintained list cannot be outgrown by a list nobody updated.
  *
@@ -185,7 +189,7 @@ class ProfilePatchFieldCoverageIT {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // The five that are refused, one test each
+    // The refused ones, one test each
     // ---------------------------------------------------------------------------------------------
 
     /**
@@ -232,6 +236,15 @@ class ProfilePatchFieldCoverageIT {
     private static final String PREFERENCES_ENDPOINT = "PUT /api/notifications/preferences";
 
     /**
+     * The owner of {@code status}, per {@code PATCH_REFUSED_FIELDS}. It names one transition and
+     * gestures at the rest because there is no single endpoint: {@code /decide},
+     * {@code /organization}, {@code /authority-assigned}, {@code /roster-configured},
+     * {@code /activate}, {@code /suspend} and {@code /deactivate} each move the status, and all seven
+     * are {@code ROLE_ADMIN}.
+     */
+    private static final String ONBOARDING_TRANSITION_ENDPOINT = "PUT /api/onboarding/applications/{id}/decide";
+
+    /**
      * The specialty is assigned by {@code PUT /api/onboarding/applications/&#123;id&#125;/organization},
      * which is {@code ROLE_ADMIN} only and appends an {@code OnboardingEvent}. This endpoint is open
      * to six roles and appends nothing, so copying the field here would be a strictly weaker second
@@ -267,6 +280,21 @@ class ProfilePatchFieldCoverageIT {
     @Test
     void pushShowSenderNameIsRefusedRatherThanDropped() throws Exception {
         assertRefused("pushShowSenderName", PREFERENCES_ENDPOINT, "{\"id\":\"__ID__\",\"pushShowSenderName\":true}");
+    }
+
+    /**
+     * {@code status} is the state machine's own field, and this endpoint is not the state machine.
+     *
+     * <p>Every legal move between {@code ProfileStatus} values is a {@code ROLE_ADMIN}
+     * {@code PUT /api/onboarding/applications/&#123;id&#125;/**} that checks
+     * {@code OnboardingService.LEGAL_TRANSITIONS} and appends an {@code OnboardingEvent}. The probe
+     * below is deliberately a value no transition could reach from a fresh profile: applying it here
+     * would write an approval with no credential review before it and no event recording either,
+     * which is the one outcome the server-side machine exists to make impossible.
+     */
+    @Test
+    void statusIsRefusedRatherThanDropped() throws Exception {
+        assertRefused("status", ONBOARDING_TRANSITION_ENDPOINT, "{\"id\":\"__ID__\",\"status\":\"APPROVED\"}");
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -473,6 +501,12 @@ class ProfilePatchFieldCoverageIT {
         }
         if (type == EmergencyContact.class) {
             return "{\"name\":\"Probe Contact\"}";
+        }
+        // Enums by reflection rather than by name, so the next one added needs no edit here. Any
+        // constant differs from what storedClinician() holds, which is null for every enum field, so
+        // "applied" stays observable without the probe having to know which value is special.
+        if (type.isEnum()) {
+            return "\"" + type.getEnumConstants()[0] + "\"";
         }
         return fail(
             String.format(

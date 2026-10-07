@@ -10,7 +10,7 @@ import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
 
 /**
@@ -58,7 +58,7 @@ final class CompleteOnboardingFixture {
      * stamped. Callers chain whatever else their own subject needs — {@code login},
      * {@code requestedRole}, {@code profileId}, {@code source} — none of which the contract reads.
      */
-    static ProfessionalApplication consentedApplication(String accountId, OnboardingStatus status) {
+    static ProfessionalApplication consentedApplication(String accountId, ProfileStatus status) {
         return new ProfessionalApplication().accountId(accountId).status(status).consentAcceptedAt(Instant.now());
     }
 

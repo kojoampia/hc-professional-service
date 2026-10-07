@@ -272,4 +272,9 @@ public class PersonalDocumentService {
         log.debug("Request to delete PersonalDocument : {}", id);
         personalDocumentRepository.deleteById(id);
     }
+
+    public List<PersonalDocument> findAllByProfileId(String profileId) {
+        log.debug("Request to get all PersonalDocuments by profileId : {}", profileId);
+        return personalDocumentRepository.findAllByProfileId(profileId);
+    }
 }

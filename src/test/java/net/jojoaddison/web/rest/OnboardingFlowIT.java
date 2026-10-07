@@ -20,7 +20,7 @@ import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.Team;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
 import net.jojoaddison.repository.CategoryRepository;
 import net.jojoaddison.repository.OnboardingEventRepository;
@@ -247,7 +247,7 @@ class OnboardingFlowIT {
     @Test
     void reviewerEndpointsRequireAdmin() throws Exception {
         ProfessionalApplication application = applicationRepository.save(
-            new ProfessionalApplication().accountId("someone").status(OnboardingStatus.CREDENTIAL_REVIEW)
+            new ProfessionalApplication().accountId("someone").status(ProfileStatus.CREDENTIAL_REVIEW)
         );
         restMockMvc
             .perform(
@@ -266,7 +266,7 @@ class OnboardingFlowIT {
         // stamped from the fixture because this test skips the applicant steps that would normally set
         // it, and the transition to ACTIVE counts consent among the eight completion requirements.
         ProfessionalApplication application = applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), OnboardingStatus.CREDENTIAL_REVIEW).profileId(
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), ProfileStatus.CREDENTIAL_REVIEW).profileId(
                 profile.getId()
             )
         );

@@ -1,5 +1,6 @@
 package net.jojoaddison.repository;
 
+import java.util.List;
 import net.jojoaddison.domain.PersonalDocument;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
@@ -32,4 +33,6 @@ public interface PersonalDocumentRepository extends MongoRepository<PersonalDocu
         net.jojoaddison.domain.enumeration.DocumentType type,
         java.time.LocalDate date
     );
+
+    List<PersonalDocument> findAllByProfileId(String profileId);
 }

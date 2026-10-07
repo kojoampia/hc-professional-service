@@ -8,7 +8,7 @@ import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
@@ -101,7 +101,7 @@ public class ComplianceService {
         int renewed = 0;
         for (PersonalDocument license : expired) {
             ProfessionalApplication application = applicationRepository.findByProfileId(license.getProfileId()).orElse(null);
-            if (application == null || application.getStatus() != OnboardingStatus.ACTIVE) {
+            if (application == null || application.getStatus() != ProfileStatus.ACTIVE) {
                 continue;
             }
             if (onboardingService.hasCurrentVerifiedLicense(license.getProfileId())) {
@@ -117,7 +117,7 @@ public class ComplianceService {
             }
             onboardingService.markStatus(
                 application.getId(),
-                OnboardingStatus.SUSPENDED,
+                ProfileStatus.SUSPENDED,
                 LICENSE_EXPIRED_REASON + ": " + license.getId() + " expired " + license.getExpiryDate(),
                 actor
             );

@@ -11,7 +11,7 @@ import net.jojoaddison.domain.Category;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.Team;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.repository.CategoryRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
 import net.jojoaddison.repository.ProfileRepository;
@@ -194,7 +194,7 @@ class OrganizationReferenceIntegrityIT {
 
     private ProfessionalApplication approvedApplicationFor(Profile profile) {
         return applicationRepository.save(
-            new ProfessionalApplication().accountId(profile.getAccountId()).profileId(profile.getId()).status(OnboardingStatus.APPROVED)
+            new ProfessionalApplication().accountId(profile.getAccountId()).profileId(profile.getId()).status(ProfileStatus.APPROVED)
         );
     }
 
@@ -227,7 +227,7 @@ class OrganizationReferenceIntegrityIT {
             .isNull();
         assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus())
             .as("and does not advance the application either")
-            .isEqualTo(OnboardingStatus.APPROVED);
+            .isEqualTo(ProfileStatus.APPROVED);
     }
 
     @Test
@@ -255,7 +255,7 @@ class OrganizationReferenceIntegrityIT {
         onboardingService.assignOrganization(application.getId(), null, null, null, "admin");
 
         assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(
-            OnboardingStatus.ORGANIZATION_ASSIGNED
+            ProfileStatus.ORGANIZATION_ASSIGNED
         );
     }
 }

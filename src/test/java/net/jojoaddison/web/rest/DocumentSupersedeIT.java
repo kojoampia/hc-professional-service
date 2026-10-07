@@ -21,7 +21,7 @@ import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
 import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
@@ -198,7 +198,7 @@ class DocumentSupersedeIT {
     @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void theWatchlistTheMetricAndTheSweepAllForgetAnArchivedLicence() throws Exception {
         ProfessionalApplication application = applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), OnboardingStatus.ACTIVE)
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), ProfileStatus.ACTIVE)
                 .login(APPLICANT)
                 .profileId(profile.getId())
         );
@@ -239,7 +239,7 @@ class DocumentSupersedeIT {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.expiredLicenses").value(0))
             .andExpect(jsonPath("$.applicationsSuspended").value(0));
-        assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(OnboardingStatus.ACTIVE);
+        assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(ProfileStatus.ACTIVE);
 
         // Still two rows: the compliance surfaces stopped counting the old licence, they did not lose it.
         assertThat(personalDocumentRepository.findByProfileId(profile.getId())).hasSize(2);
@@ -249,7 +249,7 @@ class DocumentSupersedeIT {
     @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void aRejectedDocumentThatHasBeenReplacedCannotBlockApprovalForEver() throws Exception {
         ProfessionalApplication application = applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), OnboardingStatus.CREDENTIAL_REVIEW)
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), ProfileStatus.CREDENTIAL_REVIEW)
                 .login(APPLICANT)
                 .profileId(profile.getId())
         );
@@ -324,7 +324,7 @@ class DocumentSupersedeIT {
     @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void aBackdatedUploadDoesNotRetireAValidLicenceNorSuspendTheClinician() throws Exception {
         ProfessionalApplication application = applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), OnboardingStatus.ACTIVE)
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), ProfileStatus.ACTIVE)
                 .login(APPLICANT)
                 .profileId(profile.getId())
         );
@@ -343,7 +343,7 @@ class DocumentSupersedeIT {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.expiredLicenses").value(1))
             .andExpect(jsonPath("$.applicationsSuspended").value(0));
-        assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(OnboardingStatus.ACTIVE);
+        assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(ProfileStatus.ACTIVE);
 
         // The same typo made on the renewal path is refused outright, rather than archiving the row it
         // names. The clinician is told both dates, which is what they need to correct it.

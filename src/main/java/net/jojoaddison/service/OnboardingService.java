@@ -11,7 +11,7 @@ import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
 import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
@@ -66,53 +66,35 @@ public class OnboardingService {
         DocumentType.VOTERCARD
     );
 
-    private static final Map<OnboardingStatus, Set<OnboardingStatus>> LEGAL_TRANSITIONS = Map.ofEntries(
-        Map.entry(OnboardingStatus.APPLICATION_STARTED, EnumSet.of(OnboardingStatus.PROFILE_COMPLETED)),
-        Map.entry(OnboardingStatus.PROFILE_COMPLETED, EnumSet.of(OnboardingStatus.CREDENTIAL_REVIEW)),
+    private static final Map<ProfileStatus, Set<ProfileStatus>> LEGAL_TRANSITIONS = Map.ofEntries(
+        Map.entry(ProfileStatus.APPLICATION_STARTED, EnumSet.of(ProfileStatus.PROFILE_COMPLETED)),
+        Map.entry(ProfileStatus.PROFILE_COMPLETED, EnumSet.of(ProfileStatus.CREDENTIAL_REVIEW)),
         Map.entry(
-            OnboardingStatus.CREDENTIAL_REVIEW,
-            EnumSet.of(OnboardingStatus.APPROVED, OnboardingStatus.REJECTED, OnboardingStatus.RETURNED_FOR_CORRECTION)
+            ProfileStatus.CREDENTIAL_REVIEW,
+            EnumSet.of(ProfileStatus.APPROVED, ProfileStatus.REJECTED, ProfileStatus.RETURNED_FOR_CORRECTION)
+        ),
+        Map.entry(ProfileStatus.RETURNED_FOR_CORRECTION, EnumSet.of(ProfileStatus.PROFILE_COMPLETED, ProfileStatus.CREDENTIAL_REVIEW)),
+        Map.entry(
+            ProfileStatus.APPROVED,
+            EnumSet.of(ProfileStatus.ORGANIZATION_ASSIGNED, ProfileStatus.SUSPENDED, ProfileStatus.EXPIRED, ProfileStatus.DEACTIVATED)
         ),
         Map.entry(
-            OnboardingStatus.RETURNED_FOR_CORRECTION,
-            EnumSet.of(OnboardingStatus.PROFILE_COMPLETED, OnboardingStatus.CREDENTIAL_REVIEW)
+            ProfileStatus.ORGANIZATION_ASSIGNED,
+            EnumSet.of(ProfileStatus.AUTHORITY_ASSIGNED, ProfileStatus.SUSPENDED, ProfileStatus.EXPIRED, ProfileStatus.DEACTIVATED)
         ),
         Map.entry(
-            OnboardingStatus.APPROVED,
-            EnumSet.of(
-                OnboardingStatus.ORGANIZATION_ASSIGNED,
-                OnboardingStatus.SUSPENDED,
-                OnboardingStatus.EXPIRED,
-                OnboardingStatus.DEACTIVATED
-            )
+            ProfileStatus.AUTHORITY_ASSIGNED,
+            EnumSet.of(ProfileStatus.ROSTER_CONFIGURED, ProfileStatus.SUSPENDED, ProfileStatus.EXPIRED, ProfileStatus.DEACTIVATED)
         ),
         Map.entry(
-            OnboardingStatus.ORGANIZATION_ASSIGNED,
-            EnumSet.of(
-                OnboardingStatus.AUTHORITY_ASSIGNED,
-                OnboardingStatus.SUSPENDED,
-                OnboardingStatus.EXPIRED,
-                OnboardingStatus.DEACTIVATED
-            )
+            ProfileStatus.ROSTER_CONFIGURED,
+            EnumSet.of(ProfileStatus.ACTIVE, ProfileStatus.SUSPENDED, ProfileStatus.EXPIRED, ProfileStatus.DEACTIVATED)
         ),
-        Map.entry(
-            OnboardingStatus.AUTHORITY_ASSIGNED,
-            EnumSet.of(
-                OnboardingStatus.ROSTER_CONFIGURED,
-                OnboardingStatus.SUSPENDED,
-                OnboardingStatus.EXPIRED,
-                OnboardingStatus.DEACTIVATED
-            )
-        ),
-        Map.entry(
-            OnboardingStatus.ROSTER_CONFIGURED,
-            EnumSet.of(OnboardingStatus.ACTIVE, OnboardingStatus.SUSPENDED, OnboardingStatus.EXPIRED, OnboardingStatus.DEACTIVATED)
-        ),
-        Map.entry(OnboardingStatus.ACTIVE, EnumSet.of(OnboardingStatus.SUSPENDED, OnboardingStatus.EXPIRED, OnboardingStatus.DEACTIVATED)),
-        Map.entry(OnboardingStatus.SUSPENDED, EnumSet.of(OnboardingStatus.ACTIVE, OnboardingStatus.EXPIRED, OnboardingStatus.DEACTIVATED)),
-        Map.entry(OnboardingStatus.EXPIRED, EnumSet.of(OnboardingStatus.CREDENTIAL_REVIEW, OnboardingStatus.DEACTIVATED)),
-        Map.entry(OnboardingStatus.REJECTED, EnumSet.noneOf(OnboardingStatus.class)),
-        Map.entry(OnboardingStatus.DEACTIVATED, EnumSet.noneOf(OnboardingStatus.class))
+        Map.entry(ProfileStatus.ACTIVE, EnumSet.of(ProfileStatus.SUSPENDED, ProfileStatus.EXPIRED, ProfileStatus.DEACTIVATED)),
+        Map.entry(ProfileStatus.SUSPENDED, EnumSet.of(ProfileStatus.ACTIVE, ProfileStatus.EXPIRED, ProfileStatus.DEACTIVATED)),
+        Map.entry(ProfileStatus.EXPIRED, EnumSet.of(ProfileStatus.CREDENTIAL_REVIEW, ProfileStatus.DEACTIVATED)),
+        Map.entry(ProfileStatus.REJECTED, EnumSet.noneOf(ProfileStatus.class)),
+        Map.entry(ProfileStatus.DEACTIVATED, EnumSet.noneOf(ProfileStatus.class))
     );
 
     private final ProfessionalApplicationRepository applicationRepository;
@@ -166,12 +148,12 @@ public class OnboardingService {
                 .accountId(accountId)
                 .login(login)
                 .requestedRole(requestedRole)
-                .status(OnboardingStatus.APPLICATION_STARTED)
+                .status(ProfileStatus.APPLICATION_STARTED)
                 .consentAcceptedAt(Instant.now())
                 .invitedBy(invitedBy)
                 .source(normalizeSource(source))
         );
-        appendEvent(application, null, OnboardingStatus.APPLICATION_STARTED, "application started");
+        appendEvent(application, null, ProfileStatus.APPLICATION_STARTED, "application started");
         domainEventPublisher.publishEntityCreated(
             "ProfessionalApplication",
             application.getId(),
@@ -340,7 +322,7 @@ public class OnboardingService {
             .findByAccountId(accountId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "No profile exists for this account yet"));
         application.profileId(profile.getId());
-        return transition(application, OnboardingStatus.PROFILE_COMPLETED, accountId, "profile completed");
+        return transition(application, ProfileStatus.PROFILE_COMPLETED, accountId, "profile completed");
     }
 
     public ProfessionalApplication submitForReview(String accountId) {
@@ -349,7 +331,7 @@ public class OnboardingService {
         application.submittedAt(Instant.now());
         ProfessionalApplication saved = transition(
             application,
-            OnboardingStatus.CREDENTIAL_REVIEW,
+            ProfileStatus.CREDENTIAL_REVIEW,
             accountId,
             "submitted for credential review"
         );
@@ -362,23 +344,19 @@ public class OnboardingService {
 
     public ProfessionalApplication decide(
         String applicationId,
-        OnboardingStatus decision,
+        ProfileStatus decision,
         String reason,
         String correctionNotes,
         String actor
     ) {
-        if (
-            decision != OnboardingStatus.APPROVED &&
-            decision != OnboardingStatus.REJECTED &&
-            decision != OnboardingStatus.RETURNED_FOR_CORRECTION
-        ) {
+        if (decision != ProfileStatus.APPROVED && decision != ProfileStatus.REJECTED && decision != ProfileStatus.RETURNED_FOR_CORRECTION) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Decision must be APPROVED, REJECTED or RETURNED_FOR_CORRECTION");
         }
-        if (decision != OnboardingStatus.APPROVED && (reason == null || reason.isBlank())) {
+        if (decision != ProfileStatus.APPROVED && (reason == null || reason.isBlank())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Rejection or correction requires a reviewer reason");
         }
         ProfessionalApplication application = getById(applicationId);
-        if (decision == OnboardingStatus.APPROVED) {
+        if (decision == ProfileStatus.APPROVED) {
             requireAllMandatoryDocumentsVerified(application);
         }
         application.decidedBy(actor).decidedAt(Instant.now()).decisionReason(reason).correctionNotes(correctionNotes);
@@ -407,24 +385,24 @@ public class OnboardingService {
         }
         profileRepository.save(profile);
         log.debug("Organization context assigned to profile {} (supervisor {})", profile.getId(), supervisorProfileId);
-        return transition(application, OnboardingStatus.ORGANIZATION_ASSIGNED, actor, "organization context assigned");
+        return transition(application, ProfileStatus.ORGANIZATION_ASSIGNED, actor, "organization context assigned");
     }
 
-    public ProfessionalApplication markStatus(String applicationId, OnboardingStatus target, String reason, String actor) {
+    public ProfessionalApplication markStatus(String applicationId, ProfileStatus target, String reason, String actor) {
         ProfessionalApplication application = getById(applicationId);
-        if (target == OnboardingStatus.ACTIVE) {
+        if (target == ProfileStatus.ACTIVE) {
             // A profile goes ACTIVE only when it is complete AND vetted. The vetting half is the
             // APPROVED -> ... -> ACTIVE chain, which only an admin can drive; this is the other
             // half, and it is checked here rather than in the client because an admin activating an
             // incomplete application is a bug, not a shortcut.
             requireCompleteProfile(application);
             // WP7 reactivation guard: leaving SUSPENDED additionally requires a current license.
-            if (application.getStatus() == OnboardingStatus.SUSPENDED) {
+            if (application.getStatus() == ProfileStatus.SUSPENDED) {
                 requireCurrentVerifiedLicense(application);
             }
         }
         ProfessionalApplication saved = transition(application, target, actor, reason);
-        if (target == OnboardingStatus.ACTIVE) {
+        if (target == ProfileStatus.ACTIVE) {
             domainEventPublisher.publishOnboardingState("ACTIVE", saved.getAccountId(), saved.getId(), saved.getRequestedRole(), actor);
         }
         return saved;
@@ -488,7 +466,7 @@ public class OnboardingService {
         );
     }
 
-    public List<ProfessionalApplication> listApplications(OnboardingStatus status) {
+    public List<ProfessionalApplication> listApplications(ProfileStatus status) {
         if (status == null) {
             return applicationRepository.findAll(
                 org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "submittedAt")
@@ -587,8 +565,8 @@ public class OnboardingService {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Application not found"));
     }
 
-    private ProfessionalApplication transition(ProfessionalApplication application, OnboardingStatus to, String actor, String reason) {
-        OnboardingStatus from = application.getStatus();
+    private ProfessionalApplication transition(ProfessionalApplication application, ProfileStatus to, String actor, String reason) {
+        ProfileStatus from = application.getStatus();
         if (from == null || !LEGAL_TRANSITIONS.getOrDefault(from, Set.of()).contains(to)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Illegal onboarding transition " + from + " -> " + to);
         }
@@ -598,7 +576,7 @@ public class OnboardingService {
         return saved;
     }
 
-    private void appendEvent(ProfessionalApplication application, OnboardingStatus from, OnboardingStatus to, String reason) {
+    private void appendEvent(ProfessionalApplication application, ProfileStatus from, ProfileStatus to, String reason) {
         eventRepository.save(
             new OnboardingEvent()
                 .applicationId(application.getId())

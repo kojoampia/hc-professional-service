@@ -14,7 +14,7 @@ public interface ProfessionalApplicationRepository extends MongoRepository<Profe
 
     Optional<ProfessionalApplication> findByProfileId(String profileId);
 
-    java.util.List<ProfessionalApplication> findByStatusOrderBySubmittedAtDesc(net.jojoaddison.domain.enumeration.OnboardingStatus status);
+    java.util.List<ProfessionalApplication> findByStatusOrderBySubmittedAtDesc(net.jojoaddison.domain.enumeration.ProfileStatus status);
 
     /**
      * Backs role broadcast in messaging: who currently holds a given clinical authority.
@@ -26,6 +26,6 @@ public interface ProfessionalApplicationRepository extends MongoRepository<Profe
      */
     java.util.List<ProfessionalApplication> findByRequestedRoleAndStatus(
         String requestedRole,
-        net.jojoaddison.domain.enumeration.OnboardingStatus status
+        net.jojoaddison.domain.enumeration.ProfileStatus status
     );
 }

@@ -92,7 +92,14 @@ public class ProfileResource {
      * The fields a merge-patch here may not change, and the endpoint that does set each
      * (backlog.md item 60).
      *
-     * <h2>Why five refusals and two applications, rather than copying all seven</h2>
+     * <h2>Why refusals and applications, rather than copying every field {@code partialUpdate} missed</h2>
+     *
+     * <p><b>Read the set below rather than a count.</b> This heading named "five refusals and two
+     * applications" until {@code Profile.status} arrived and made it six and two, which is the shape
+     * of staleness this whole class is annotated against — a number maintained by hand in prose that
+     * nothing compiles. {@code ProfilePatchFieldCoverageIT.everyProfileFieldIsEitherAppliedOrRefused}
+     * is what forces the decision for a field added later; it is not able to force a decision about a
+     * sentence.
      *
      * <p>{@code ProfileService.partialUpdate} copied eleven of {@code Profile}'s fields and stopped,
      * so a patch naming any of the other seven answered 200 with the row unchanged and the
@@ -110,7 +117,7 @@ public class ProfileResource {
      * fields this endpoint has always let the same six roles change. Refusing them would expose no
      * less data and would leave no way to correct a title short of a whole-document {@code PUT}.
      *
-     * <p><b>The five below are refused, because each already has an owner with narrower authority
+     * <p><b>The fields below are refused, because each already has an owner with narrower authority
      * than this endpoint.</b> {@code PATCH /api/profiles/&#123;id&#125;} is open to all six
      * {@code CLINICAL_MUTATION} roles and carries no ownership check, so it is the <em>weakest</em>
      * write path in the service:
@@ -126,12 +133,23 @@ public class ProfileResource {
      *       writes the <em>caller's own</em> profile and no one else's. Copying them here would let
      *       one clinician switch off another's compliance notifications — the nudge that says their
      *       licence is about to expire — and the victim would see nothing.</li>
+     *   <li>{@code status} is the sixth, and it is the one that could not be anything else.
+     *       {@code ProfileStatus} is the alphabet of {@code OnboardingService}'s server-side state
+     *       machine, and every legal move between its values is a {@code ROLE_ADMIN}
+     *       {@code PUT /api/onboarding/applications/&#123;id&#125;/**} that checks
+     *       {@code LEGAL_TRANSITIONS} and appends an {@code OnboardingEvent}. A merge-patch here
+     *       checks nothing and appends nothing, so copying the field would let any of six roles
+     *       write {@code APPROVED} over {@code APPLICATION_STARTED} — jumping credential review
+     *       outright — and leave an application whose own history does not contain the step that
+     *       approved it. The refusal is also the <em>only</em> writer story this field has today:
+     *       nothing in the service sets {@code Profile.status} yet, so a patch is the first thing
+     *       that would, and it would do it without the machine.</li>
      * </ul>
      *
      * <p><b>Three shapes were rejected.</b> <em>Copy all seven</em> creates those two weaker second
      * writers, and independently loses data: {@code Profile.teamIds} is initialised to an empty list,
      * so a {@code != null} guard of the shape the eleven use fires on every patch and would empty a
-     * clinician's teams whenever they changed a phone number. <em>Gate the sensitive five by
+     * clinician's teams whenever they changed a phone number. <em>Gate the sensitive ones by
      * authority</em> reads well but answers the wrong question — an admin is not the missing
      * ingredient, an {@code OnboardingEvent} and an ownership check are, and both already exist one
      * endpoint over; it would also make the same request succeed or fail depending on who sent it,
@@ -151,7 +169,9 @@ public class ProfileResource {
         "pushComplianceEnabled",
         "PUT /api/notifications/preferences",
         "pushShowSenderName",
-        "PUT /api/notifications/preferences"
+        "PUT /api/notifications/preferences",
+        "status",
+        "PUT /api/onboarding/applications/{id}/decide and the transitions beside it"
     );
 
     @Value("${jhipster.clientApp.name}")
@@ -230,7 +250,7 @@ public class ProfileResource {
      * colleague's profile before that colleague onboards — the unique sparse index refuses a second
      * row for a login that already has one, but it says nothing about a login that does not yet, and
      * {@code upsertOwnProfile} then adopts whatever was planted, push preferences and organisation
-     * included; it would also need item 60's five-field refusal duplicated onto the create path, and
+     * included; it would also need item 60's field refusals duplicated onto the create path, and
      * item 50 will turn the identifier the caller types into a {@code User.id}, which is the value
      * item 55 had to gate an enumeration endpoint over. <em>Add an admin link endpoint</em> is
      * narrower and auditable, but the {@code OnboardingEvent} that would make it auditable has
@@ -355,7 +375,7 @@ public class ProfileResource {
      * does not own (backlog.md item 60).
      *
      * <p><b>The refusal is on a change, not on the mention.</b> A client that GETs a profile, edits
-     * one field and PATCHes the whole document back names all five of these at their current values,
+     * one field and PATCHes the whole document back names every one of these at its current value,
      * and refusing that would make the honest answer unusable. Carrying a value forward unchanged is
      * not a dropped write, because nothing the caller asked for went missing.
      *
@@ -379,6 +399,9 @@ public class ProfileResource {
         }
         if (changes(patch, "pushShowSenderName", incoming.getPushShowSenderName(), stored.getPushShowSenderName())) {
             refused.add("pushShowSenderName");
+        }
+        if (changes(patch, "status", incoming.getStatus(), stored.getStatus())) {
+            refused.add("status");
         }
         if (!refused.isEmpty()) {
             String detail = refused.stream().map(field -> field + " is set by " + PATCH_REFUSED_FIELDS.get(field)).collect(joining("; "));

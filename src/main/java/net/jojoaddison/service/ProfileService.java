@@ -86,16 +86,17 @@ public class ProfileService {
     /**
      * Partially update a profile.
      *
-     * <p><b>Thirteen fields, and the other five are guaranteed absent rather than ignored here.</b>
+     * <p><b>The fields this method does not copy are guaranteed absent rather than ignored here.</b>
      * This copied eleven and stopped, so a merge-patch naming {@code title},
      * {@code emergencyContact}, {@code specialtyCategoryId}, {@code teamIds} or one of the three push
      * preferences answered 200 with the row unchanged and the unmodified profile as the body —
      * backlog.md item 60. {@code title} and {@code emergencyContact} join the eleven below;
-     * {@link net.jojoaddison.web.rest.ProfileResource} refuses the other five with a 400 before this
-     * method is reached, and the argument for that split lives there because it is an argument about
-     * the HTTP surface.
+     * {@code ProfileResource.PATCH_REFUSED_FIELDS} names the rest and refuses
+     * each with a 400 before this method is reached, and the argument for that split lives there
+     * because it is an argument about the HTTP surface. Read that map rather than a count: the set
+     * grew by {@code status} after this sentence was first written.
      *
-     * <p>So this method is deliberately <em>not</em> the place that guards the five: it cannot be.
+     * <p>So this method is deliberately <em>not</em> the place that guards them: it cannot be.
      * Whether a merge-patch <em>named</em> a field is a fact about the JSON document, and by the time
      * a {@link Profile} has been bound an absent {@code teamIds} and an explicitly empty one are the
      * same empty list — the field is initialised, so a {@code != null} guard of the shape used below

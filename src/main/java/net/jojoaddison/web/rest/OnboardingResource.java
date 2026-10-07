@@ -3,7 +3,7 @@ package net.jojoaddison.web.rest;
 import java.util.List;
 import net.jojoaddison.domain.OnboardingEvent;
 import net.jojoaddison.domain.ProfessionalApplication;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.security.AuthoritiesConstants;
 import net.jojoaddison.security.SecurityUtils;
 import net.jojoaddison.service.OnboardingService;
@@ -42,7 +42,7 @@ public class OnboardingResource {
 
     public record StartApplicationRequest(String requestedRole, boolean consentAccepted, String source) {}
 
-    public record DecisionRequest(OnboardingStatus decision, String reason, String correctionNotes) {}
+    public record DecisionRequest(ProfileStatus decision, String reason, String correctionNotes) {}
 
     public record OrganizationRequest(String specialtyCategoryId, List<String> teamIds, String supervisorProfileId) {}
 
@@ -88,7 +88,7 @@ public class OnboardingResource {
     @GetMapping("/applications")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public List<ProfessionalApplication> listApplications(
-        @org.springframework.web.bind.annotation.RequestParam(value = "status", required = false) OnboardingStatus status
+        @org.springframework.web.bind.annotation.RequestParam(value = "status", required = false) ProfileStatus status
     ) {
         return onboardingService.listApplications(status);
     }
@@ -167,31 +167,31 @@ public class OnboardingResource {
     @PutMapping("/applications/{id}/authority-assigned")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ProfessionalApplication markAuthorityAssigned(@PathVariable String id) {
-        return onboardingService.markStatus(id, OnboardingStatus.AUTHORITY_ASSIGNED, "clinical authority assigned", currentActor());
+        return onboardingService.markStatus(id, ProfileStatus.AUTHORITY_ASSIGNED, "clinical authority assigned", currentActor());
     }
 
     @PutMapping("/applications/{id}/roster-configured")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ProfessionalApplication markRosterConfigured(@PathVariable String id) {
-        return onboardingService.markStatus(id, OnboardingStatus.ROSTER_CONFIGURED, "duty roster configured", currentActor());
+        return onboardingService.markStatus(id, ProfileStatus.ROSTER_CONFIGURED, "duty roster configured", currentActor());
     }
 
     @PutMapping("/applications/{id}/activate")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ProfessionalApplication activate(@PathVariable String id) {
-        return onboardingService.markStatus(id, OnboardingStatus.ACTIVE, "professional access activated", currentActor());
+        return onboardingService.markStatus(id, ProfileStatus.ACTIVE, "professional access activated", currentActor());
     }
 
     @PutMapping("/applications/{id}/suspend")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ProfessionalApplication suspend(@PathVariable String id, @RequestBody StatusRequest request) {
-        return onboardingService.markStatus(id, OnboardingStatus.SUSPENDED, request.reason(), currentActor());
+        return onboardingService.markStatus(id, ProfileStatus.SUSPENDED, request.reason(), currentActor());
     }
 
     @PutMapping("/applications/{id}/deactivate")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ProfessionalApplication deactivate(@PathVariable String id, @RequestBody StatusRequest request) {
-        return onboardingService.markStatus(id, OnboardingStatus.DEACTIVATED, request.reason(), currentActor());
+        return onboardingService.markStatus(id, ProfileStatus.DEACTIVATED, request.reason(), currentActor());
     }
 
     private void assertAdminOrOwner(ProfessionalApplication application) {
