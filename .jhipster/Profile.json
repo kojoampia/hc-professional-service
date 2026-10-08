@@ -47,7 +47,8 @@
     },
     {
       "fieldName": "sex",
-      "fieldType": "String"
+      "fieldType": "Sex",
+      "fieldValues": "FEMALE,MALE"
     },
     {
       "fieldName": "mobilePhone",
@@ -63,7 +64,8 @@
     },
     {
       "fieldName": "cardType",
-      "fieldType": "String"
+      "fieldType": "DocumentType",
+      "fieldValues": "PASSPORT,CERTIFICATE,LICENSE,GHANACARD,PASSPHOTO,DRIVERLICENSE,VOTERCARD,NHIS,OTHER"
     },
     {
       "fieldName": "cardNumber",

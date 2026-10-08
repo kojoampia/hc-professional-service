@@ -139,9 +139,8 @@ class OnboardingContractsIT {
      *
      * <p><b>The next of kin is asserted under BOTH names, which is the contract since profile.md's
      * T1.</b> {@code contacts} is the stored field and the one the specification names;
-     * {@code emergencyContact} is a wire alias projecting its first element, kept because
-     * {@code PUT /api/onboarding/profile} is still live and two shipped clients still speak it —
-     * {@code web/} until T6 and <b>{@code mobile/}, which no task moves at all</b>. Asserting only
+     * {@code emergencyContact} is a wire alias projecting its first element, kept because two
+     * shipped clients still speak it on {@code PUT /api/profile} — dropping it is T6's. Asserting only
      * the new name would let the alias be deleted with every test green and the mobile Me tab
      * silently unable to save a next of kin; asserting only the old one would let the field it
      * projects be lost under it.

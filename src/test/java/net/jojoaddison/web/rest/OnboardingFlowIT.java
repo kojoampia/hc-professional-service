@@ -189,7 +189,7 @@ class OnboardingFlowIT {
     void applicantUpsertsOwnProfileThroughOnboardingSurface() throws Exception {
         restMockMvc
             .perform(
-                put("/api/onboarding/profile")
+                put("/api/profile")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"firstName\":\"Fresh\",\"lastName\":\"Applicant\",\"accountId\":\"spoofed\",\"title\":\"RN\"}")
             )
@@ -199,7 +199,7 @@ class OnboardingFlowIT {
         // update keeps the same profile (no duplicate)
         restMockMvc
             .perform(
-                put("/api/onboarding/profile")
+                put("/api/profile")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"firstName\":\"Fresher\",\"lastName\":\"Applicant\"}")
             )

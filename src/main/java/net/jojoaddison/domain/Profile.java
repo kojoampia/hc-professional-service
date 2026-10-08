@@ -8,7 +8,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import net.jojoaddison.domain.enumeration.DocumentType;
 import net.jojoaddison.domain.enumeration.ProfileStatus;
+import net.jojoaddison.domain.enumeration.Sex;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedBy;
@@ -78,8 +80,18 @@ public class Profile implements Serializable {
     @Field("birth_date")
     private LocalDate birthDate;
 
+    /**
+     * {@code FEMALE} or {@code MALE}, and nothing else — typed since F9 (profile.md's Profile model
+     * types this field {@code enum} and names {@code sex.enum.ts - &#123;'FEMALE','MALE'&#125;}).
+     *
+     * <p><b>It was a free-text {@code String}</b>, so {@code &#123;"sex":"banana"&#125;} stored and
+     * answered 200 — and {@code OnboardingService.personalDetailsComplete} counted it as provided,
+     * because the only thing it could check was that there was text. An invalid value is now refused
+     * with a 400 by the binding rather than persisted; {@code ProfileEnumValueMigration} deals with
+     * what was already stored.
+     */
     @Field("sex")
-    private String sex;
+    private Sex sex;
 
     @Field("mobile_phone")
     private String mobilePhone;
@@ -93,8 +105,22 @@ public class Profile implements Serializable {
     @Field("address")
     private Address address;
 
+    /**
+     * Which identity document {@link #cardNumber} is the number of — typed since F9.
+     *
+     * <p>{@code profile.md} types this field {@code enum} and names its vocabulary explicitly:
+     * <b>{@code PersonalDocumentType: types.enum.ts}</b>. That is {@link DocumentType} on this side
+     * — the same nine members {@code PersonalDocument.type} already uses, which is the point: a card
+     * type and a document type are the same vocabulary and were two different ones (one of them
+     * free text) until this change. {@code &#123;"cardType":"loyalty card"&#125;} stored and
+     * answered 200.
+     *
+     * <p>⚠ It is deliberately <b>not</b> narrowed to {@code IDENTITY_TYPES}, the four
+     * {@code OnboardingService} accepts as government identity. The specification names the whole
+     * enumeration, and a narrower type here would make a value the specification admits unstorable.
+     */
     @Field("card_type")
-    private String cardType;
+    private DocumentType cardType;
 
     @Field("card_number")
     private String cardNumber;
@@ -163,8 +189,8 @@ public class Profile implements Serializable {
      * {@code lastModifiedBy} straight onto its dashboard (backlog.md item 47 § 2b), so a write path
      * that forgot to stamp them would not fail anything here and would show a stale date over there.
      * {@code @EnableMongoAuditing} is already on in {@code DatabaseConfiguration}, so every path that
-     * saves a {@code Profile} — {@code ProfileService}, {@code OnboardingService.upsertOwnProfile},
-     * the repository directly — stamps them without knowing it has to.
+     * saves a {@code Profile} — {@code ProfileService}, the repository directly — stamps them
+     * without knowing it has to.
      *
      * <p><b>Null on every profile written before this field existed</b>, and that is left alone
      * rather than backfilled: Mongo has no migration framework here, and inventing a creation date
@@ -293,16 +319,16 @@ public class Profile implements Serializable {
         this.birthDate = birthDate;
     }
 
-    public String getSex() {
+    public Sex getSex() {
         return this.sex;
     }
 
-    public Profile sex(String sex) {
+    public Profile sex(Sex sex) {
         this.setSex(sex);
         return this;
     }
 
-    public void setSex(String sex) {
+    public void setSex(Sex sex) {
         this.sex = sex;
     }
 
@@ -345,16 +371,16 @@ public class Profile implements Serializable {
         this.email = email;
     }
 
-    public String getCardType() {
+    public DocumentType getCardType() {
         return this.cardType;
     }
 
-    public Profile cardType(String cardType) {
+    public Profile cardType(DocumentType cardType) {
         this.setCardType(cardType);
         return this;
     }
 
-    public void setCardType(String cardType) {
+    public void setCardType(DocumentType cardType) {
         this.cardType = cardType;
     }
 

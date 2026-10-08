@@ -231,7 +231,8 @@ public class AccountIdMigrationService {
             String resolved = loginToAccountId.get(value.toLowerCase(Locale.ROOT));
             if (resolved == null) {
                 // Before giving up on a row, ask the field item 48 added for exactly this value.
-                // `account_uid` was only ever written by `upsertOwnProfile` from the caller's own
+                // `account_uid` was only ever written by the retired `upsertOwnProfile` from the
+                // caller's own
                 // issuer-checked `uid` claim, so where it is present it holds a `User.id` this
                 // gateway minted for this profile's owner — which is what item 50 is looking for.
                 //

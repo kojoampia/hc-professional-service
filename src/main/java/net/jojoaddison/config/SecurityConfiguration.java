@@ -140,7 +140,7 @@ public class SecurityConfiguration {
                     // below. What was decided is who may READ a profile that is not theirs.
                     //
                     // A CLINICIAN'S OWN PROFILE IS NOT REACHED THROUGH HERE and never was:
-                    // GET /api/onboarding/profile resolves the caller from the uid claim and takes no
+                    // GET /api/profile resolves the caller from the uid claim and takes no
                     // subject at all, so it cannot name anyone else and stays .authenticated() above.
                     // Do not add a self-exception to this rule — a subject-addressed endpoint that
                     // excuses the caller has to compare caller against path, which is the shape that

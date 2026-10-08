@@ -200,6 +200,6 @@ class AccountIdMigrationIT {
     void aTokenWithNoAccountIdClaimIsRefusedRatherThanResolvedToItsLogin() throws Exception {
         profileRepository.save(new Profile().accountId(KNOWN_LOGIN).firstName("Ama"));
 
-        restMockMvc.perform(get("/api/onboarding/profile")).andExpect(status().isUnauthorized());
+        restMockMvc.perform(get("/api/profile")).andExpect(status().isUnauthorized());
     }
 }

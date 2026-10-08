@@ -20,10 +20,6 @@
       "fieldType": "String"
     },
     {
-      "fieldName": "areaCode",
-      "fieldType": "String"
-    },
-    {
       "fieldName": "town",
       "fieldType": "String"
     },
@@ -33,10 +29,6 @@
     },
     {
       "fieldName": "district",
-      "fieldType": "String"
-    },
-    {
-      "fieldName": "state",
       "fieldType": "String"
     },
     {

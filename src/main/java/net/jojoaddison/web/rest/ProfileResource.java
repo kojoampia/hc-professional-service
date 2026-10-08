@@ -6,6 +6,7 @@ import java.util.Optional;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.security.AuthoritiesConstants;
+import net.jojoaddison.security.SecurityUtils;
 import net.jojoaddison.service.ProfileService;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
 import org.slf4j.Logger;
@@ -23,7 +24,6 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
@@ -37,7 +37,42 @@ import tools.jackson.databind.node.ObjectNode;
 /**
  * REST controller for managing {@link net.jojoaddison.domain.Profile}.
  *
- * <h2>Every read here is {@code ROLE_ADMIN} (backlog.md item 143)</h2>
+ * <h2>⭐ TWO SURFACES IN ONE CLASS, GATED PER HANDLER — and that is {@code profile.md}'s doing (F3)</h2>
+ *
+ * <p>{@code profile.md} names this file, by path, as the one that serves {@code api/profile}:
+ * <i>"{@code api/profile} - create ProfileResource and ProfileService if not existent …
+ * {@code src/main/java/net/jojoaddison/web/rest/ProfileResource.java}"</i>. So:
+ *
+ * <table>
+ *   <caption>The two paths this class serves</caption>
+ *   <tr><th>path</th><th>subject</th><th>gate</th></tr>
+ *   <tr><td>{@code /api/profile} — {@link #SINGULAR}</td><td>none; the caller's own, from the
+ *       {@code uid} claim</td><td>{@code .authenticated()}</td></tr>
+ *   <tr><td>{@code /api/profiles/**} — {@link #PLURAL}</td><td>named in the path</td>
+ *       <td>{@code ROLE_ADMIN} to read, {@code CLINICAL_MUTATION} to write</td></tr>
+ * </table>
+ *
+ * <p>There is <b>no class-level {@code @RequestMapping}</b>, because a class-level prefix cannot be
+ * opted out of per handler. Each handler spells its own path.
+ *
+ * <p>⛔ <b>This was two classes until F3, and the javadoc of the one that went argued against ever
+ * merging them: "one class should not hold two answers to who may call this". That reasoning was
+ * overruled by the owner and is not to be restated.</b> The specification names this file; "the
+ * existing split is safer" is not an argument against building what was specified. What the merged
+ * class owes instead is <b>evidence</b>, because the per-handler gating is now the only thing
+ * keeping the two surfaces apart:
+ *
+ * <ul>
+ *   <li>{@code ClinicalAuthorityMatrixIT.theSingularOwnProfilePathDoesNotOpenThePluralAdminReads} —
+ *       an applicant holding {@code ROLE_USER} and nothing else reaches {@code GET}/{@code PUT
+ *       /api/profile} and is refused every {@code /api/profiles} read.</li>
+ *   <li>{@code HEAD} beside {@code GET} on <b>both</b> paths, because Spring MVC dispatches a
+ *       {@code HEAD} to the {@code @GetMapping} handler and a body-less read of the plural path is
+ *       an existence oracle on its own status line — that is backlog.md item 143, and it is why the
+ *       filter-chain rules here are method-agnostic rather than scoped to {@code HttpMethod.GET}.</li>
+ * </ul>
+ *
+ * <h2>Every read on {@link #PLURAL} is {@code ROLE_ADMIN} (backlog.md item 143)</h2>
  *
  * <p><b>Because every read here names its subject in the path, and an endpoint that takes a subject
  * cannot be gated by authentication</b> — every caller is authenticated as somebody, and the subject
@@ -68,21 +103,42 @@ import tools.jackson.databind.node.ObjectNode;
  * <p><b>Writes are unchanged</b> and still admit {@code CLINICAL_MUTATION}'s six. What item 143
  * decided is who may read a profile that is not theirs.
  *
- * <p>⛔ <b>A clinician reading their own profile does not come through here, and no self-exception
- * belongs here.</b> {@code GET /api/onboarding/profile} resolves the caller from the {@code uid}
- * claim and takes no subject at all — {@code mobile/}'s {@code profile-api.service.ts} already calls
- * exactly that, and {@code web/} calls this resource nowhere — so identity really is the boundary
- * there and an authority check would constrain nothing further. Excusing the caller on a
- * subject-addressed path means comparing caller against path, which is the shape that gets it wrong;
- * the endpoint that cannot name anyone else is the one that cannot leak anyone else.
+ * <p>⛔ <b>A clinician reading their own profile does not come through the plural path, and no
+ * self-exception belongs on it.</b> It comes through {@link #getOwnProfile()} — {@code GET
+ * /api/profile}, which resolves the caller from the {@code uid} claim and takes no subject at all,
+ * so identity really is the boundary there and an authority check would constrain nothing further.
+ * Excusing the caller on a subject-addressed path means comparing caller against path, which is the
+ * shape that gets it wrong; the endpoint that cannot name anyone else is the one that cannot leak
+ * anyone else. <b>That those two endpoints now share a class changes neither statement</b> — the
+ * singular handlers take no {@code @PathVariable} and the plural ones have no self-carve-out, and
+ * the two facts are independent of where the code lives.
  */
 @RestController
-@RequestMapping("/api/profiles")
 public class ProfileResource {
 
     private final Logger log = LoggerFactory.getLogger(ProfileResource.class);
 
     private static final String ENTITY_NAME = "professionalMsProfile";
+
+    /**
+     * The admin collection — {@code ROLE_ADMIN} on every read, {@code CLINICAL_MUTATION} on every
+     * write. Every handler spells its own path out of this constant because <b>there is no
+     * class-level {@code @RequestMapping} any more</b>: {@code profile.md} names this file as the
+     * one that serves {@code api/profile}, and a class-level prefix cannot be opted out of per
+     * handler.
+     */
+    private static final String PLURAL = "/api/profiles";
+
+    /**
+     * The caller's own profile — {@code .authenticated()}, no subject in the path.
+     *
+     * <p>⚠ <b>{@code /api/profile} is not a sub-path of {@code /api/profiles}</b> and does not match
+     * it. The security rules are the literal {@code "/api/profiles"} plus {@code "/api/profiles/**"}
+     * and neither pattern reaches the singular path, which is what makes the two surfaces separable
+     * in one class at all — read the other way, nothing written for the singular path can widen the
+     * plural admin surface.
+     */
+    private static final String SINGULAR = "/api/profile";
 
     /**
      * The fields a merge-patch here may not change, and the endpoint that does set each, now live in
@@ -142,10 +198,12 @@ public class ProfileResource {
      * the two in backlog.md item 49. {@code ProfileStatusAnnouncer} announces off the save itself.
      *
      * <p><b>No {@code DomainEventPublisher} since backlog.md item 66.</b> Its one use here was the
-     * {@code entity.created} the refused {@code POST} published; the create that survives —
-     * {@code OnboardingService.upsertOwnProfile} — publishes its own, so no {@code Profile}
-     * {@code entity.created} was lost with it. The only one that would have been is the event for a
-     * profile belonging to nobody, which no consumer could have placed.
+     * {@code entity.created} the refused {@code POST} published. ⚠ <b>Nothing publishes a
+     * {@code Profile} {@code entity.created} any more</b> — {@code OnboardingService.upsertOwnProfile}
+     * did and F8 retired it, and {@link ProfileService#partialUpdateOwnProfile} deliberately does not,
+     * for the reason {@code ProfileStatusAnnouncer} records about {@code updatePushPreferences}. The
+     * profile's arrival is still announced, as {@code ProfileStatus} off the save. The only event ever
+     * lost here is the one for a profile belonging to nobody, which no consumer could have placed.
      */
     public ProfileResource(ProfileService profileService, ProfileRepository profileRepository, ObjectMapper objectMapper) {
         this.profileService = profileService;
@@ -162,7 +220,7 @@ public class ProfileResource {
      * to go instead is backlog.md item 46 wearing a 400.
      */
     static final String CREATE_REFUSAL =
-        "A profile is created by the clinician it belongs to, through PUT /api/onboarding/profile. " +
+        "A profile is created by the clinician it belongs to, through PUT /api/profile. " +
         "This endpoint cannot link one to an account — accountId is read-only over HTTP — so every " +
         "profile it created would belong to nobody, and nothing could ever give it an owner.";
 
@@ -189,7 +247,7 @@ public class ProfileResource {
      * writable on create only</em> hands the six {@code CLINICAL_MUTATION} roles a way to author a
      * colleague's profile before that colleague onboards — the unique sparse index refuses a second
      * row for a login that already has one, but it says nothing about a login that does not yet, and
-     * {@code upsertOwnProfile} then adopts whatever was planted, push preferences and organisation
+     * the own-profile write then adopts whatever was planted, push preferences and organisation
      * included; it would also need item 60's field refusals duplicated onto the create path, and
      * item 50 will turn the identifier the caller types into a {@code User.id}, which is the value
      * item 55 had to gate an enumeration endpoint over. <em>Add an admin link endpoint</em> is
@@ -199,7 +257,7 @@ public class ProfileResource {
      *
      * <p><b>What settled it is that no product surface creates a profile on another's behalf.</b>
      * Established across all seven repos and both sibling stacks: {@code web/} and {@code mobile/}
-     * write a profile only through {@code PUT /api/onboarding/profile}, hc-admin and hc-patient only
+     * write a profile only through {@code PUT /api/profile}, hc-admin and hc-patient only
      * ever {@code GET} this path, and the sole non-test caller in the estate was
      * {@code quality/seed-data.py}. The product's answer to "create a professional on somebody's
      * behalf" is already built and is the gateway's: an administrator creates the <em>account</em>,
@@ -216,7 +274,7 @@ public class ProfileResource {
      *
      * @return never; always throws.
      */
-    @PostMapping
+    @PostMapping(PLURAL)
     public ResponseEntity<Profile> createProfile() {
         log.debug("REST request to save Profile — refused, see backlog.md item 66");
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, CREATE_REFUSAL);
@@ -231,7 +289,7 @@ public class ProfileResource {
      * or with status {@code 400 (Bad Request)} if the profile is not valid,
      * or with status {@code 500 (Internal Server Error)} if the profile couldn't be updated.
      */
-    @PutMapping("/{id}")
+    @PutMapping(PLURAL + "/{id}")
     public ResponseEntity<Profile> updateProfile(
         @PathVariable(value = "id", required = false) final String id,
         @RequestBody Profile profile
@@ -267,9 +325,9 @@ public class ProfileResource {
      * <p><b>One deviation from RFC 7396, which {@code application/merge-patch+json} names: a nested
      * object is replaced wholesale rather than merged recursively.</b> That is true of
      * {@code address} and {@code contacts}, it predates this change, and it is kept
-     * deliberately — {@code OnboardingService.upsertOwnProfile} replaces the same two, so merging
-     * here would make the two write paths mean different things by the same request. See
-     * {@code ProfileService.partialUpdate}. See {@link ProfileFieldOwnership} and backlog.md
+     * deliberately — {@link #updateOwnProfile} replaces the same two through the same
+     * {@code applyProvidedFields}, so merging here would make the two write paths mean different
+     * things by the same request. See {@code ProfileService.partialUpdate}. See {@link ProfileFieldOwnership} and backlog.md
      * item 60.
      *
      * @param id the id of the profile to save.
@@ -280,7 +338,7 @@ public class ProfileResource {
      * or with status {@code 404 (Not Found)} if the profile is not found,
      * or with status {@code 500 (Internal Server Error)} if the profile couldn't be updated.
      */
-    @PatchMapping(value = "/{id}", consumes = { "application/json", "application/merge-patch+json" })
+    @PatchMapping(value = PLURAL + "/{id}", consumes = { "application/json", "application/merge-patch+json" })
     public ResponseEntity<Profile> partialUpdateProfile(
         @PathVariable(value = "id", required = false) final String id,
         @RequestBody ObjectNode patch
@@ -320,7 +378,7 @@ public class ProfileResource {
      * @param pageable the pagination information.
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and the list of profiles in body.
      */
-    @GetMapping
+    @GetMapping(PLURAL)
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ResponseEntity<List<Profile>> getAllProfiles(@org.springdoc.core.annotations.ParameterObject Pageable pageable) {
         log.debug("REST request to get a page of Profiles");
@@ -335,7 +393,7 @@ public class ProfileResource {
      * @param id the id of the profile to retrieve.
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the profile, or with status {@code 404 (Not Found)}.
      */
-    @GetMapping("/{id}")
+    @GetMapping(PLURAL + "/{id}")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ResponseEntity<Profile> getProfile(@PathVariable("id") String id) {
         log.debug("REST request to get Profile : {}", id);
@@ -355,7 +413,7 @@ public class ProfileResource {
      * @param accountId the accountId of the profile to retrieve.
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the profile, or with status {@code 404 (Not Found)}.
      */
-    @GetMapping("/account/{accountId}")
+    @GetMapping(PLURAL + "/account/{accountId}")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ResponseEntity<Profile> getProfileByAccountId(@PathVariable("accountId") String accountId) {
         log.debug("REST request to get Profile by accountId : {}", accountId);
@@ -386,12 +444,117 @@ public class ProfileResource {
      * @param email the email of the profile to retrieve.
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the profile, or with status {@code 404 (Not Found)}.
      */
-    @GetMapping("/email/{email}")
+    @GetMapping(PLURAL + "/email/{email}")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public ResponseEntity<Profile> getProfileByEmail(@PathVariable("email") String email) {
         log.debug("REST request to get Profile by email : {}", email);
         Optional<Profile> profile = profileService.findByEmail(email);
         return ResponseUtil.wrapOrNotFound(profile);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // /api/profile — the caller's own (profile.md step 2). No subject in either path below.
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * {@code GET /api/profile} : the caller's own profile.
+     *
+     * <h2>Why {@code .authenticated()} is the correct gate here, when it is the defect above</h2>
+     *
+     * <p>The estate's rule (workspace {@code CLAUDE.md} § "How products read each other",
+     * 2026-09-17) is that <b>the subject decides the gate, not the resource</b>: an endpoint that
+     * names a subject is {@code ROLE_ADMIN}; an endpoint that cannot name anyone but the caller needs
+     * only authentication. This one takes no subject — the account comes from the {@code uid} claim
+     * through {@link SecurityUtils#getCurrentAccountId()} — so an authority check would constrain
+     * nothing further, while the admin gate would lock out the people the endpoint is <em>for</em>.
+     * An applicant holds {@code ROLE_USER} and nothing else until an administrator assigns one.
+     *
+     * <p>⛔ <b>So do not answer "a clinician needs their own profile" by excusing the caller on
+     * {@link #getProfileByAccountId}.</b> That shape has to compare caller against path, and it is
+     * the one that gets it wrong.
+     *
+     * <p><b>404 when the caller has none yet</b>, which is most of an applicant's time on the wizard.
+     * An empty {@code 200} was considered and refused: it makes "no profile yet" and "a profile with
+     * nothing in it" the same answer, and step 3 keys off {@code Profile.id}. {@code web/}'s
+     * {@code error-handler.interceptor.ts} already opts this read out of the global error banner,
+     * because an untreated 404 was visible in the deployed portal.
+     *
+     * <p>{@code status} is <b>readable</b> here — {@code profile.md} renders it in the page header —
+     * and is refused on the write. Those are two different questions about one field;
+     * {@link ProfileFieldOwnership} answers the second and {@code ProfileCompleteness} is what sets
+     * it.
+     *
+     * @return the caller's profile.
+     */
+    @GetMapping(SINGULAR)
+    @PreAuthorize("isAuthenticated()")
+    public Profile getOwnProfile() {
+        String accountId = currentAccountId();
+        log.debug("REST request to get own Profile for account : {}", accountId);
+        return profileService
+            .findByAccountId(accountId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No profile for this account yet"));
+    }
+
+    /**
+     * {@code PUT /api/profile} : writes the fields the caller named onto the caller's own profile,
+     * creating it if there is none.
+     *
+     * <h2>A partial write behind a {@code PUT}, which is deliberate and is profile.md's doing</h2>
+     *
+     * <p>The specification names {@code PUT} and specifies <b>a dialog panel per step</b>. Those two
+     * together make a whole-document replace wrong by construction: a pane that saves only its own
+     * slice would blank every field the other panes wrote, answering 200 with a body confirming the
+     * loss. So the verb is the specification's and the semantics are the only ones that can serve it.
+     * {@code ProfileService.partialUpdateOwnProfile} carries the rest of that argument, including
+     * the {@code PROFILE_COMPLETED} stamp.
+     *
+     * <p><b>{@code accountId} is forced to the caller and never taken from the body</b>, twice over:
+     * the field is {@code @JsonProperty(READ_ONLY)} so Jackson drops it before this handler sees it,
+     * and the service sets it from the token regardless. A {@code PUT} from account A naming account
+     * B cannot reach B's row — there is no path by which the body selects a row at all.
+     *
+     * <p><b>The one-writer-per-field rule holds here exactly as it does on the {@code PATCH}</b>, and
+     * {@code status} is why it is not weaker for being own-scoped: "it is my own row" is an argument
+     * about disclosure, and an applicant who could write {@code status} would approve their own
+     * credential review. The refusal names the field and the endpoint that does own it, from the same
+     * {@link ProfileFieldOwnership} map the {@code PATCH} uses — shared rather than copied.
+     *
+     * @param document the fields to write; anything absent is left as stored.
+     * @return the persisted profile.
+     */
+    @PutMapping(SINGULAR)
+    @PreAuthorize("isAuthenticated()")
+    public Profile updateOwnProfile(@RequestBody ObjectNode document) {
+        String accountId = currentAccountId();
+        log.debug("REST request to update own Profile for account : {}", accountId);
+        Profile incoming;
+        try {
+            incoming = objectMapper.treeToValue(document, Profile.class);
+        } catch (JacksonException e) {
+            throw new BadRequestAlertException("Unreadable profile document", ENTITY_NAME, "invalidbody");
+        }
+        // Against the caller's own stored row, or against nothing at all on the first save — in which
+        // case any value the caller named is an introduction and therefore a change, and is refused.
+        // That is the right way round: a profile being created is the one moment at which somebody
+        // could plant a `status` the state machine never issued.
+        Profile stored = profileService.findByAccountId(accountId).orElse(null);
+        ProfileFieldOwnership.refuseFieldsThisEndpointDoesNotOwn(document, incoming, stored);
+
+        return profileService.partialUpdateOwnProfile(accountId, incoming);
+    }
+
+    /**
+     * The caller's gateway {@code User.id} — what {@code Profile.accountId} holds and is looked up by
+     * (backlog.md item 50).
+     *
+     * <p>{@code SecurityUtils} is where the rule actually lives: the {@code uid} claim, discarded when
+     * minted by any other issuer, with deliberately no fallback to the login. The three gateways share
+     * a signing key and not a user store, so a sibling product's {@code User.id} names nothing here.
+     */
+    private String currentAccountId() {
+        return SecurityUtils.getCurrentAccountId()
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "No authenticated account"));
     }
     /*
      * There is deliberately no DELETE here. It was generated CRUD, no client ever called it, and it

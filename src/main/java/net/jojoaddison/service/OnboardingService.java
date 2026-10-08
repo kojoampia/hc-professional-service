@@ -163,74 +163,31 @@ public class OnboardingService {
         return application;
     }
 
-    /**
-     * Applicant profile upsert (WP4 support): applicants hold only ROLE_USER,
-     * which the WP1 mutation matrix blocks from POST /api/profiles — their
-     * profile is written through the onboarding surface instead. accountId is
-     * always forced to the caller; an existing profile keeps its id.
+    /*
+     * upsertOwnProfile is GONE — retired by F8 with GET and PUT /api/onboarding/profile, per
+     * profile.md § Other Elements: "api/onboarding/profile should migrate to api/profile".
      *
-     * <p><b>This is the write that carries the second half of a clinician's arrival</b>
-     * ({@code ProfileStatus}, backlog.md item 47). It no longer announces it: the save does, through
-     * {@link ProfileStatusAnnouncer}, which listens for the persisted document rather than being
-     * called from a table of paths. This method was one of the four entries on that table and item 49
-     * is what the table missed — see the announcer's javadoc.
+     * ProfileService.partialUpdateOwnProfile is the write now, and it is NOT this method made
+     * partial. This one set thirteen fields unconditionally with no `!= null` guard, so a wizard
+     * pane saving its own slice blanked every field the other panes had written; the replacement
+     * applies only what the caller named, creates the row on first write, and stamps
+     * PROFILE_COMPLETED when ProfileCompleteness says every field is provided.
      *
-     * <h2>⚠ Superseded by {@code PUT /api/profile}, and kept until T3 retires the path</h2>
+     * TWO THINGS THAT WENT WITH IT, both worth knowing before writing a fixture:
      *
-     * <p>{@code profile.md} replaces this endpoint with {@code PUT /api/profile}
-     * ({@code OwnProfileResource}), and <b>the unconditional write below is the specific behaviour
-     * that was replaced rather than carried over</b>: there is no {@code != null} guard on any of
-     * these, so a client that sends one pane's fields blanks every field the other panes wrote.
-     * Today's clients only survive it by sending the whole document back —
-     * {@code web/}'s {@code clinical-profile.component.ts} spreads <code>{...this.loaded, …}</code>
-     * and {@code mobile/}'s {@code me.page.ts} spreads the loaded contact — which makes correctness a
-     * property of the caller. {@code ProfileService.partialUpdateOwnProfile} is the guarded version.
+     *   The entity.created publication. This method published one for a profile it created, and
+     *   partialUpdateOwnProfile deliberately does not — the house decision recorded on
+     *   ProfileStatusAnnouncer, where updatePushPreferences has created profiles silently since
+     *   MOB9: entity.created carries an actor and an accountId that are not derivable from the
+     *   saved document and rides hc.professional.entity, which hc-admin is not subscribed to. The
+     *   profile's arrival is still announced — the save raises AfterSaveEvent and ProfileStatus goes
+     *   out from there, which is the half the estate consumes.
      *
-     * <p>⛔ <b>Do not "fix" this method to be partial.</b> Two write paths that disagree about what a
-     * missing field means is worse than one that is wrong in a documented way, and the clients above
-     * are written against this behaviour. It goes away with the rest of {@code /api/onboarding/**}.
-     *
-     * <p><b>{@code middleNames} is copied as of profile.md's T1, and it never was before.</b> The
-     * field has been on {@code Profile} and in {@code .jhipster/Profile.json} since WP2 and no write
-     * path anywhere copied it, so the middle name the wizard collects was stored by nothing while
-     * {@code profile.md}'s header renders "firstName middleName lastName". Added here as well as on
-     * the new path because this is still the live writer until T6.
+     *   A FALSE CLAIM THIS JAVADOC CARRIED (F6). It said middleNames was copied by "no write path
+     *   anywhere" before T1. The admin PATCH /api/profiles/{id} did copy it — see
+     *   ProfileService.applyProvidedFields, where the narrower and true claim is now recorded: no
+     *   APPLICANT-FACING write path copied it.
      */
-    public Profile upsertOwnProfile(String accountId, Profile incoming) {
-        Profile profile = profileRepository.findByAccountId(accountId).orElse(null);
-        boolean created = profile == null;
-        if (created) {
-            profile = new Profile();
-        }
-        // accountUid used to be stamped here, beside a login-valued accountId. Item 50 removed the
-        // field: accountId now holds the very value accountUid held, so keeping both would be the
-        // second join key that item exists to remove, spelled twice in one document.
-        profile
-            .accountId(accountId)
-            .firstName(incoming.getFirstName())
-            .lastName(incoming.getLastName())
-            .birthDate(incoming.getBirthDate())
-            .sex(incoming.getSex())
-            .mobilePhone(incoming.getMobilePhone())
-            .phoneNumber(incoming.getPhoneNumber())
-            .email(incoming.getEmail())
-            .cardType(incoming.getCardType())
-            .cardNumber(incoming.getCardNumber())
-            .title(incoming.getTitle())
-            .address(incoming.getAddress())
-            .middleNames(incoming.getMiddleNames())
-            .contacts(incoming.getContacts());
-        Profile saved = profileRepository.save(profile);
-        if (created) {
-            domainEventPublisher.publishEntityCreated(
-                "Profile",
-                saved.getId(),
-                saved.getAccountId(),
-                net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
-            );
-        }
-        return saved;
-    }
 
     /**
      * Composes and publishes {@code ProfileStatus} — the second half of a clinician's arrival, for a
@@ -324,12 +281,6 @@ public class OnboardingService {
         }
         String trimmed = source.trim();
         return trimmed.length() > 64 ? trimmed.substring(0, 64) : trimmed;
-    }
-
-    public Profile getOwnProfile(String accountId) {
-        return profileRepository
-            .findByAccountId(accountId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No profile for this account yet"));
     }
 
     public ProfessionalApplication getOwnApplication(String accountId) {
@@ -683,9 +634,14 @@ public class OnboardingService {
             hasText(profile.getFirstName()) &&
             hasText(profile.getLastName()) &&
             profile.getBirthDate() != null &&
-            hasText(profile.getSex()) &&
+            // `sex` and `cardType` are enums since F9 — a null check is the whole of "provided"
+                // now, where hasText used to be the only thing a free-text field admitted. A value
+                // outside the enumeration can no longer reach storage, so this predicate no longer
+                // counts "banana" as a sex.
+                profile.getSex() !=
+                null &&
             hasText(profile.getMobilePhone()) &&
-            hasText(profile.getCardType()) &&
+            profile.getCardType() != null &&
             hasText(profile.getCardNumber())
         );
     }
@@ -703,47 +659,50 @@ public class OnboardingService {
     }
 
     /**
-     * What "next of kin provided" means now that {@code Profile.contacts} is a list (profile.md, T1).
+     * What "next of kin provided" means: <b>at least {@link ProfileCompleteness#REQUIRED_CONTACTS}
+     * contacts</b>, each carrying name, relationship and phone (F2).
      *
-     * <h2>The decision: at least ONE contact carrying name, relationship and phone</h2>
+     * <p>{@code profile.md} step 2: <i>"At least <b>two</b> emergency contacts are required."</i>
+     * This was an {@code anyMatch}, so one contact satisfied it, and <b>nothing anywhere in
+     * {@code src/main} or {@code src/test} expressed the requirement</b> — the only mention of it in
+     * the repository was a comment in {@code ProfilePatchFieldCoverageIT}.
      *
-     * <p>Not "every contact complete", and <b>not two</b>, and both exclusions are deliberate.
+     * <p>⛔ <b>The javadoc that stood here argued for one and deferred two to T5. It was overruled
+     * and is deleted rather than reworded.</b> Its argument was that raising the predicate would
+     * make profiles already saved through the shipped one-contact wizard retroactively incomplete.
+     * That is true, it is the accepted consequence, and <i>"this would make existing rows
+     * retroactively incomplete"</i> is not a reason to deviate from the specification. The three
+     * things it named as blast radius are the right things to look at and none of them is a reason
+     * either.
      *
-     * <p><em>Every contact complete</em> turns adding a second contact into a way to go backwards: a
-     * clinician with one good contact who starts typing a second would see their meter drop and their
-     * activation gate close, which punishes exactly the behaviour the specification asks for.
-     *
-     * <p><em>Two contacts</em> is what {@code profile.md} step 2 requires of the <b>form</b>, and it
-     * is deliberately not asserted here yet. Raising this predicate to two would make every profile
-     * already saved through the shipped one-contact wizard retroactively incomplete — the meter drops
-     * for clinicians who did nothing, and the {@code ACTIVE} gate refuses activation for applicants
-     * mid-review. That is a change to the progress model with its own blast radius
-     * ({@code OnboardingProgressIT} states the arithmetic, four i18n catalogues carry the labels,
-     * {@code CompleteOnboardingFixture} is the one fixture, and the post-sign-in redirect reads the
-     * result), and {@code profile-addendum.md} assigns it to <b>T5</b>, where the four-step meter is
-     * built. Doing it here would be the same change arriving without the rest of its own task.
-     *
-     * <p><b>This is therefore behaviour-preserving by construction:</b> for a profile holding exactly
-     * one contact — every profile in the database before the migration — it answers precisely what
-     * the singular version answered.
+     * <p><b>Counting the complete ones rather than requiring every contact complete</b>, which is
+     * the one clause of the old reasoning that survives on its own merits: a clinician with two good
+     * contacts who starts typing a third would otherwise see this requirement go from satisfied to
+     * unsatisfied, and the {@code ACTIVE} gate close, for having done what the form invites. ⚠ That
+     * makes this predicate deliberately <em>weaker</em> than {@link ProfileCompleteness}, which
+     * requires every contact complete because it decides a status rather than a meter — see that
+     * class on which definition is authoritative for what.
      *
      * <p><b>Advisory and server-side, as it was.</b> {@code Profile} carries no
-     * {@code jakarta.validation} annotations and gains none here: "every field is required" is a
-     * client-side rule, and making the server enforce it would reject rows the current client
-     * legitimately saves. What the server owns is whether a <em>requirement</em> is satisfied, which
-     * is this.
+     * {@code jakarta.validation} annotations and gains none here: what the server owns is whether a
+     * <em>requirement</em> is satisfied, which is this.
      */
     private static boolean nextOfKinComplete(Profile profile) {
         return (
             profile != null &&
             profile.getContacts() != null &&
             profile
-                .getContacts()
-                .stream()
-                .anyMatch(
-                    contact ->
-                        contact != null && hasText(contact.getName()) && hasText(contact.getRelationship()) && hasText(contact.getPhone())
-                )
+                    .getContacts()
+                    .stream()
+                    .filter(
+                        contact ->
+                            contact != null &&
+                            hasText(contact.getName()) &&
+                            hasText(contact.getRelationship()) &&
+                            hasText(contact.getPhone())
+                    )
+                    .count() >=
+                ProfileCompleteness.REQUIRED_CONTACTS
         );
     }
 

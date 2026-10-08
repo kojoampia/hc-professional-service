@@ -31,8 +31,11 @@ import org.springframework.test.web.servlet.MockMvc;
  * if they read to the end. {@code GET} <i>and</i> {@code HEAD} on {@code /api/profiles} and everything
  * under it require {@code ROLE_ADMIN}, because every one of those reads names its subject in the path,
  * and identity cannot gate a read whose subject is whoever you ask for. A clinician's own profile is
- * not reached that way and never was: {@code GET /api/onboarding/profile} takes no subject at all and
- * stays open to any authenticated caller. {@code ProfileResourceIT} holds the endpoint's own cases;
+ * not reached that way and never was: {@code GET /api/profile} takes no subject at all and
+ * stays open to any authenticated caller. ⚠ <b>Since F3 both paths are served by the same class</b>,
+ * {@code ProfileResource}, gated per handler — so the cases below are no longer merely a matrix view
+ * of two resources but <b>the only thing separating two surfaces inside one file</b>.
+ * {@code ProfileResourceIT} and {@code OwnProfilePathIT} hold the endpoints' own cases;
  * what this class holds is the <i>matrix</i> view — that the refusal applies to a clinician and to a
  * role-less applicant alike.
  *
@@ -224,7 +227,7 @@ class ClinicalAuthorityMatrixIT {
     // the gateway's own CLINICAL_AND_ADMIN rule on /services/** never runs. docs/backlog.md item 143.
     //
     // WHAT A CLINICIAN KEEPS is the last case in this section, and it is the half that makes the
-    // gate honest rather than merely strict: GET /api/onboarding/profile resolves the caller from
+    // gate honest rather than merely strict: GET /api/profile resolves the caller from
     // the uid claim and takes no subject, so it cannot name anyone else. Identity is the boundary
     // there, which is exactly why it stays .authenticated(). Do not answer "a clinician needs their
     // own profile" by excusing the caller on a subject-addressed path — that shape has to compare
@@ -271,20 +274,24 @@ class ClinicalAuthorityMatrixIT {
 
     /**
      * <b>What the gate did not take away.</b> A clinician still reads their own profile, through the
-     * endpoint that cannot name anyone else — which is where {@code mobile/}'s
-     * {@code profile-api.service.ts} has always read it from, and {@code web/} calls
-     * {@code ProfileResource} nowhere at all.
+     * endpoint that cannot name anyone else — {@code GET /api/profile}, which is where both
+     * {@code web/} and {@code mobile/} read it from since F8 re-pointed them.
      *
-     * <p>A clinician who has not completed onboarding has no profile row yet and gets a 404 from it;
-     * that is the pre-existing behaviour of {@code OnboardingService.getOwnProfile} and not an
-     * authorization answer. What this asserts is the only thing item 143 could have broken and did
-     * not: <b>not a 403</b>. Seeding a row to make it a 200 would assert the onboarding write path
-     * instead, which {@code ProfileResourceIT} already covers.
+     * <p>⚠ <b>This case used to call {@code /api/onboarding/profile}</b>, and the path it names is
+     * the whole of its value now that F8 has retired that one: the <em>previous</em> version of this
+     * test would have gone on passing after the retirement, because an unmapped path under
+     * {@code /api/onboarding/**} answers 404 too — the status it asserts. A 404 for "no row yet" and
+     * a 404 for "no such endpoint" are indistinguishable here, which is exactly the shape of green
+     * this estate keeps finding, so the re-point was not optional bookkeeping.
+     *
+     * <p>A clinician who has not completed onboarding has no profile row yet and gets a 404; that is
+     * {@code ProfileResource.getOwnProfile}'s documented answer and not an authorization one. What
+     * this asserts is the only thing item 143 could have broken and did not: <b>not a 403</b>.
      */
     @Test
     @WithMockGatewayUser(login = "matrix-doctor", authorities = { "ROLE_DOCTOR" })
     void aClinicianStillReadsTheirOwnProfileThroughTheEndpointThatCannotNameAnyoneElse() throws Exception {
-        restMockMvc.perform(get("/api/onboarding/profile")).andExpect(status().isNotFound());
+        restMockMvc.perform(get("/api/profile")).andExpect(status().isNotFound());
     }
 
     // --- /api/profile (singular): the read and write that cannot name anybody else ---------------

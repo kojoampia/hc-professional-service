@@ -22,6 +22,8 @@ import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.Address;
 import net.jojoaddison.domain.AddressTestSamples;
 import net.jojoaddison.domain.Profile;
+import net.jojoaddison.domain.enumeration.DocumentType;
+import net.jojoaddison.domain.enumeration.Sex;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,8 +53,11 @@ class ProfileResourceIT {
     private static final LocalDate DEFAULT_BIRTH_DATE = LocalDate.ofEpochDay(0L);
     private static final LocalDate UPDATED_BIRTH_DATE = LocalDate.now(ZoneId.systemDefault());
 
-    private static final String DEFAULT_SEX = "F";
-    private static final String UPDATED_SEX = "M";
+    // Enums since F9: profile.md types `sex` {FEMALE, MALE} and `cardType` by PersonalDocumentType.
+    // These were "F"/"M" and "AAAAAAAAAA"/"BBBBBBBBBB" — the generated placeholders, which is what a
+    // free-text field admits and is exactly why the specification typed them.
+    private static final Sex DEFAULT_SEX = Sex.FEMALE;
+    private static final Sex UPDATED_SEX = Sex.MALE;
 
     private static final String DEFAULT_MOBILE_PHONE = "AAAAAAAAAA";
     private static final String UPDATED_MOBILE_PHONE = "BBBBBBBBBB";
@@ -63,8 +68,8 @@ class ProfileResourceIT {
     private static final String DEFAULT_EMAIL = "AAAAAAAAAA";
     private static final String UPDATED_EMAIL = "BBBBBBBBBB";
 
-    private static final String DEFAULT_CARD_TYPE = "AAAAAAAAAA";
-    private static final String UPDATED_CARD_TYPE = "BBBBBBBBBB";
+    private static final DocumentType DEFAULT_CARD_TYPE = DocumentType.GHANACARD;
+    private static final DocumentType UPDATED_CARD_TYPE = DocumentType.PASSPORT;
 
     private static final String DEFAULT_CARD_NUMBER = "AAAAAAAAAA";
     private static final String UPDATED_CARD_NUMBER = "BBBBBBBBBB";
@@ -164,7 +169,7 @@ class ProfileResourceIT {
 
         assertThat(body)
             .as("a refusal that will not say where the caller should go instead is item 46 wearing a 400")
-            .contains("PUT /api/onboarding/profile");
+            .contains("PUT /api/profile");
 
         // The same, with an id — the case the generated createProfileWithExistingId covered.
         profile.setId("existing_id");
@@ -231,8 +236,9 @@ class ProfileResourceIT {
      * <b>The positive half: a profile does end up linked, through the caller item 66 settled on.</b>
      *
      * <p>Item 66 asked how a profile becomes attached to an account now that a create cannot do it,
-     * and the answer is that it never was a create's job — {@code PUT /api/onboarding/profile} force
-     * -sets {@code accountId} to the caller's own token and has done since WP4. This runs as an
+     * and the answer is that it never was a create's job — the own-profile write force-sets
+     * {@code accountId} to the caller's own token and has done since WP4; the path it lives on moved
+     * from {@code /api/onboarding/profile} to {@code PUT /api/profile} in F8. This runs as an
      * applicant holding nothing but {@code ROLE_USER}, which is what an applicant really holds and
      * what {@code POST /api/profiles} refuses outright, so it also shows the two paths are not
      * competing for the same caller.
@@ -246,9 +252,7 @@ class ProfileResourceIT {
     void theApplicantPathIsWhatLinksAProfileToAnAccount() throws Exception {
         restProfileMockMvc
             .perform(
-                put("/api/onboarding/profile")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"firstName\":\"Kofi\",\"lastName\":\"Mensah\"}")
+                put("/api/profile").contentType(MediaType.APPLICATION_JSON).content("{\"firstName\":\"Kofi\",\"lastName\":\"Mensah\"}")
             )
             .andExpect(status().isOk());
 
@@ -290,11 +294,11 @@ class ProfileResourceIT {
             .andExpect(jsonPath("$.[*].middleNames").value(hasItem(DEFAULT_MIDDLE_NAMES)))
             .andExpect(jsonPath("$.[*].lastName").value(hasItem(DEFAULT_LAST_NAME)))
             .andExpect(jsonPath("$.[*].birthDate").value(hasItem(DEFAULT_BIRTH_DATE.toString())))
-            .andExpect(jsonPath("$.[*].sex").value(hasItem(DEFAULT_SEX)))
+            .andExpect(jsonPath("$.[*].sex").value(hasItem(DEFAULT_SEX.name())))
             .andExpect(jsonPath("$.[*].mobilePhone").value(hasItem(DEFAULT_MOBILE_PHONE)))
             .andExpect(jsonPath("$.[*].phoneNumber").value(hasItem(DEFAULT_PHONE_NUMBER)))
             .andExpect(jsonPath("$.[*].email").value(hasItem(DEFAULT_EMAIL)))
-            .andExpect(jsonPath("$.[*].cardType").value(hasItem(DEFAULT_CARD_TYPE)))
+            .andExpect(jsonPath("$.[*].cardType").value(hasItem(DEFAULT_CARD_TYPE.name())))
             .andExpect(jsonPath("$.[*].cardNumber").value(hasItem(DEFAULT_CARD_NUMBER)));
     }
 
@@ -314,11 +318,11 @@ class ProfileResourceIT {
             .andExpect(jsonPath("$.middleNames").value(DEFAULT_MIDDLE_NAMES))
             .andExpect(jsonPath("$.lastName").value(DEFAULT_LAST_NAME))
             .andExpect(jsonPath("$.birthDate").value(DEFAULT_BIRTH_DATE.toString()))
-            .andExpect(jsonPath("$.sex").value(DEFAULT_SEX))
+            .andExpect(jsonPath("$.sex").value(DEFAULT_SEX.name()))
             .andExpect(jsonPath("$.mobilePhone").value(DEFAULT_MOBILE_PHONE))
             .andExpect(jsonPath("$.phoneNumber").value(DEFAULT_PHONE_NUMBER))
             .andExpect(jsonPath("$.email").value(DEFAULT_EMAIL))
-            .andExpect(jsonPath("$.cardType").value(DEFAULT_CARD_TYPE))
+            .andExpect(jsonPath("$.cardType").value(DEFAULT_CARD_TYPE.name()))
             .andExpect(jsonPath("$.cardNumber").value(DEFAULT_CARD_NUMBER))
             .andExpect(jsonPath("$.address").value(DEFAULT_ADDRESS));
     }
@@ -468,12 +472,13 @@ class ProfileResourceIT {
     /**
      * <b>The behaviour item 143 had to leave standing: a clinician still reads their own profile.</b>
      *
-     * <p>Not through this resource, and never through it — {@code GET /api/onboarding/profile}
-     * resolves the caller from the {@code uid} claim and takes no subject at all, which is why it
-     * stays {@code .authenticated()} while every path that names a subject does not. It is also
-     * where {@code mobile/}'s {@code profile-api.service.ts} has always read it from. The same
-     * {@code ROLE_DOCTOR} refused all four reads above is handed their own document here,
-     * {@code cardNumber} included.
+     * <p>Not through any of the four reads above — {@code GET /api/profile} resolves the caller from
+     * the {@code uid} claim and takes no subject at all, which is why it stays
+     * {@code .authenticated()} while every path that names a subject does not. ⚠ <b>It IS through
+     * this resource since F3</b>, which serves both paths and gates them per handler, and that is
+     * precisely why this case matters more than it did: the same {@code ROLE_DOCTOR} refused all
+     * four subject-addressed reads above is handed their own document here, {@code cardNumber}
+     * included, from one class.
      *
      * <p>The row is seeded through the repository under the account id the annotation derives, so
      * what is exercised is the read rather than the onboarding write that creates one.
@@ -485,7 +490,7 @@ class ProfileResourceIT {
         profileRepository.save(profile);
 
         restProfileMockMvc
-            .perform(get("/api/onboarding/profile"))
+            .perform(get("/api/profile"))
             .andExpect(status().isOk())
             .andExpect(content().contentType(MediaType.APPLICATION_JSON_VALUE))
             .andExpect(jsonPath("$.id").value(profile.getId()))

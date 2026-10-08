@@ -42,7 +42,7 @@ import tools.jackson.databind.node.ObjectNode;
  * rather than a completion.
  *
  * <p><b>{@code title} and {@code contacts} are applied</b>, alongside the rest.
- * {@code OnboardingService.upsertOwnProfile} writes both from a clinician's own onboarding body, on
+ * {@code PUT /api/profile} writes both from a clinician's own onboarding body, on
  * exactly the same footing as {@code firstName}, {@code address} and {@code cardNumber} — fields
  * these endpoints have always let the same six roles change. Refusing them would expose no less data
  * and would leave no way to correct a title short of a whole-document {@code PUT}.

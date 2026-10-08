@@ -14,7 +14,9 @@ import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.Address;
 import net.jojoaddison.domain.EmergencyContact;
 import net.jojoaddison.domain.Profile;
+import net.jojoaddison.domain.enumeration.DocumentType;
 import net.jojoaddison.domain.enumeration.ProfileStatus;
+import net.jojoaddison.domain.enumeration.Sex;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.security.WithMockGatewayUser;
 import org.junit.jupiter.api.AfterEach;
@@ -26,7 +28,15 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
 /**
- * {@code GET} and {@code PUT /api/profile} — the caller's own profile (profile.md step 2, T1).
+ * {@code GET} and {@code PUT /api/profile} — the caller's own profile (profile.md step 2).
+ *
+ * <h2>Named for the PATH and not for a class, deliberately (F3)</h2>
+ *
+ * <p>This was {@code OwnProfileResourceIT} and there is no {@code OwnProfileResource} any more:
+ * {@code profile.md} names {@code ProfileResource.java} as the file that serves {@code api/profile},
+ * so the two handlers moved there and are gated per handler. The path is the stable subject — it is
+ * what the specification names and what every client calls — so the test is named after it rather
+ * than after whichever class currently holds the mapping.
  *
  * <h2>What this class is for, as distinct from its neighbours</h2>
  *
@@ -43,7 +53,7 @@ import org.springframework.test.web.servlet.ResultActions;
 @AutoConfigureMockMvc
 @IntegrationTest
 @WithMockGatewayUser(login = "own-profile-applicant", authorities = { "ROLE_USER" })
-class OwnProfileResourceIT {
+class OwnProfilePathIT {
 
     private static final String OWN_PROFILE_URL = "/api/profile";
 
@@ -94,8 +104,8 @@ class OwnProfileResourceIT {
     /**
      * 404 before step 2 has been completed, which is a state and not an error.
      *
-     * <p>Follows {@code GET /api/onboarding/profile} and {@code getOwnApplication}, both of which
-     * throw {@code NOT_FOUND} for exactly this; {@code web/}'s {@code error-handler.interceptor.ts}
+     * <p>Follows {@code getOwnApplication}, which throws {@code NOT_FOUND} for exactly this (as did
+     * the retired {@code GET /api/onboarding/profile}); {@code web/}'s {@code error-handler.interceptor.ts}
      * already opts the own-application read out of the global error banner <em>because</em> an
      * untreated 404 was visible in the deployed portal, so the client-side precedent exists too.
      *
@@ -148,11 +158,11 @@ class OwnProfileResourceIT {
      * ⛔ <b>The case this endpoint exists for: a write that omits a field must not blank it.</b>
      *
      * <p>{@code profile.md} specifies a dialog panel per step, so a pane saves only its own slice. The
-     * endpoint it replaces — {@code PUT /api/onboarding/profile} through
-     * {@code OnboardingService.upsertOwnProfile} — writes thirteen fields with no {@code != null}
-     * guards, so the next-of-kin pane would blank the address the address pane had just saved, and
-     * answer 200 with a body confirming the loss. Nothing about the status code can see that, which
-     * is why this asserts the stored row.
+     * endpoint it replaced — {@code PUT /api/onboarding/profile} through
+     * {@code OnboardingService.upsertOwnProfile}, both retired by F8 — wrote thirteen fields with no
+     * {@code != null} guards, so the next-of-kin pane would blank the address the address pane had
+     * just saved, and answer 200 with a body confirming the loss. Nothing about the status code can
+     * see that, which is why this asserts the stored row.
      *
      * <p>Two writes, as a real wizard would make them, rather than one write and an inspection: the
      * claim is about what the <em>second</em> request does to the <em>first</em> request's fields.
@@ -209,17 +219,21 @@ class OwnProfileResourceIT {
     }
 
     /**
-     * {@code middleNames} round-trips, and <b>no write path in this service copied it before</b>.
+     * {@code middleNames} round-trips, and <b>no applicant-facing write path copied it before</b>.
      *
-     * <p>The field has been on {@code Profile} and in {@code .jhipster/Profile.json} since WP2, and
-     * {@code upsertOwnProfile} never copied it — so the middle name the wizard collected was stored
-     * by nothing, while {@code profile.md}'s header renders "firstName middleName lastName". That is
-     * a field that could never appear, with a 200 on every save.
+     * <p>⛔ <b>THE HEADING OVERSTATES IT AND IS CORRECTED HERE (F6).</b> It read "no write path in
+     * this service copied it before", and the admin {@code PATCH /api/profiles/&#123;id&#125;} did —
+     * through {@code ProfileService.applyProvidedFields}, before T1 widened it. The true and
+     * narrower claim: <b>no APPLICANT-FACING write path copied it</b>, because the retired
+     * {@code upsertOwnProfile} omitted it, so the middle name the wizard collected was stored by
+     * nothing on the one route a clinician had. A field unreachable from one direction is not a
+     * field nothing could reach, and the difference is the whole of F6.
      *
-     * <p>⚠ <b>The name differs between the two sides and deliberately so.</b> {@code profile.md} calls
-     * it {@code middleName}; the Java field and the wire name are {@code middleNames}. Renaming a
-     * persisted field is a migration nobody asked for, so the divergence is recorded rather than
-     * resolved — see {@code Profile.middleNames} and {@code .jhipster/Profile.json}.
+     * <p>⭐ <b>The field name no longer diverges.</b> {@code profile.md}'s Profile model reads
+     * {@code middleNames}, aligned to the code by the owner, so the paragraph that used to record a
+     * {@code middleName}/{@code middleNames} divergence here describes nothing. ⚠ The document's
+     * page-header row still renders the singular; that is the owner's document and is reported, not
+     * edited.
      */
     @Test
     void middleNamesRoundTrips() throws Exception {
@@ -494,8 +508,11 @@ class OwnProfileResourceIT {
     /**
      * The retired singular name still writes into the list through this endpoint too.
      *
-     * <p>Not because any client calls {@code /api/profile} with it — none does yet — but because the
-     * alias lives on {@code Profile} and therefore applies to every endpoint that binds one. Pinned
+     * <p>⚠ <b>Both shipped clients do call {@code /api/profile} with it</b> since F8 re-pointed
+     * {@code web/}'s {@code OnboardingProfileDto} and {@code mobile/}'s {@code me.page.ts} at this
+     * path without renaming the field — this sentence read "none does yet" and that stopped being
+     * true in the same change. The alias lives on {@code Profile} and therefore applies to every
+     * endpoint that binds one. Pinned
      * here so that retiring it with T6 is a decision somebody makes rather than a surprise, and so
      * that the two endpoints cannot come to mean different things by the same field name.
      */
@@ -512,5 +529,216 @@ class OwnProfileResourceIT {
     @Test
     void anUnreadableDocumentIsRefused() throws Exception {
         putOwnProfile("{\"birthDate\":\"not-a-date\"}").andExpect(status().isBadRequest());
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // PROFILE_COMPLETED (F1) — the server stamps it, the client never sends it
+    // ---------------------------------------------------------------------------------------------
+    //
+    // profile.md § "Step 2 — Create the profile": "Set profile.status to PROFILE_COMPLETED when
+    // every field is provided." NOTHING WROTE Profile.status AT ALL before F1 — a search for
+    // PROFILE_COMPLETED found the enum declaration and four OnboardingService sites, every one of
+    // them on ProfessionalApplication.status, which is a different field on a different document.
+    //
+    // "Every field" is the owner's literal, nested reading: 39 values. ProfileCompletenessTest
+    // enumerates them one withheld at a time; what these cases hold is the HTTP half — that the
+    // stamp happens on the write, that it happens ACROSS several panes rather than only on a single
+    // complete body, and that the caller cannot ask for it.
+
+    /**
+     * A body providing all 39 values is stamped {@code PROFILE_COMPLETED}, in the response and in
+     * the stored row.
+     */
+    @Test
+    void aCompleteWriteIsStampedProfileCompleted() throws Exception {
+        putOwnProfile(completeProfileJson()).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("PROFILE_COMPLETED"));
+
+        assertThat(reloadCaller().getStatus()).isEqualTo(ProfileStatus.PROFILE_COMPLETED);
+    }
+
+    /**
+     * ⭐ <b>The stamp is evaluated against the STORED ROW after the merge, not against the request
+     * body</b> — which is the only reading that can work at all.
+     *
+     * <p>{@code profile.md} specifies a dialog panel per step, so no single body a wizard sends is
+     * ever complete. A predicate run over the body would therefore stamp nothing, ever, and the
+     * endpoint would satisfy its own test only when a client posted the whole document in one go —
+     * which is the shape the specification rules out. Two writes here, each incomplete, completing
+     * the profile between them.
+     */
+    @Test
+    void thePanesCompleteTheProfileBetweenThemAndTheLastOneStampsIt() throws Exception {
+        putOwnProfile(completeProfileJson().replace(CONTACTS_FRAGMENT, "\"phoneNumber\":\"+233300000000\"")).andExpect(status().isOk());
+        assertThat(reloadCaller().getStatus()).as("the contacts pane has not run yet").isNull();
+
+        putOwnProfile("{" + CONTACTS_FRAGMENT + "}").andExpect(status().isOk());
+
+        assertThat(reloadCaller().getStatus()).isEqualTo(ProfileStatus.PROFILE_COMPLETED);
+    }
+
+    /**
+     * ⚠ <b>One contact is not enough</b> — {@code profile.md} step 2 requires at least two (F2).
+     *
+     * <p>Asserted here as well as in {@code ProfileCompletenessTest} because it is the requirement
+     * the shipped wizard violated: the server's predicate was an {@code anyMatch} and accepted one,
+     * and the only mention of "two" anywhere in this repository was a comment.
+     */
+    @Test
+    void oneCompleteContactDoesNotCompleteTheProfile() throws Exception {
+        putOwnProfile(completeProfileJson().replace(CONTACTS_FRAGMENT, oneContactFragment())).andExpect(status().isOk());
+
+        assertThat(reloadCaller().getStatus()).as("profile.md requires at least two emergency contacts").isNull();
+    }
+
+    /**
+     * {@code title} is <b>not</b> required, and that is deliberate rather than an oversight.
+     *
+     * <p>It is absent from {@code profile.md}'s Profile model table, even though the page header
+     * renders {@code profile.title}. The owner's enumeration of the 39 excludes it by name, so a
+     * profile with no title is complete — and this case is what fails if somebody "finishes" the
+     * predicate by adding every field the class happens to declare.
+     */
+    @Test
+    void titleIsNotOneOfTheRequiredFields() throws Exception {
+        putOwnProfile(completeProfileJson()).andExpect(status().isOk());
+
+        assertThat(reloadCaller().getTitle()).as("the complete body deliberately omits it").isNull();
+        assertThat(reloadCaller().getStatus()).isEqualTo(ProfileStatus.PROFILE_COMPLETED);
+    }
+
+    /**
+     * ⛔ <b>A complete body that also NAMES {@code status} is refused, not stamped.</b>
+     *
+     * <p>The two halves of the rule read from both ends: the caller cannot set {@code status}
+     * ({@code ProfileFieldOwnership}) and the server always does ({@code ProfileCompleteness}). An
+     * applicant who could write it would approve their own credential review, and a body that
+     * happens to be complete is the easiest place to smuggle one.
+     */
+    @Test
+    void aCompleteWriteThatAlsoNamesStatusIsStillRefused() throws Exception {
+        putOwnProfile(completeProfileJson().replace("{\"firstName\"", "{\"status\":\"APPROVED\",\"firstName\"")).andExpect(
+            status().isBadRequest()
+        );
+
+        assertThat(profileRepository.findByAccountId(CALLER_ACCOUNT)).isEmpty();
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // sex and cardType are enums (F9) — an invalid value is refused rather than stored
+    // ---------------------------------------------------------------------------------------------
+
+    /** {@code {"sex":"banana"}} stored and answered 200 until {@link net.jojoaddison.domain.enumeration.Sex} existed. */
+    @Test
+    void aSexOutsideTheEnumerationIsRefused() throws Exception {
+        putOwnProfile("{\"firstName\":\"Ama\",\"sex\":\"banana\"}").andExpect(status().isBadRequest());
+
+        assertThat(profileRepository.findByAccountId(CALLER_ACCOUNT)).as("a refused write stores nothing").isEmpty();
+    }
+
+    /** And {@code {"cardType":"loyalty card"}}, which {@code profile.md} types by PersonalDocumentType. */
+    @Test
+    void aCardTypeOutsideTheEnumerationIsRefused() throws Exception {
+        putOwnProfile("{\"firstName\":\"Ama\",\"cardType\":\"loyalty card\"}").andExpect(status().isBadRequest());
+
+        assertThat(profileRepository.findByAccountId(CALLER_ACCOUNT)).isEmpty();
+    }
+
+    /**
+     * ⚠ <b>Case matters on the wire.</b> {@code "female"} is refused where {@code "FEMALE"} is
+     * accepted, which is why {@code ProfileEnumValueMigration} exists for what was already stored —
+     * the quality database held exactly one such row.
+     */
+    @Test
+    void aMemberNameInTheWrongCaseIsRefusedOnTheWire() throws Exception {
+        putOwnProfile("{\"firstName\":\"Ama\",\"sex\":\"female\"}").andExpect(status().isBadRequest());
+    }
+
+    /** The members do round-trip, which is the control for the three refusals above. */
+    @Test
+    void bothEnumValuesRoundTrip() throws Exception {
+        putOwnProfile("{\"sex\":\"MALE\",\"cardType\":\"GHANACARD\"}")
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.sex").value("MALE"))
+            .andExpect(jsonPath("$.cardType").value("GHANACARD"));
+
+        Profile after = reloadCaller();
+        assertThat(after.getSex()).isEqualTo(Sex.MALE);
+        assertThat(after.getCardType()).isEqualTo(DocumentType.GHANACARD);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * The contacts half of {@link #completeProfileJson()}, kept separate so a case can swap it out
+     * without rebuilding the other 17 values — which is what makes "complete but for X" assertable.
+     */
+    private static final String CONTACTS_FRAGMENT =
+        "\"contacts\":[" +
+        contactFragment("Efua Mensah", "sister", "efua@example.com", "+233200000001") +
+        "," +
+        contactFragment("Kojo Mensah", "brother", "kojo@example.com", "+233200000002") +
+        "]";
+
+    /**
+     * All 39 values {@code profile.md} step 2 requires: the 10 {@code Profile} fields, the 7
+     * {@code address} fields, and 11 on each of two contacts.
+     *
+     * <p>⛔ <b>{@code title} is deliberately absent</b> — see {@link #titleIsNotOneOfTheRequiredFields}.
+     * So are {@code id}, {@code accountId} and {@code status}, none of which is a user input.
+     */
+    private static String completeProfileJson() {
+        return (
+            "{\"firstName\":\"Ama\",\"middleNames\":\"Nana Yaa\",\"lastName\":\"Boateng\"," +
+            "\"birthDate\":\"1990-01-01\",\"sex\":\"FEMALE\",\"mobilePhone\":\"+233200000000\"," +
+            "\"phoneNumber\":\"+233300000000\",\"email\":\"ama@example.com\"," +
+            "\"cardType\":\"GHANACARD\",\"cardNumber\":\"GHA-1\"," +
+            "\"address\":" +
+            addressFragment("GA-123-4567", "12 Oxford St", "Osu", "Accra", "Ayawaso East") +
+            "," +
+            CONTACTS_FRAGMENT +
+            "}"
+        );
+    }
+
+    /** One complete contact, for the case that asserts one is not two. */
+    private static String oneContactFragment() {
+        return "\"contacts\":[" + contactFragment("Efua Mensah", "sister", "efua@example.com", "+233200000001") + "]";
+    }
+
+    private static String contactFragment(String name, String relationship, String email, String phone) {
+        return (
+            "{\"name\":\"" +
+            name +
+            "\",\"relationship\":\"" +
+            relationship +
+            "\"," +
+            "\"email\":\"" +
+            email +
+            "\",\"phone\":\"" +
+            phone +
+            "\"," +
+            "\"address\":" +
+            addressFragment("GA-999-0000", "3 High St", "Bantama", "Kumasi", "Bantama") +
+            "}"
+        );
+    }
+
+    /** The seven {@code Address} input fields — all of them, since step 2 requires all of them. */
+    private static String addressFragment(String digital, String street, String town, String city, String district) {
+        return (
+            "{\"digitalAddress\":\"" +
+            digital +
+            "\",\"streetAddress\":\"" +
+            street +
+            "\"," +
+            "\"town\":\"" +
+            town +
+            "\",\"city\":\"" +
+            city +
+            "\",\"district\":\"" +
+            district +
+            "\"," +
+            "\"region\":\"Greater Accra\",\"country\":\"Ghana\"}"
+        );
     }
 }

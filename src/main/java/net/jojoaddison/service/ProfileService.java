@@ -2,6 +2,7 @@ package net.jojoaddison.service;
 
 import java.util.Optional;
 import net.jojoaddison.domain.Profile;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.repository.ProfileRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,14 +39,15 @@ public class ProfileService {
      * What made it worth removing rather than leaving unused is that it was the one write path to
      * this collection with no rule on it at all: `update` preserves accountId and createdDate
      * from the stored row and runs `OrganizationReferenceValidator`, `partialUpdate` merges field by
-     * field, `upsertOwnProfile` forces the account to the caller. A bare repository passthrough on
+     * field, `partialUpdateOwnProfile` forces the account to the caller. A bare repository passthrough on
      * the service is what the next create would have been written against.
      *
      * The paths that legitimately create a profile do it through the repository, each with its own
-     * reason recorded: `OnboardingService.upsertOwnProfile` (the clinician's own, from their token),
-     * `partialUpdateOwnProfile` below (the caller's own, because profile.md's step 2 IS "create the
-     * profile" and PUT /api/profile is the endpoint it names) and `updatePushPreferences` below (the
-     * caller's own, so a toggle works before onboarding finishes).
+     * reason recorded: `partialUpdateOwnProfile` below (the caller's own, because profile.md's step 2
+     * IS "create the profile" and PUT /api/profile is the endpoint it names) and
+     * `updatePushPreferences` below (the caller's own, so a toggle works before onboarding finishes).
+     * `OnboardingService.upsertOwnProfile` was a third until F8 retired it with
+     * /api/onboarding/profile.
      *
      * There were two until profile.md's T1 and this sentence said so; it is a count maintained by
      * hand, so prefer the shared property to the tally — EVERY ONE OF THEM FORCES accountId FROM THE
@@ -135,10 +137,10 @@ public class ProfileService {
      * <p>{@code profile.md} specifies <b>a dialog panel per step</b>, so a pane saves only its own
      * slice of the document. A whole-document write is therefore wrong <em>by construction</em>: the
      * next-of-kin pane would blank the address the address pane had just saved, with a 200 and a body
-     * confirming it. That is the behaviour this method <b>replaces rather than inherits</b> —
-     * {@code OnboardingService.upsertOwnProfile} writes thirteen fields unconditionally with no
-     * {@code != null} guards, and today's client only survives it by sending
-     * <code>{...this.loaded, …}</code> back, which makes correctness a property of the client.
+     * confirming it. That is the behaviour this method <b>replaced rather than inherited</b> —
+     * {@code OnboardingService.upsertOwnProfile}, retired by F8, wrote thirteen fields
+     * unconditionally with no {@code != null} guards, and the clients only survived it by sending
+     * <code>{...this.loaded, …}</code> back, which made correctness a property of the client.
      *
      * <h2>{@code accountId} is forced here and never read from the body</h2>
      *
@@ -167,6 +169,30 @@ public class ProfileService {
      * not lost: the save raises {@code AfterSaveEvent} and {@code ProfileStatus} is announced from
      * there, which is the half the estate actually consumes.
      *
+     * <h2>It stamps {@code PROFILE_COMPLETED}, and the server is the only thing that may (F1)</h2>
+     *
+     * <p>{@code profile.md} § "Step 2": <i>"Set {@code profile.status} to {@code PROFILE_COMPLETED}
+     * when every field is provided"</i>. {@link ProfileCompleteness} is what "every field" means —
+     * 39 values on the owner's literal, nested reading — and it is evaluated <b>after</b> the merge,
+     * against the stored row as it now stands, never against the request body: a pane saves one
+     * slice, so the body alone can never be complete and a predicate run over it would stamp
+     * nothing, ever.
+     *
+     * <p><b>The client never decides this.</b> {@code status} is in
+     * {@code ProfileFieldOwnership.REFUSED_FIELDS}, so a body naming it is refused with a 400 before
+     * this method is reached — an applicant who could write {@code status} would approve their own
+     * credential review. The two halves are one rule read from both ends: the caller cannot set it
+     * and the server always does.
+     *
+     * <p>⚠ <b>It sets, and does not clear.</b> {@code profile.md} says what to do when every field
+     * is provided and says nothing about the other case, so nothing here invents a second rule — a
+     * profile that was complete keeps its {@code status} if a later write leaves it short. ⛔ Do not
+     * add a clearing branch on the reasoning that it is tidier: {@code ProfileStatus} is the
+     * alphabet of {@code OnboardingService}'s state machine and a profile may legitimately have been
+     * moved past {@code PROFILE_COMPLETED} by an admin transition, which this method must not undo.
+     * Narrowing the field back from {@code CREDENTIAL_REVIEW} because a clinician blanked a middle
+     * name would rewind an application's lifecycle from a form.
+     *
      * @param accountId the caller's gateway {@code User.id}, from the {@code uid} claim.
      * @param incoming the fields the caller named; everything null is left as stored.
      * @return the persisted profile.
@@ -175,7 +201,11 @@ public class ProfileService {
         log.debug("Request to partially update own Profile for account : {}", accountId);
         Profile own = profileRepository.findByAccountId(accountId).orElseGet(Profile::new);
         own.setAccountId(accountId);
-        return profileRepository.save(applyProvidedFields(own, incoming));
+        Profile merged = applyProvidedFields(own, incoming);
+        if (ProfileCompleteness.isComplete(merged)) {
+            merged.setStatus(ProfileStatus.PROFILE_COMPLETED);
+        }
+        return profileRepository.save(merged);
     }
 
     /**
@@ -194,10 +224,17 @@ public class ProfileService {
         if (provided.getFirstName() != null) {
             target.setFirstName(provided.getFirstName());
         }
-        // Copied since profile.md's T1, and it had never been written by ANY path: upsertOwnProfile
-        // omitted it, so the middle name the wizard collected was stored by nothing while
-        // profile.md's header renders "firstName middleName lastName". The Java field is
-        // `middleNames` and the specification calls it `middleName`; see Profile.middleNames.
+        // Copied since profile.md's T1, and NO APPLICANT-FACING WRITE PATH had ever copied it:
+        // upsertOwnProfile omitted it, so the middle name the wizard collected was stored by nothing
+        // while profile.md's header renders the full name.
+        //
+        // ⛔ THAT CLAIM USED TO READ "it had never been written by ANY path" AND THAT WAS FALSE (F6).
+        // The admin PATCH /api/profiles/{id} did copy it, through this very method, before T1 —
+        // `git show 53e9640^:src/main/java/net/jojoaddison/service/ProfileService.java` lines 123-124.
+        // The narrower claim is the true one and is the one that mattered: an applicant filling in
+        // their own profile had no route by which the field reached the database. Corrected here
+        // rather than reworded, because a comment that overstates a gap is how the next reader
+        // concludes a field is unreachable when it is merely unreachable from one direction.
         if (provided.getMiddleNames() != null) {
             target.setMiddleNames(provided.getMiddleNames());
         }
@@ -240,9 +277,10 @@ public class ProfileService {
         // the raw ObjectNode, so a recursive merge is reconstructible there and could be
         // handed down. It simply is not, for the two reasons that were always the real ones:
         // address above, the other embedded object this copies, has always replaced
-        // wholesale, and OnboardingService.upsertOwnProfile replaces this very field. A
-        // merge here would make the paths that write the next of kin disagree about what
-        // writing it means.
+        // wholesale, and the retired upsertOwnProfile replaced this very field. A merge
+        // here would make the paths that write the next of kin disagree about what writing
+        // it means — there is one such path left, and this method is it, so the rule is now
+        // kept for the PATCH's sake rather than for a sibling writer's.
         //
         // THE LIST DOES NOT CHANGE THAT ARGUMENT, it sharpens it (profile.md T1). `contacts`
         // replaces wholesale as `emergencyContact` did, and a per-element merge would have to
@@ -351,9 +389,12 @@ public class ProfileService {
      * onboarding fills in the rest and does not treat mere existence as progress — the application
      * advances only when {@code completeProfile} is called explicitly.
      *
-     * <p>This deliberately does not go through {@code OnboardingService.upsertOwnProfile}. That sets
-     * every field it knows from the incoming body, so routing preferences through it would mean
-     * either sending a whole profile to change one toggle, or blanking the rest.
+     * <p>This deliberately does not go through {@link #partialUpdateOwnProfile}, which is the write
+     * {@code PUT /api/profile} serves: routing preferences through it would mean sending a whole
+     * profile to change one toggle, and the three flags are refused there by
+     * {@code ProfileFieldOwnership} so that this method is their only writer. ⚠ Until F8 the
+     * argument was stronger — {@code OnboardingService.upsertOwnProfile} set every field it knew
+     * from the body, so the alternative blanked the rest.
      */
     public PushPreferences updatePushPreferences(String accountId, PushPreferences preferences) {
         Profile profile = profileRepository.findByAccountId(accountId).orElseGet(() -> new Profile().accountId(accountId));

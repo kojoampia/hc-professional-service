@@ -75,15 +75,26 @@ public class OnboardingResource {
         return onboardingService.progressFor(currentAccountId());
     }
 
-    @GetMapping("/profile")
-    public net.jojoaddison.domain.Profile getOwnProfile() {
-        return onboardingService.getOwnProfile(currentAccountId());
-    }
-
-    @PutMapping("/profile")
-    public net.jojoaddison.domain.Profile upsertOwnProfile(@RequestBody net.jojoaddison.domain.Profile profile) {
-        return onboardingService.upsertOwnProfile(currentAccountId(), profile);
-    }
+    /*
+     * GET and PUT /profile are GONE — retired by F8, per profile.md § Other Elements:
+     * "api/onboarding/profile should migrate to api/profile".
+     *
+     * ProfileResource serves both verbs on /api/profile now. This is a retirement rather than a
+     * second writer because the two did not mean the same thing: the PUT here was a thirteen-field
+     * WHOLE-DOCUMENT replace with no null guards, so a wizard pane saving its own slice blanked
+     * every field the other panes had written and answered 200 doing it. The only thing standing
+     * between that and data loss was the client sending `{...this.loaded, …}` back, which made
+     * correctness a property of the caller. /api/profile is a partial write.
+     *
+     * The order was the house rule's and not a preference — ADD BEFORE REMOVING, AND REMOVE THE
+     * CONSUMER BEFORE THE PRODUCER: web/'s clinical-profile.component.ts and mobile/'s
+     * profile-api.service.ts were both re-pointed first, mobile/ being the consumer that had
+     * appeared in no task and would have started answering 200 with the next of kin silently not
+     * saved.
+     *
+     * ⚠ /progress and the two /acknowledgement mappings above are deliberately untouched: they are
+     * T5's and T3's respectively, and mobile/ still reads /progress and /applications/me.
+     */
 
     @GetMapping("/applications")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")

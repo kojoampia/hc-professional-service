@@ -11,6 +11,7 @@ import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
 import net.jojoaddison.domain.enumeration.ProfileStatus;
+import net.jojoaddison.domain.enumeration.Sex;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
 
 /**
@@ -81,12 +82,21 @@ final class CompleteOnboardingFixture {
             .firstName("Appli")
             .lastName("Cant")
             .birthDate(LocalDate.of(1990, 1, 1))
-            .sex("female")
+            .sex(Sex.FEMALE)
             .mobilePhone("+233200000000")
-            .cardType("GHANACARD")
+            .cardType(DocumentType.GHANACARD)
             .cardNumber("GHA-1")
             .address(new Address().streetAddress("1 Road").city("Accra").region("Greater Accra").country("Ghana"))
-            .contacts(List.of(new EmergencyContact().name("Ama").relationship("Sister").phone("+233200000001")));
+            // TWO contacts since F2, because profile.md step 2 requires at least two and
+            // OnboardingService.nextOfKinComplete now counts them. One satisfied the old anyMatch,
+            // so this fixture's whole point — "a profile the ACTIVE gate accepts" — stopped being
+            // true the moment that predicate changed, and nothing but this file says so.
+            .contacts(
+                List.of(
+                    new EmergencyContact().name("Ama").relationship("Sister").phone("+233200000001"),
+                    new EmergencyContact().name("Kofi").relationship("Brother").phone("+233200000002")
+                )
+            );
     }
 
     /**

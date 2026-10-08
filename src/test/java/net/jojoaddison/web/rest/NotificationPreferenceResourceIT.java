@@ -83,8 +83,11 @@ class NotificationPreferenceResourceIT {
             .perform(put("/api/notifications/preferences").contentType(MediaType.APPLICATION_JSON).content(body(false, false, false)))
             .andExpect(status().isOk());
 
-        // The whole reason this is not routed through PUT /api/onboarding/profile, which sets every
-        // field it knows from the body it is given.
+        // The whole reason this is not routed through the profile endpoint: a settings switch must
+        // not depend on a successful profile read, and the three flags are refused on both profile
+        // write paths by ProfileFieldOwnership so this endpoint is their only writer. ⚠ The argument
+        // was stronger until F8 — PUT /api/onboarding/profile set every field it knew from the body,
+        // so routing three toggles through it would have BLANKED the two fields asserted below.
         Profile saved = profileRepository.findByAccountId(accountIdFor(NURSE)).orElseThrow();
         assertThat(saved.getFirstName()).isEqualTo("Ama");
         assertThat(saved.getMobilePhone()).isEqualTo("+233200000000");

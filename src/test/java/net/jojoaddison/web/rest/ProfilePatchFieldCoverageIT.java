@@ -247,11 +247,12 @@ class ProfilePatchFieldCoverageIT {
      * ⚠ <b>The retired {@code emergencyContact} name still works on the wire, and that is load-bearing
      * rather than legacy clutter.</b>
      *
-     * <p>{@code PUT /api/onboarding/profile} is still live and two shipped clients still speak the
-     * singular name: {@code web/}, which T6 re-points, and <b>{@code mobile/}, which no task in
-     * {@code profile-addendum.md} moves at all</b> — {@code me.page.ts} reads
-     * {@code profile?.emergencyContact?.name} and PUTs {@code emergencyContact: {…}} back. Deleting
-     * the alias would leave the mobile Me tab answering 200 with the next of kin quietly not saved.
+     * <p>{@code PUT /api/onboarding/profile} is gone (F8) and both clients were re-pointed at
+     * {@code PUT /api/profile} in the same unit — but <b>the alias is still what they send</b>:
+     * {@code web/}'s wire type and {@code mobile/}'s {@code me.page.ts} both name
+     * {@code emergencyContact}, and dropping it is T6's work, not the path migration's. Deleting the
+     * alias now would leave the mobile Me tab answering 200 with the next of kin quietly not saved
+     * — the same outcome under a new URL.
      *
      * <p>It is a projection of {@code contacts}, never a second stored field: the write below must
      * land in the list, and the read must come back out of it. Retire the pair with T6, and only once

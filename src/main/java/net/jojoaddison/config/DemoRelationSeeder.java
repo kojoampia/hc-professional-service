@@ -130,7 +130,7 @@ public class DemoRelationSeeder implements ApplicationRunner {
      * <p><b>Nothing else in this service can put a row under that {@code _id}</b>, so leaving it alone
      * cannot be leaving somebody else's row alone: {@code POST /api/profiles} refuses outright (item
      * 66), {@code PUT /api/profiles/{id}} requires the id to exist already, and
-     * {@code OnboardingService.upsertOwnProfile} either adopts the row it finds by {@code accountId}
+     * {@code ProfileService.partialUpdateOwnProfile} either adopts the row it finds by {@code accountId}
      * or creates one under a generated id. The demo account is therefore the only account this row can
      * ever belong to, and a hand-edited database that made it otherwise is still better served by a
      * seeder that writes nothing than by one that overwrites a stranger's profile.

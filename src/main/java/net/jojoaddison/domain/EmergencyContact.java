@@ -26,20 +26,35 @@ import java.util.Objects;
  * no {@code Address} at all rather than an empty one, because an address nobody entered and an
  * address with every field empty should not read the same.
  *
- * <p><b>No {@code id} of its own, and {@code profile.md} gives it one.</b> That is a deliberate
- * divergence recorded rather than implemented: this is a value type with no {@code @Document}, no
- * repository and no endpoint, so an id would be a field no writer sets, no reader joins on and no
- * form may collect — the specification's own note calls it "not a user input". If a contact ever
- * needs addressing individually it comes back as a decision, with whatever sets it.
+ * <h2>{@code id} is a field of this model, because {@code profile.md} gives it one (F5)</h2>
  *
- * <p><b>{@code equals} inherits {@link Address}'s identity semantics</b>, which are id-based and
- * answer false for two addresses whose ids are null — the shape every embedded one has. Nothing in
- * the service compares contacts, and the write paths replace wholesale rather than diffing, so this
- * is recorded rather than worked around.
+ * <p>It was omitted, and the reasoning recorded here for the omission — <i>a value type needs no
+ * id</i> — <b>was overruled by the owner</b>. {@code profile.md}'s EmergencyContact model lists
+ * {@code id} first and that document is authoritative; "the existing model is more defensible" is
+ * not an argument against building what was specified. It is <b>not</b> a Mongo {@code @Id}: this
+ * class has no {@code @Document} and no repository, so the field is an ordinary member of the
+ * embedded object, carried on the wire and stored inside {@code profile.contacts}. Nothing in this
+ * service mints one and no form collects one, which is the specification's own note about it
+ * ("not a user input"); a client that supplies one has it stored and returned, which is what lets a
+ * form address the right element of the list when there is more than one.
+ *
+ * <h2>⚠ {@code equals} compares the address <em>by value</em>, and that was a live bug</h2>
+ *
+ * <p>{@link Address#equals(Object)} is identity-based — the JHipster convention for a
+ * {@code @Document} — so it answers {@code false} whenever {@code id} is null, which is the shape
+ * <em>every</em> embedded address has. This class's {@code equals} delegated to it, so <b>two
+ * field-for-field identical contacts never compared equal</b> and {@code List<EmergencyContact>}
+ * did not behave: {@code contains}, {@code indexOf} and list {@code equals} all answered on a
+ * property nobody sets. Fixed through {@link Address#hasSameValuesAs(Address)} and
+ * {@link Address#valuesHashCode()} — the fix is here rather than on {@code Address}, whose
+ * identity contract is right for the collection it is a document of. {@code EmergencyContactTest}
+ * holds it.
  */
 public class EmergencyContact implements Serializable {
 
     private static final long serialVersionUID = 1L;
+
+    private String id;
 
     private String name;
 
@@ -50,6 +65,19 @@ public class EmergencyContact implements Serializable {
     private String email;
 
     private Address address;
+
+    public String getId() {
+        return id;
+    }
+
+    public EmergencyContact id(String id) {
+        this.id = id;
+        return this;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
 
     public String getName() {
         return name;
@@ -126,24 +154,38 @@ public class EmergencyContact implements Serializable {
         }
         EmergencyContact other = (EmergencyContact) o;
         return (
+            Objects.equals(id, other.id) &&
             Objects.equals(name, other.name) &&
             Objects.equals(relationship, other.relationship) &&
             Objects.equals(phone, other.phone) &&
             Objects.equals(email, other.email) &&
-            Objects.equals(address, other.address)
+            sameAddress(other.address)
         );
+    }
+
+    /**
+     * Address equality by value, never by identity — see the class note. {@code null == null} is the
+     * ordinary case: a contact with no address is as valid as one with.
+     */
+    private boolean sameAddress(Address other) {
+        return address == null ? other == null : address.hasSameValuesAs(other);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(name, relationship, phone, email, address);
+        // Agrees with equals above: the address contributes its VALUE hash, because
+        // Address.hashCode() is getClass().hashCode() and so says nothing about two addresses being
+        // the same one. Were this Objects.hash(..., address), two equal contacts would hash alike by
+        // accident rather than by construction, and a contact whose address changed would not.
+        return Objects.hash(id, name, relationship, phone, email, address == null ? 0 : address.valuesHashCode());
     }
 
     // prettier-ignore
     @Override
     public String toString() {
         return "EmergencyContact{" +
-                "name='" + getName() + "'" +
+                "id='" + getId() + "'" +
+                ", name='" + getName() + "'" +
                 ", relationship='" + getRelationship() + "'" +
                 ", phone='" + getPhone() + "'" +
                 ", email='" + getEmail() + "'" +
