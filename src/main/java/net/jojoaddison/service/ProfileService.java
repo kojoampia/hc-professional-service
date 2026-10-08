@@ -41,10 +41,16 @@ public class ProfileService {
      * field, `upsertOwnProfile` forces the account to the caller. A bare repository passthrough on
      * the service is what the next create would have been written against.
      *
-     * The two paths that legitimately create a profile do it through the repository, each with its
-     * own reason recorded: `OnboardingService.upsertOwnProfile` (the clinician's own, from their
-     * token) and `updatePushPreferences` below (the caller's own, so a toggle works before
-     * onboarding finishes).
+     * The paths that legitimately create a profile do it through the repository, each with its own
+     * reason recorded: `OnboardingService.upsertOwnProfile` (the clinician's own, from their token),
+     * `partialUpdateOwnProfile` below (the caller's own, because profile.md's step 2 IS "create the
+     * profile" and PUT /api/profile is the endpoint it names) and `updatePushPreferences` below (the
+     * caller's own, so a toggle works before onboarding finishes).
+     *
+     * There were two until profile.md's T1 and this sentence said so; it is a count maintained by
+     * hand, so prefer the shared property to the tally — EVERY ONE OF THEM FORCES accountId FROM THE
+     * CALLER'S TOKEN AND NONE TAKES IT FROM A BODY. That is the invariant item 54 exists for, and a
+     * fourth writer that honours it is fine while a third that did not would be the takeover again.
      */
 
     /**
@@ -88,25 +94,26 @@ public class ProfileService {
      *
      * <p><b>The fields this method does not copy are guaranteed absent rather than ignored here.</b>
      * This copied eleven and stopped, so a merge-patch naming {@code title},
-     * {@code emergencyContact}, {@code specialtyCategoryId}, {@code teamIds} or one of the three push
+     * {@code contacts}, {@code specialtyCategoryId}, {@code teamIds} or one of the three push
      * preferences answered 200 with the row unchanged and the unmodified profile as the body —
-     * backlog.md item 60. {@code title} and {@code emergencyContact} join the eleven below;
-     * {@code ProfileResource.PATCH_REFUSED_FIELDS} names the rest and refuses
-     * each with a 400 before this method is reached, and the argument for that split lives there
-     * because it is an argument about the HTTP surface. Read that map rather than a count: the set
-     * grew by {@code status} after this sentence was first written.
+     * backlog.md item 60. {@code title} and {@code contacts} join the rest in
+     * {@link #applyProvidedFields}; {@code ProfileFieldOwnership.REFUSED_FIELDS} names the others and
+     * refuses each with a 400 before this method is reached, and the argument for that split lives
+     * there because it is an argument about the HTTP surface. Read that map rather than a count: the
+     * set grew by {@code status} after this sentence was first written.
      *
      * <p>So this method is deliberately <em>not</em> the place that guards them: it cannot be.
      * Whether a merge-patch <em>named</em> a field is a fact about the JSON document, and by the time
      * a {@link Profile} has been bound an absent {@code teamIds} and an explicitly empty one are the
-     * same empty list — the field is initialised, so a {@code != null} guard of the shape used below
-     * would fire on every patch and empty a clinician's teams whenever they changed their phone
-     * number. Only the resource, which still holds the raw node, can tell the two apart.
+     * same empty list — the field is initialised, so a {@code != null} guard of the shape
+     * {@link #applyProvidedFields} uses would fire on every patch and empty a clinician's teams
+     * whenever they changed their phone number. Only the resource, which still holds the raw node,
+     * can tell the two apart.
      *
-     * <p>{@code .jhipster/Profile.json} lists {@code title}, {@code emergencyContact},
+     * <p>{@code .jhipster/Profile.json} lists {@code title}, {@code contacts},
      * {@code specialtyCategoryId} and {@code teamIds}, so a regeneration would re-emit all four into
-     * this if-chain and quietly undo the refusal. {@code ProfilePatchFieldCoverageIT} is what fails
-     * when that happens.
+     * the if-chain below and quietly undo the refusal. {@code ProfilePatchFieldCoverageIT} is what
+     * fails when that happens.
      *
      * @param profile the entity to update partially.
      * @return the persisted entity.
@@ -116,62 +123,141 @@ public class ProfileService {
 
         return profileRepository
             .findById(profile.getId())
-            .map(existingProfile -> {
-                if (profile.getFirstName() != null) {
-                    existingProfile.setFirstName(profile.getFirstName());
-                }
-                if (profile.getMiddleNames() != null) {
-                    existingProfile.setMiddleNames(profile.getMiddleNames());
-                }
-                if (profile.getLastName() != null) {
-                    existingProfile.setLastName(profile.getLastName());
-                }
-                if (profile.getBirthDate() != null) {
-                    existingProfile.setBirthDate(profile.getBirthDate());
-                }
-                if (profile.getSex() != null) {
-                    existingProfile.setSex(profile.getSex());
-                }
-                if (profile.getMobilePhone() != null) {
-                    existingProfile.setMobilePhone(profile.getMobilePhone());
-                }
-                if (profile.getPhoneNumber() != null) {
-                    existingProfile.setPhoneNumber(profile.getPhoneNumber());
-                }
-                if (profile.getEmail() != null) {
-                    existingProfile.setEmail(profile.getEmail());
-                }
-                if (profile.getCardType() != null) {
-                    existingProfile.setCardType(profile.getCardType());
-                }
-                if (profile.getCardNumber() != null) {
-                    existingProfile.setCardNumber(profile.getCardNumber());
-                }
-                if (profile.getAddress() != null) {
-                    existingProfile.setAddress(profile.getAddress());
-                }
-                if (profile.getTitle() != null) {
-                    existingProfile.setTitle(profile.getTitle());
-                }
-                // Whole-object replace, not a recursive merge, which is a deviation from RFC 7396 —
-                // the media type this endpoint consumes — and a deliberate one.
-                //
-                // Not because a merge is impossible. It used to be: the body was bound to a Profile
-                // before it reached any of this, so an absent "phone" and an explicit "phone": null
-                // arrived as the same Java null. THIS COMMIT ENDED THAT — ProfileResource now holds
-                // the raw ObjectNode, so a recursive merge is reconstructible there and could be
-                // handed down. It simply is not, for the two reasons that were always the real ones:
-                // address above, the other embedded object partialUpdate copies, has always replaced
-                // wholesale, and OnboardingService.upsertOwnProfile replaces this very field. A
-                // merge here would make the two paths that write emergencyContact disagree about
-                // what writing it means.
-                if (profile.getEmergencyContact() != null) {
-                    existingProfile.setEmergencyContact(profile.getEmergencyContact());
-                }
-
-                return existingProfile;
-            })
+            .map(existing -> applyProvidedFields(existing, profile))
             .map(profileRepository::save);
+    }
+
+    /**
+     * The caller's own profile, partially written — {@code PUT /api/profile} (profile.md step 2, T1).
+     *
+     * <h2>Partial, and the wizard is the reason rather than a preference</h2>
+     *
+     * <p>{@code profile.md} specifies <b>a dialog panel per step</b>, so a pane saves only its own
+     * slice of the document. A whole-document write is therefore wrong <em>by construction</em>: the
+     * next-of-kin pane would blank the address the address pane had just saved, with a 200 and a body
+     * confirming it. That is the behaviour this method <b>replaces rather than inherits</b> —
+     * {@code OnboardingService.upsertOwnProfile} writes thirteen fields unconditionally with no
+     * {@code != null} guards, and today's client only survives it by sending
+     * <code>{...this.loaded, …}</code> back, which makes correctness a property of the client.
+     *
+     * <h2>{@code accountId} is forced here and never read from the body</h2>
+     *
+     * <p>Twice over, deliberately. {@code Profile.accountId} is {@code @JsonProperty(READ_ONLY)} so a
+     * client cannot send one at all (backlog.md item 54, a live account takeover) — and this method
+     * sets it from the caller's token regardless, because <b>a defence that depends on a Jackson
+     * annotation staying put is one edit from being gone</b> and this is the field every ownership
+     * check in the service resolves through. A {@code PUT} from account A can therefore not reach
+     * account B's row by any route: the lookup is by the caller's own account id, and the value
+     * written is the caller's own account id.
+     *
+     * <h2>It creates the row when there is none, and that is step 2 rather than an upsert habit</h2>
+     *
+     * <p>Step 2 <em>is</em> "create the profile", so refusing a write for want of an existing row
+     * would make the specified flow unreachable. The create takes the shape
+     * {@link #updatePushPreferences} already uses — a document holding nothing but the account id,
+     * then the provided fields on top — which is also why that method is the precedent for the next
+     * paragraph.
+     *
+     * <p><b>No {@code entity.created} is published, and that is the house decision rather than an
+     * omission.</b> {@code ProfileStatusAnnouncer}'s javadoc states it in as many words:
+     * {@code updatePushPreferences} creates a profile and announces no creation, backlog.md item 49
+     * names that, and it is left alone because {@code entity.created} carries an {@code actor} and an
+     * {@code accountId} that are not derivable from the saved document, and rides
+     * {@code hc.professional.entity}, which hc-admin is not subscribed to. The profile's arrival is
+     * not lost: the save raises {@code AfterSaveEvent} and {@code ProfileStatus} is announced from
+     * there, which is the half the estate actually consumes.
+     *
+     * @param accountId the caller's gateway {@code User.id}, from the {@code uid} claim.
+     * @param incoming the fields the caller named; everything null is left as stored.
+     * @return the persisted profile.
+     */
+    public Profile partialUpdateOwnProfile(String accountId, Profile incoming) {
+        log.debug("Request to partially update own Profile for account : {}", accountId);
+        Profile own = profileRepository.findByAccountId(accountId).orElseGet(Profile::new);
+        own.setAccountId(accountId);
+        return profileRepository.save(applyProvidedFields(own, incoming));
+    }
+
+    /**
+     * Copies every field the caller provided onto the stored row, leaving the rest alone.
+     *
+     * <p><b>One copy of this list, called from both write paths</b>, which is the point of it being a
+     * method (profile.md T1). {@code PATCH /api/profiles/&#123;id&#125;} and
+     * {@code PUT /api/profile} apply the same fields and refuse the same ones
+     * ({@code ProfileFieldOwnership}); two if-chains would be two answers to the same question, and a
+     * field added to one is the drift {@code quality/}'s items 84 and 92 are a record of.
+     *
+     * @param target the stored row, or a fresh document owned by the caller.
+     * @param provided the bound request body.
+     */
+    private Profile applyProvidedFields(Profile target, Profile provided) {
+        if (provided.getFirstName() != null) {
+            target.setFirstName(provided.getFirstName());
+        }
+        // Copied since profile.md's T1, and it had never been written by ANY path: upsertOwnProfile
+        // omitted it, so the middle name the wizard collected was stored by nothing while
+        // profile.md's header renders "firstName middleName lastName". The Java field is
+        // `middleNames` and the specification calls it `middleName`; see Profile.middleNames.
+        if (provided.getMiddleNames() != null) {
+            target.setMiddleNames(provided.getMiddleNames());
+        }
+        if (provided.getLastName() != null) {
+            target.setLastName(provided.getLastName());
+        }
+        if (provided.getBirthDate() != null) {
+            target.setBirthDate(provided.getBirthDate());
+        }
+        if (provided.getSex() != null) {
+            target.setSex(provided.getSex());
+        }
+        if (provided.getMobilePhone() != null) {
+            target.setMobilePhone(provided.getMobilePhone());
+        }
+        if (provided.getPhoneNumber() != null) {
+            target.setPhoneNumber(provided.getPhoneNumber());
+        }
+        if (provided.getEmail() != null) {
+            target.setEmail(provided.getEmail());
+        }
+        if (provided.getCardType() != null) {
+            target.setCardType(provided.getCardType());
+        }
+        if (provided.getCardNumber() != null) {
+            target.setCardNumber(provided.getCardNumber());
+        }
+        if (provided.getAddress() != null) {
+            target.setAddress(provided.getAddress());
+        }
+        if (provided.getTitle() != null) {
+            target.setTitle(provided.getTitle());
+        }
+        // Whole-object replace, not a recursive merge, which is a deviation from RFC 7396 —
+        // the media type the PATCH endpoint consumes — and a deliberate one.
+        //
+        // Not because a merge is impossible. It used to be: the body was bound to a Profile
+        // before it reached any of this, so an absent "phone" and an explicit "phone": null
+        // arrived as the same Java null. ITEM 60's COMMIT ENDED THAT — ProfileResource holds
+        // the raw ObjectNode, so a recursive merge is reconstructible there and could be
+        // handed down. It simply is not, for the two reasons that were always the real ones:
+        // address above, the other embedded object this copies, has always replaced
+        // wholesale, and OnboardingService.upsertOwnProfile replaces this very field. A
+        // merge here would make the paths that write the next of kin disagree about what
+        // writing it means.
+        //
+        // THE LIST DOES NOT CHANGE THAT ARGUMENT, it sharpens it (profile.md T1). `contacts`
+        // replaces wholesale as `emergencyContact` did, and a per-element merge would have to
+        // answer "which element" — on a collection with no id on its members and no stable
+        // order, that question has no answer a client could predict. Replacing the list is the
+        // only rule both write paths can mean the same thing by.
+        //
+        // AND THIS GUARD IS WHY Profile.contacts IS NOT INITIALISED TO AN EMPTY LIST. Were it
+        // initialised, as teamIds is, `provided.getContacts()` would never be null and every
+        // partial write would empty the clinician's next of kin — the defect
+        // ProfilePatchFieldCoverageIT.anAbsentTeamIdsIsNotAChange exists for, one field over.
+        if (provided.getContacts() != null) {
+            target.setContacts(provided.getContacts());
+        }
+        return target;
     }
 
     /**

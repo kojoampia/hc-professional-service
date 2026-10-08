@@ -11,9 +11,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.lang.reflect.ParameterizedType;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
@@ -135,57 +137,173 @@ class ProfilePatchFieldCoverageIT {
     }
 
     /**
-     * {@code emergencyContact} is applied, and applied <b>whole</b>.
+     * {@code contacts} is applied, and applied <b>whole</b>.
      *
      * <p>Replace rather than recursive merge, which RFC 7396 — the media type this endpoint consumes
      * — asks for on a nested object. The deviation is deliberate and is <em>not</em> justified by
-     * impossibility: since this change {@code ProfileResource} holds the raw node, so a merge could
-     * be reconstructed there. It is not, because {@code address} — the other embedded object
-     * {@code partialUpdate} copies — has always replaced wholesale, and so does
-     * {@code upsertOwnProfile} with this very field; a merge here would make the two write paths
-     * disagree about what writing an emergency contact means.
+     * impossibility: {@code ProfileResource} holds the raw node, so a merge could be reconstructed
+     * there. It is not, because {@code address} — the other embedded object the copy chain handles —
+     * has always replaced wholesale, and so does {@code upsertOwnProfile} with this very field; a
+     * merge here would make the write paths disagree about what writing a next of kin means.
+     *
+     * <p><b>The list makes that argument sharper rather than weaker</b> (profile.md T1): a
+     * per-element merge would have to answer "which element", and on a collection whose members
+     * carry no id and no stable order that question has no answer a client could predict.
      */
     @Test
-    void emergencyContactIsAppliedRatherThanDropped() throws Exception {
+    void contactsAreAppliedRatherThanDropped() throws Exception {
         Profile stored = storedClinician();
 
         patchWith(
             stored.getId(),
             "{\"id\":\"" +
             stored.getId() +
-            "\",\"emergencyContact\":{\"name\":\"Efua Mensah\",\"relationship\":\"sister\"," +
-            "\"phone\":\"+233200000000\"}}"
+            "\",\"contacts\":[{\"name\":\"Efua Mensah\",\"relationship\":\"sister\"," +
+            "\"phone\":\"+233200000000\"}]}"
         )
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.emergencyContact.name").value("Efua Mensah"));
+            .andExpect(jsonPath("$.contacts[0].name").value("Efua Mensah"));
 
-        EmergencyContact saved = profileRepository.findById(stored.getId()).orElseThrow().getEmergencyContact();
-        assertThat(saved).isNotNull();
-        assertThat(saved.getName()).isEqualTo("Efua Mensah");
-        assertThat(saved.getRelationship()).isEqualTo("sister");
-        assertThat(saved.getPhone()).isEqualTo("+233200000000");
+        List<EmergencyContact> saved = profileRepository.findById(stored.getId()).orElseThrow().getContacts();
+        assertThat(saved).hasSize(1);
+        assertThat(saved.get(0).getName()).isEqualTo("Efua Mensah");
+        assertThat(saved.get(0).getRelationship()).isEqualTo("sister");
+        assertThat(saved.get(0).getPhone()).isEqualTo("+233200000000");
     }
 
     /**
-     * A second {@code emergencyContact} write replaces the stored one rather than merging into it.
-     *
-     * <p>Stated separately because "applied" and "applied whole" are different claims and only the
-     * second one rules out a future recursive merge being added without a decision.
+     * More than one, which is the whole point of the field being a list — {@code profile.md} requires
+     * at least two emergency contacts and the singular field it replaced could express one.
      */
     @Test
-    void aSecondEmergencyContactReplacesTheFirstWholesale() throws Exception {
+    void severalContactsAreAllStored() throws Exception {
         Profile stored = storedClinician();
-        stored.setEmergencyContact(new EmergencyContact().name("Efua Mensah").relationship("sister").phone("+233200000000"));
+
+        patchWith(
+            stored.getId(),
+            "{\"id\":\"" +
+            stored.getId() +
+            "\",\"contacts\":[{\"name\":\"Efua Mensah\",\"relationship\":\"sister\",\"phone\":\"+233200000000\"}," +
+            "{\"name\":\"Kojo Mensah\",\"relationship\":\"brother\",\"phone\":\"+233200000001\"}]}"
+        ).andExpect(status().isOk());
+
+        List<EmergencyContact> saved = profileRepository.findById(stored.getId()).orElseThrow().getContacts();
+        assertThat(saved).hasSize(2);
+        assertThat(saved).extracting(EmergencyContact::getName).containsExactly("Efua Mensah", "Kojo Mensah");
+    }
+
+    /**
+     * {@code EmergencyContact.address} is a structured {@link Address} since profile.md's T1, and it
+     * round-trips through the nesting rather than being flattened or dropped.
+     */
+    @Test
+    void aContactAddressRoundTripsAsAStructuredAddress() throws Exception {
+        Profile stored = storedClinician();
+
+        patchWith(
+            stored.getId(),
+            "{\"id\":\"" +
+            stored.getId() +
+            "\",\"contacts\":[{\"name\":\"Efua Mensah\",\"address\":{\"streetAddress\":\"12 Oxford St\"," +
+            "\"city\":\"Accra\",\"country\":\"Ghana\"}}]}"
+        )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.contacts[0].address.streetAddress").value("12 Oxford St"));
+
+        Address saved = profileRepository.findById(stored.getId()).orElseThrow().getContacts().get(0).getAddress();
+        assertThat(saved).isNotNull();
+        assertThat(saved.getStreetAddress()).isEqualTo("12 Oxford St");
+        assertThat(saved.getCity()).isEqualTo("Accra");
+        assertThat(saved.getCountry()).isEqualTo("Ghana");
+    }
+
+    /**
+     * A second {@code contacts} write replaces the stored list rather than merging into or appending
+     * to it.
+     *
+     * <p>Stated separately because "applied" and "applied whole" are different claims and only the
+     * second one rules out a future recursive merge — or an append — being added without a decision.
+     * Append is the specific wrong answer a list invites: a wizard pane that re-saved would then
+     * double the clinician's contacts on every visit.
+     */
+    @Test
+    void aSecondContactsWriteReplacesTheStoredListWholesale() throws Exception {
+        Profile stored = storedClinician();
+        stored.setContacts(List.of(new EmergencyContact().name("Efua Mensah").relationship("sister").phone("+233200000000")));
         profileRepository.save(stored);
 
-        patchWith(stored.getId(), "{\"id\":\"" + stored.getId() + "\",\"emergencyContact\":{\"name\":\"Kojo Mensah\"}}").andExpect(
+        patchWith(stored.getId(), "{\"id\":\"" + stored.getId() + "\",\"contacts\":[{\"name\":\"Kojo Mensah\"}]}").andExpect(
             status().isOk()
         );
 
-        EmergencyContact saved = profileRepository.findById(stored.getId()).orElseThrow().getEmergencyContact();
-        assertThat(saved.getName()).isEqualTo("Kojo Mensah");
-        assertThat(saved.getRelationship()).as("a replace, not a merge — the old relationship must not survive").isNull();
-        assertThat(saved.getPhone()).as("a replace, not a merge — the old phone must not survive").isNull();
+        List<EmergencyContact> saved = profileRepository.findById(stored.getId()).orElseThrow().getContacts();
+        assertThat(saved).as("a replace, not an append — the old contact must not survive beside the new one").hasSize(1);
+        assertThat(saved.get(0).getName()).isEqualTo("Kojo Mensah");
+        assertThat(saved.get(0).getRelationship()).as("a replace, not a merge — the old relationship must not survive").isNull();
+        assertThat(saved.get(0).getPhone()).as("a replace, not a merge — the old phone must not survive").isNull();
+    }
+
+    /**
+     * ⚠ <b>The retired {@code emergencyContact} name still works on the wire, and that is load-bearing
+     * rather than legacy clutter.</b>
+     *
+     * <p>{@code PUT /api/onboarding/profile} is still live and two shipped clients still speak the
+     * singular name: {@code web/}, which T6 re-points, and <b>{@code mobile/}, which no task in
+     * {@code profile-addendum.md} moves at all</b> — {@code me.page.ts} reads
+     * {@code profile?.emergencyContact?.name} and PUTs {@code emergencyContact: {…}} back. Deleting
+     * the alias would leave the mobile Me tab answering 200 with the next of kin quietly not saved.
+     *
+     * <p>It is a projection of {@code contacts}, never a second stored field: the write below must
+     * land in the list, and the read must come back out of it. Retire the pair with T6, and only once
+     * {@code mobile/} has a task that moves it too.
+     */
+    @Test
+    void theRetiredSingularNameStillWritesIntoTheList() throws Exception {
+        Profile stored = storedClinician();
+
+        patchWith(
+            stored.getId(),
+            "{\"id\":\"" + stored.getId() + "\",\"emergencyContact\":{\"name\":\"Efua Mensah\",\"relationship\":\"sister\"}}"
+        )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.contacts[0].name").value("Efua Mensah"))
+            .andExpect(jsonPath("$.emergencyContact.name").value("Efua Mensah"));
+
+        List<EmergencyContact> saved = profileRepository.findById(stored.getId()).orElseThrow().getContacts();
+        assertThat(saved).as("the alias writes one contact into the list, not a second stored field").hasSize(1);
+        assertThat(saved.get(0).getRelationship()).isEqualTo("sister");
+    }
+
+    /**
+     * And when a body carries both names, {@code contacts} wins — whichever order Jackson binds them
+     * in.
+     *
+     * <p>Asserted because the alternative is a contract nobody could rely on: a client round-tripping
+     * a document it had just read sends both, and an outcome that depended on field order in the JSON
+     * would be undiagnosable. Both orderings are sent here for exactly that reason — one of them
+     * passes on the setter's guard and the other on the binding order, and only testing both says
+     * which.
+     */
+    @Test
+    void whenABodyCarriesBothNamesTheListWins() throws Exception {
+        Profile first = storedClinician();
+        patchWith(
+            first.getId(),
+            "{\"id\":\"" + first.getId() + "\",\"contacts\":[{\"name\":\"From contacts\"}],\"emergencyContact\":{\"name\":\"From alias\"}}"
+        ).andExpect(status().isOk());
+        assertThat(profileRepository.findById(first.getId()).orElseThrow().getContacts())
+            .extracting(EmergencyContact::getName)
+            .containsExactly("From contacts");
+        profileRepository.deleteAll();
+
+        Profile second = storedClinician();
+        patchWith(
+            second.getId(),
+            "{\"id\":\"" + second.getId() + "\",\"emergencyContact\":{\"name\":\"From alias\"},\"contacts\":[{\"name\":\"From contacts\"}]}"
+        ).andExpect(status().isOk());
+        assertThat(profileRepository.findById(second.getId()).orElseThrow().getContacts())
+            .extracting(EmergencyContact::getName)
+            .containsExactly("From contacts");
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -456,11 +574,29 @@ class ProfilePatchFieldCoverageIT {
 
     /**
      * Whether the response carries what the probe asked for. An embedded object is compared entry by
-     * entry, because the response serializes its unset members as nulls beside the one that was set.
+     * entry, because the response serializes its unset members as nulls beside the one that was set;
+     * an array is compared element by element on the same footing.
+     *
+     * <p><b>The array arm arrived with {@code contacts}</b> (profile.md T1) and it is not cosmetic.
+     * Without it, {@code [{"name":"Probe Contact"}]} was compared to the response's
+     * {@code [{"name":"Probe Contact","relationship":null,…}]} by whole-node equality, which is false
+     * — so a correctly applied list would have been reported as silently dropped, and the honest fix
+     * would have looked like a reason to exclude the field.
      */
     private boolean carries(JsonNode written, JsonNode expected) {
         if (written == null || written.isNull()) {
             return false;
+        }
+        if (expected.isArray()) {
+            if (!written.isArray() || written.size() != expected.size()) {
+                return false;
+            }
+            for (int i = 0; i < expected.size(); i++) {
+                if (!carries(written.get(i), expected.get(i))) {
+                    return false;
+                }
+            }
+            return true;
         }
         if (!expected.isObject()) {
             return expected.equals(written);
@@ -478,6 +614,16 @@ class ProfilePatchFieldCoverageIT {
     /**
      * A JSON value for a probe patch, differing from what {@link #storedClinician} holds so that
      * "applied" is observable. Unknown types fail rather than being skipped.
+     *
+     * <p>⚠ <b>A collection is probed by its ELEMENT type, not by {@code List}</b> (profile.md T1), and
+     * the alternative was a silent false pass rather than a failure. {@code Profile} now holds two
+     * {@code List} fields whose elements are nothing alike — {@code teamIds} is
+     * {@code List<String>} and {@code contacts} is {@code List<EmergencyContact>} — and
+     * {@code field.getType()} answers {@code List} for both. Probing {@code contacts} with
+     * {@code ["probe-id"]} makes Jackson fail to bind the document, the resource answers <b>400
+     * Unreadable profile document</b>, and the loop above counts a 400 as "refused" and moves on. The
+     * field would have read as decided while nothing about it had been decided at all — which is the
+     * exact defect this class exists for, arriving through its own instrument.
      */
     private String probeValueFor(Field field) {
         Class<?> type = field.getType();
@@ -493,14 +639,14 @@ class ProfilePatchFieldCoverageIT {
         if (type == Instant.class) {
             return "\"1999-12-31T00:00:00Z\"";
         }
-        if (type == List.class) {
-            return "[\"probe-id\"]";
-        }
         if (type == Address.class) {
             return "{\"streetAddress\":\"1 Probe Street\"}";
         }
         if (type == EmergencyContact.class) {
             return "{\"name\":\"Probe Contact\"}";
+        }
+        if (Collection.class.isAssignableFrom(type)) {
+            return "[" + probeElementValueFor(field) + "]";
         }
         // Enums by reflection rather than by name, so the next one added needs no edit here. Any
         // constant differs from what storedClinician() holds, which is null for every enum field, so
@@ -514,6 +660,45 @@ class ProfilePatchFieldCoverageIT {
                 "than excluding the field, or the field joins the seven this class exists for.",
                 field.getName(),
                 type.getName()
+            )
+        );
+    }
+
+    /**
+     * One element of a collection field, resolved from its declared type argument.
+     *
+     * <p>A raw or wildcard collection fails rather than defaulting to a string: a default here is how
+     * the {@code List}-shaped blind spot above would come back under a new name.
+     */
+    private String probeElementValueFor(Field field) {
+        if (
+            field.getGenericType() instanceof ParameterizedType parameterized &&
+            parameterized.getActualTypeArguments().length == 1 &&
+            parameterized.getActualTypeArguments()[0] instanceof Class<?> element
+        ) {
+            if (element == String.class) {
+                return "\"probe-id\"";
+            }
+            if (element == EmergencyContact.class) {
+                return "{\"name\":\"Probe Contact\"}";
+            }
+            return fail(
+                String.format(
+                    "This test does not know how to build a probe element for Profile.%s, a collection of %s. Teach " +
+                    "it one rather than excluding the field: probing a collection with the wrong element type makes " +
+                    "the body unreadable, which this class counts as a REFUSAL and would pass for nothing.",
+                    field.getName(),
+                    element.getName()
+                )
+            );
+        }
+        return fail(
+            String.format(
+                "Profile.%s is a collection with no resolvable element type (%s). A probe cannot be built for it, " +
+                "and defaulting to a string is how the List-shaped blind spot this method exists to close would " +
+                "return under another name.",
+                field.getName(),
+                field.getGenericType().getTypeName()
             )
         );
     }

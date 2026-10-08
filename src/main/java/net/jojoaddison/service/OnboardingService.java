@@ -174,6 +174,27 @@ public class OnboardingService {
      * {@link ProfileStatusAnnouncer}, which listens for the persisted document rather than being
      * called from a table of paths. This method was one of the four entries on that table and item 49
      * is what the table missed — see the announcer's javadoc.
+     *
+     * <h2>⚠ Superseded by {@code PUT /api/profile}, and kept until T3 retires the path</h2>
+     *
+     * <p>{@code profile.md} replaces this endpoint with {@code PUT /api/profile}
+     * ({@code OwnProfileResource}), and <b>the unconditional write below is the specific behaviour
+     * that was replaced rather than carried over</b>: there is no {@code != null} guard on any of
+     * these, so a client that sends one pane's fields blanks every field the other panes wrote.
+     * Today's clients only survive it by sending the whole document back —
+     * {@code web/}'s {@code clinical-profile.component.ts} spreads <code>{...this.loaded, …}</code>
+     * and {@code mobile/}'s {@code me.page.ts} spreads the loaded contact — which makes correctness a
+     * property of the caller. {@code ProfileService.partialUpdateOwnProfile} is the guarded version.
+     *
+     * <p>⛔ <b>Do not "fix" this method to be partial.</b> Two write paths that disagree about what a
+     * missing field means is worse than one that is wrong in a documented way, and the clients above
+     * are written against this behaviour. It goes away with the rest of {@code /api/onboarding/**}.
+     *
+     * <p><b>{@code middleNames} is copied as of profile.md's T1, and it never was before.</b> The
+     * field has been on {@code Profile} and in {@code .jhipster/Profile.json} since WP2 and no write
+     * path anywhere copied it, so the middle name the wizard collects was stored by nothing while
+     * {@code profile.md}'s header renders "firstName middleName lastName". Added here as well as on
+     * the new path because this is still the live writer until T6.
      */
     public Profile upsertOwnProfile(String accountId, Profile incoming) {
         Profile profile = profileRepository.findByAccountId(accountId).orElse(null);
@@ -197,7 +218,8 @@ public class OnboardingService {
             .cardNumber(incoming.getCardNumber())
             .title(incoming.getTitle())
             .address(incoming.getAddress())
-            .emergencyContact(incoming.getEmergencyContact());
+            .middleNames(incoming.getMiddleNames())
+            .contacts(incoming.getContacts());
         Profile saved = profileRepository.save(profile);
         if (created) {
             domainEventPublisher.publishEntityCreated(
@@ -680,13 +702,48 @@ public class OnboardingService {
         );
     }
 
+    /**
+     * What "next of kin provided" means now that {@code Profile.contacts} is a list (profile.md, T1).
+     *
+     * <h2>The decision: at least ONE contact carrying name, relationship and phone</h2>
+     *
+     * <p>Not "every contact complete", and <b>not two</b>, and both exclusions are deliberate.
+     *
+     * <p><em>Every contact complete</em> turns adding a second contact into a way to go backwards: a
+     * clinician with one good contact who starts typing a second would see their meter drop and their
+     * activation gate close, which punishes exactly the behaviour the specification asks for.
+     *
+     * <p><em>Two contacts</em> is what {@code profile.md} step 2 requires of the <b>form</b>, and it
+     * is deliberately not asserted here yet. Raising this predicate to two would make every profile
+     * already saved through the shipped one-contact wizard retroactively incomplete — the meter drops
+     * for clinicians who did nothing, and the {@code ACTIVE} gate refuses activation for applicants
+     * mid-review. That is a change to the progress model with its own blast radius
+     * ({@code OnboardingProgressIT} states the arithmetic, four i18n catalogues carry the labels,
+     * {@code CompleteOnboardingFixture} is the one fixture, and the post-sign-in redirect reads the
+     * result), and {@code profile-addendum.md} assigns it to <b>T5</b>, where the four-step meter is
+     * built. Doing it here would be the same change arriving without the rest of its own task.
+     *
+     * <p><b>This is therefore behaviour-preserving by construction:</b> for a profile holding exactly
+     * one contact — every profile in the database before the migration — it answers precisely what
+     * the singular version answered.
+     *
+     * <p><b>Advisory and server-side, as it was.</b> {@code Profile} carries no
+     * {@code jakarta.validation} annotations and gains none here: "every field is required" is a
+     * client-side rule, and making the server enforce it would reject rows the current client
+     * legitimately saves. What the server owns is whether a <em>requirement</em> is satisfied, which
+     * is this.
+     */
     private static boolean nextOfKinComplete(Profile profile) {
         return (
             profile != null &&
-            profile.getEmergencyContact() != null &&
-            hasText(profile.getEmergencyContact().getName()) &&
-            hasText(profile.getEmergencyContact().getRelationship()) &&
-            hasText(profile.getEmergencyContact().getPhone())
+            profile.getContacts() != null &&
+            profile
+                .getContacts()
+                .stream()
+                .anyMatch(
+                    contact ->
+                        contact != null && hasText(contact.getName()) && hasText(contact.getRelationship()) && hasText(contact.getPhone())
+                )
         );
     }
 

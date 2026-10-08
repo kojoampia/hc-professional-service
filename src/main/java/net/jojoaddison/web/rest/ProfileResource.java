@@ -1,10 +1,6 @@
 package net.jojoaddison.web.rest;
 
-import static java.util.stream.Collectors.joining;
-
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import net.jojoaddison.domain.Profile;
@@ -48,7 +44,7 @@ import tools.jackson.databind.node.ObjectNode;
  * is whoever they ask for. Held at {@code .authenticated()} until 2026-09-17, a carer read a doctor's
  * whole profile through {@code /account/&#123;accountId&#125;} — <b>23 fields</b> when it was measured
  * on the quality stack, including {@code cardNumber}, {@code birthDate}, {@code address},
- * {@code emergencyContact}, {@code mobilePhone}, {@code email} and {@code sex} — and the collection
+ * {@code contacts}, {@code mobilePhone}, {@code email} and {@code sex} — and the collection
  * read handed over the clinician directory a page at a time. <b>Do not treat that count as fixed:</b>
  * item 143 recorded 21 and it was 23 by the time the fix landed, because the projection is the whole
  * document and a field added to {@code Profile} is published here the day it is added, with no edit to
@@ -89,91 +85,35 @@ public class ProfileResource {
     private static final String ENTITY_NAME = "professionalMsProfile";
 
     /**
-     * The fields a merge-patch here may not change, and the endpoint that does set each
-     * (backlog.md item 60).
+     * The fields a merge-patch here may not change, and the endpoint that does set each, now live in
+     * {@link ProfileFieldOwnership} — <b>read that class</b>, which carries the whole argument.
      *
-     * <h2>Why refusals and applications, rather than copying every field {@code partialUpdate} missed</h2>
+     * <h2>Why they moved, which is itself part of the argument (profile.md, T1)</h2>
      *
-     * <p><b>Read the set below rather than a count.</b> This heading named "five refusals and two
-     * applications" until {@code Profile.status} arrived and made it six and two, which is the shape
-     * of staleness this whole class is annotated against — a number maintained by hand in prose that
-     * nothing compiles. {@code ProfilePatchFieldCoverageIT.everyProfileFieldIsEitherAppliedOrRefused}
-     * is what forces the decision for a field added later; it is not able to force a decision about a
-     * sentence.
+     * <p>{@code PUT /api/profile} is a second partial-write path into this collection and the rule
+     * has to be the same on both. Keeping a copy here and writing a second one there is the shape
+     * {@code quality/}'s items 84, 91 and 92 record: a fix applied to one of two correct-looking
+     * copies, and the conclusion drawn from them is that <b>two correct-for-now copies is how an
+     * estate arrives at one wrong one</b>.
      *
-     * <p>{@code ProfileService.partialUpdate} copied eleven of {@code Profile}'s fields and stopped,
-     * so a patch naming any of the other seven answered 200 with the row unchanged and the
-     * unmodified profile as the body — the caller's own read-back confirming a write that never
-     * happened. That the split was eleven and seven is an accident, not a design:
-     * {@code .jhipster/Profile.json} lists {@code title}, {@code emergencyContact},
-     * {@code specialtyCategoryId} and {@code teamIds}, so the generator would have emitted them; the
-     * three push preferences were added by hand for MOB9 and were never in the generator's input at
-     * all. Nobody decided any of this, which is why the fix had to be a decision rather than a
-     * completion.
+     * <p><b>Three shapes were rejected</b> when the refusals were decided, and they are recorded here
+     * rather than beside the map because they are arguments about <em>this</em> endpoint. <em>Copy all
+     * seven</em> creates two weaker second writers, and independently loses data:
+     * {@code Profile.teamIds} is initialised to an empty list, so a {@code != null} guard of the shape
+     * the applied fields use fires on every patch and would empty a clinician's teams whenever they
+     * changed a phone number — the same trap {@code Profile.contacts} is deliberately left null to
+     * avoid. <em>Gate the sensitive ones by authority</em> reads well but answers the wrong question —
+     * an admin is not the missing ingredient, an {@code OnboardingEvent} and an ownership check are,
+     * and both already exist one endpoint over; it would also make the same request succeed or fail
+     * depending on who sent it, for fields that have a documented home either way. <em>Delete the
+     * {@code PATCH} mapping</em>, as items 56 and 57 did to the deletes it echoes, was the closest
+     * call: no client in the estate calls it. But item 60 was opened precisely because a patch is the
+     * repair somebody reaches for after reading item 57, and {@code PUT} is a whole-document replace
+     * that drops what it omits — removing the mapping would take away the only non-destructive
+     * correction this service has.
      *
-     * <p><b>{@code title} and {@code emergencyContact} are applied</b>, alongside the eleven.
-     * {@code OnboardingService.upsertOwnProfile} writes both from a clinician's own onboarding body,
-     * on exactly the same footing as {@code firstName}, {@code address} and {@code cardNumber} —
-     * fields this endpoint has always let the same six roles change. Refusing them would expose no
-     * less data and would leave no way to correct a title short of a whole-document {@code PUT}.
-     *
-     * <p><b>The fields below are refused, because each already has an owner with narrower authority
-     * than this endpoint.</b> {@code PATCH /api/profiles/&#123;id&#125;} is open to all six
-     * {@code CLINICAL_MUTATION} roles and carries no ownership check, so it is the <em>weakest</em>
-     * write path in the service:
-     *
-     * <ul>
-     *   <li>{@code specialtyCategoryId} and {@code teamIds} are set by
-     *       {@code PUT /api/onboarding/applications/&#123;id&#125;/organization}, which is
-     *       {@code ROLE_ADMIN} only and appends an {@code OnboardingEvent} as part of the state
-     *       machine. Copying them here would give every nurse the power to file any colleague under
-     *       any discipline, and would move an assignment that the application's own history could
-     *       not then explain.</li>
-     *   <li>The three push preferences are set by {@code PUT /api/notifications/preferences}, which
-     *       writes the <em>caller's own</em> profile and no one else's. Copying them here would let
-     *       one clinician switch off another's compliance notifications — the nudge that says their
-     *       licence is about to expire — and the victim would see nothing.</li>
-     *   <li>{@code status} is the sixth, and it is the one that could not be anything else.
-     *       {@code ProfileStatus} is the alphabet of {@code OnboardingService}'s server-side state
-     *       machine, and every legal move between its values is a {@code ROLE_ADMIN}
-     *       {@code PUT /api/onboarding/applications/&#123;id&#125;/**} that checks
-     *       {@code LEGAL_TRANSITIONS} and appends an {@code OnboardingEvent}. A merge-patch here
-     *       checks nothing and appends nothing, so copying the field would let any of six roles
-     *       write {@code APPROVED} over {@code APPLICATION_STARTED} — jumping credential review
-     *       outright — and leave an application whose own history does not contain the step that
-     *       approved it. The refusal is also the <em>only</em> writer story this field has today:
-     *       nothing in the service sets {@code Profile.status} yet, so a patch is the first thing
-     *       that would, and it would do it without the machine.</li>
-     * </ul>
-     *
-     * <p><b>Three shapes were rejected.</b> <em>Copy all seven</em> creates those two weaker second
-     * writers, and independently loses data: {@code Profile.teamIds} is initialised to an empty list,
-     * so a {@code != null} guard of the shape the eleven use fires on every patch and would empty a
-     * clinician's teams whenever they changed a phone number. <em>Gate the sensitive ones by
-     * authority</em> reads well but answers the wrong question — an admin is not the missing
-     * ingredient, an {@code OnboardingEvent} and an ownership check are, and both already exist one
-     * endpoint over; it would also make the same request succeed or fail depending on who sent it,
-     * for fields that have a documented home either way. <em>Delete the {@code PATCH} mapping</em>,
-     * as items 56 and 57 did to the deletes it echoes, was the closest call: no client in the estate
-     * calls it. But item 60 was opened precisely because a patch is the repair somebody reaches for
-     * after reading item 57, and {@code PUT} is a whole-document replace that drops what it omits —
-     * removing the mapping would take away the only non-destructive correction this service has.
+     * @see ProfileFieldOwnership#REFUSED_FIELDS
      */
-    private static final Map<String, String> PATCH_REFUSED_FIELDS = Map.of(
-        "specialtyCategoryId",
-        "PUT /api/onboarding/applications/{id}/organization",
-        "teamIds",
-        "PUT /api/onboarding/applications/{id}/organization",
-        "pushMessagesEnabled",
-        "PUT /api/notifications/preferences",
-        "pushComplianceEnabled",
-        "PUT /api/notifications/preferences",
-        "pushShowSenderName",
-        "PUT /api/notifications/preferences",
-        "status",
-        "PUT /api/onboarding/applications/{id}/decide and the transitions beside it"
-    );
-
     @Value("${jhipster.clientApp.name}")
     private String applicationName;
 
@@ -217,9 +157,9 @@ public class ProfileResource {
      * What a caller is told instead of being handed a profile that belongs to nobody
      * (backlog.md item 66).
      *
-     * <p>It names the endpoint that does create one, for the reason {@link #PATCH_REFUSED_FIELDS}
-     * gives at length: a refusal that will not say where to go instead is backlog.md item 46 wearing
-     * a 400.
+     * <p>It names the endpoint that does create one, for the reason
+     * {@link ProfileFieldOwnership#REFUSED_FIELDS} gives at length: a refusal that will not say where
+     * to go instead is backlog.md item 46 wearing a 400.
      */
     static final String CREATE_REFUSAL =
         "A profile is created by the clinician it belongs to, through PUT /api/onboarding/profile. " +
@@ -326,10 +266,10 @@ public class ProfileResource {
      *
      * <p><b>One deviation from RFC 7396, which {@code application/merge-patch+json} names: a nested
      * object is replaced wholesale rather than merged recursively.</b> That is true of
-     * {@code address} and {@code emergencyContact}, it predates this change, and it is kept
+     * {@code address} and {@code contacts}, it predates this change, and it is kept
      * deliberately — {@code OnboardingService.upsertOwnProfile} replaces the same two, so merging
      * here would make the two write paths mean different things by the same request. See
-     * {@code ProfileService.partialUpdate}. See {@link #PATCH_REFUSED_FIELDS} and backlog.md
+     * {@code ProfileService.partialUpdate}. See {@link ProfileFieldOwnership} and backlog.md
      * item 60.
      *
      * @param id the id of the profile to save.
@@ -363,71 +303,11 @@ public class ProfileResource {
             .findById(id)
             .orElseThrow(() -> new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound"));
 
-        refuseFieldsThisEndpointDoesNotOwn(patch, profile, stored);
+        ProfileFieldOwnership.refuseFieldsThisEndpointDoesNotOwn(patch, profile, stored);
 
         Optional<Profile> result = profileService.partialUpdate(profile);
 
         return ResponseUtil.wrapOrNotFound(result, HeaderUtil.createEntityUpdateAlert(applicationName, true, ENTITY_NAME, profile.getId()));
-    }
-
-    /**
-     * Refuses, rather than silently ignores, a merge-patch that would change a field this endpoint
-     * does not own (backlog.md item 60).
-     *
-     * <p><b>The refusal is on a change, not on the mention.</b> A client that GETs a profile, edits
-     * one field and PATCHes the whole document back names every one of these at its current value,
-     * and refusing that would make the honest answer unusable. Carrying a value forward unchanged is
-     * not a dropped write, because nothing the caller asked for went missing.
-     *
-     * <p><b>Not the silence item 46 described, and not its mirror either.</b> There an operator was
-     * refused with no reason given; the answer here has to name the field and the endpoint that does
-     * own it, or it is the same defect wearing a 400.
-     */
-    private void refuseFieldsThisEndpointDoesNotOwn(ObjectNode patch, Profile incoming, Profile stored) {
-        List<String> refused = new ArrayList<>();
-        if (changes(patch, "specialtyCategoryId", incoming.getSpecialtyCategoryId(), stored.getSpecialtyCategoryId())) {
-            refused.add("specialtyCategoryId");
-        }
-        if (patch.has("teamIds") && !Objects.equals(orEmpty(incoming.getTeamIds()), orEmpty(stored.getTeamIds()))) {
-            refused.add("teamIds");
-        }
-        if (changes(patch, "pushMessagesEnabled", incoming.getPushMessagesEnabled(), stored.getPushMessagesEnabled())) {
-            refused.add("pushMessagesEnabled");
-        }
-        if (changes(patch, "pushComplianceEnabled", incoming.getPushComplianceEnabled(), stored.getPushComplianceEnabled())) {
-            refused.add("pushComplianceEnabled");
-        }
-        if (changes(patch, "pushShowSenderName", incoming.getPushShowSenderName(), stored.getPushShowSenderName())) {
-            refused.add("pushShowSenderName");
-        }
-        if (changes(patch, "status", incoming.getStatus(), stored.getStatus())) {
-            refused.add("status");
-        }
-        if (!refused.isEmpty()) {
-            String detail = refused.stream().map(field -> field + " is set by " + PATCH_REFUSED_FIELDS.get(field)).collect(joining("; "));
-            // ResponseStatusException rather than BadRequestAlertException, and not for consistency
-            // with anything — for the only reason that matters here, which is that the caller has to
-            // be able to read which field was refused. ExceptionTranslator.customizeProblem
-            // overwrites `title` with extractTitle(), and getCustomizedTitle() returns null for
-            // everything but MethodArgumentNotValidException, so a BadRequestAlertException's
-            // defaultMessage never reaches the client: the body carries "Bad Request" and
-            // "error.fieldnotpatchable" and nothing else. A refusal that will not say what it refused
-            // is item 46 wearing a 400, which is precisely what this method exists to avoid. That the
-            // same silence applies to every other BadRequestAlertException in the service is a wider
-            // finding and is recorded under item 60 rather than fixed here.
-            throw new ResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                "This endpoint does not set these fields, and will not quietly drop them: " + detail
-            );
-        }
-    }
-
-    private static boolean changes(ObjectNode patch, String field, Object incoming, Object stored) {
-        return patch.has(field) && !Objects.equals(incoming, stored);
-    }
-
-    private static List<String> orEmpty(List<String> ids) {
-        return ids == null ? List.of() : ids;
     }
 
     /**

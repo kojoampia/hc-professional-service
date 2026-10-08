@@ -65,6 +65,15 @@ final class CompleteOnboardingFixture {
     /**
      * Satisfies the {@code profile}, {@code address} and {@code nextOfKin} requirements: every field
      * {@code personalDetailsComplete}, {@code addressComplete} and {@code nextOfKinComplete} read.
+     *
+     * <p><b>ONE contact, deliberately, now that {@code Profile.contacts} is a list</b> (profile.md
+     * T1). {@code nextOfKinComplete} asks for at least one complete contact rather than two — the
+     * argument is on that predicate — so one is what "complete" means today and this fixture must
+     * keep saying exactly that. ⚠ Adding a second here would make the fixture pass a stricter
+     * predicate than the service has, which is the direction that hides a regression: T5 raises the
+     * requirement to two, and <b>this fixture is where that change becomes visible</b>, which is why
+     * it is one file on purpose — it used to be three and the one change forgot stayed red for
+     * thirteen days.
      */
     static Profile completeProfile(String accountId) {
         return new Profile()
@@ -77,7 +86,7 @@ final class CompleteOnboardingFixture {
             .cardType("GHANACARD")
             .cardNumber("GHA-1")
             .address(new Address().streetAddress("1 Road").city("Accra").region("Greater Accra").country("Ghana"))
-            .emergencyContact(new EmergencyContact().name("Ama").relationship("Sister").phone("+233200000001"));
+            .contacts(List.of(new EmergencyContact().name("Ama").relationship("Sister").phone("+233200000001")));
     }
 
     /**

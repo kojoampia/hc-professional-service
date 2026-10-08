@@ -74,7 +74,7 @@
       "fieldType": "String"
     },
     {
-      "fieldName": "emergencyContact",
+      "fieldName": "contacts",
       "fieldType": "String"
     },
     {
@@ -104,7 +104,7 @@
   ],
   "fieldsThisFormatCannotExpress": {
     "address": "Profile.address is an embedded Address document. The declaration above says String because that is the nearest thing JDL has: its field vocabulary (generator-jhipster/jdl/jhipster/field-types.js, CommonDBTypes) is scalar only, and a MongoDB relationship would emit a DBRef into another collection rather than an embedded object. Regenerating Profile emits String and breaks every consumer of the nested fields.",
-    "emergencyContact": "Profile.emergencyContact is an embedded EmergencyContact, which is a value type with no @Document, no repository and no definition file of its own. Same reason as address: there is no JDL for it, and the String above is an approximation rather than a description.",
+    "contacts": "Profile.contacts is a List<EmergencyContact>, and the String above understates it in BOTH of the ways this format fails at once — the collection dimension (as teamIds below) and the embedded value type (as address above). EmergencyContact has no @Document, no repository and no definition file of its own, and JDL has no collection-of-embedded-type at all, so there is nothing nearer than String. It was a singular `emergencyContact` until profile.md's T1, which specifies `contacts: EmergencyContact[]` and requires at least two; EmergencyContactListMigration remapped the stored rows. Regenerating Profile emits String and a clinician stops being able to name more than one next of kin — or any, since the nested object goes too. AND THE NESTING IS TWO DEEP: EmergencyContact.address is itself an embedded Address since the same change (it was a String), which nothing in .jhipster/ can state at all because EmergencyContact has no definition file to state it in. That is the field a regeneration would lose most quietly, so it is named here rather than in a dotted key of its own — every key in this block has to name a real field of this document, which is what JhipsterEntityFieldsTest.everyInexpressibleFieldNamedIsRealAndGivesAReason holds, and a note that outlives its field is a note nobody deletes.",
     "teamIds": "Profile.teamIds is a List<String>. JDL has no collection-of-scalar field type at all, so the String above understates it by one dimension. Regenerating Profile emits String, and a clinician stops being able to belong to more than one team.",
     "status": "Profile.status is an enumeration represented as a String. JDL has no native support for enums, so it is expressed as a String here."
   },

@@ -114,7 +114,7 @@ class OnboardingContractsIT {
                 .title("RN")
                 .specialtyCategoryId("cat-midwifery")
                 .teamIds(List.of("team-1", "team-2"))
-                .emergencyContact(new EmergencyContact().name("Kojo A").relationship("spouse").phone("0242000000"))
+                .contacts(List.of(new EmergencyContact().name("Kojo A").relationship("spouse").phone("0242000000")))
         );
 
         restMockMvc
@@ -134,12 +134,26 @@ class OnboardingContractsIT {
             .andExpectAll(theFourWP2Fields());
     }
 
-    /** {@code title}, {@code specialtyCategoryId}, {@code teamIds} and {@code emergencyContact}. */
+    /**
+     * {@code title}, {@code specialtyCategoryId}, {@code teamIds} and the next of kin.
+     *
+     * <p><b>The next of kin is asserted under BOTH names, which is the contract since profile.md's
+     * T1.</b> {@code contacts} is the stored field and the one the specification names;
+     * {@code emergencyContact} is a wire alias projecting its first element, kept because
+     * {@code PUT /api/onboarding/profile} is still live and two shipped clients still speak it —
+     * {@code web/} until T6 and <b>{@code mobile/}, which no task moves at all</b>. Asserting only
+     * the new name would let the alias be deleted with every test green and the mobile Me tab
+     * silently unable to save a next of kin; asserting only the old one would let the field it
+     * projects be lost under it.
+     */
     private static ResultMatcher[] theFourWP2Fields() {
         return new ResultMatcher[] {
             jsonPath("$.title").value("RN"),
             jsonPath("$.specialtyCategoryId").value("cat-midwifery"),
             jsonPath("$.teamIds", org.hamcrest.Matchers.contains("team-1", "team-2")),
+            jsonPath("$.contacts[0].name").value("Kojo A"),
+            jsonPath("$.contacts[0].relationship").value("spouse"),
+            jsonPath("$.contacts[0].phone").value("0242000000"),
             jsonPath("$.emergencyContact.name").value("Kojo A"),
             jsonPath("$.emergencyContact.relationship").value("spouse"),
             jsonPath("$.emergencyContact.phone").value("0242000000"),

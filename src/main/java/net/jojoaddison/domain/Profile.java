@@ -1,6 +1,8 @@
 package net.jojoaddison.domain;
 
+import com.fasterxml.jackson.annotation.JsonGetter;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonSetter;
 import java.io.Serializable;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -11,6 +13,7 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedBy;
 import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.annotation.Transient;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -96,8 +99,28 @@ public class Profile implements Serializable {
     @Field("card_number")
     private String cardNumber;
 
-    @Field("emergency_contact")
-    private EmergencyContact emergencyContact;
+    /**
+     * The clinician's next of kin — <b>a list since profile.md's T1</b>, where it was a single
+     * embedded {@code emergencyContact}.
+     *
+     * <p>{@code profile.md} specifies {@code contacts: EmergencyContact[]} and requires <b>at least
+     * two</b> of them, which a single embedded object cannot express at all.
+     * {@code EmergencyContactListMigration} remaps every document written in the old shape into a
+     * one-element list; {@code OnboardingService.nextOfKinComplete} is the server's own predicate
+     * over it and says there what "complete" means for a list.
+     *
+     * <p><b>Deliberately NOT initialised to an empty list, unlike {@link #teamIds} beside it.</b>
+     * That is the single most expensive line to get wrong here, and the argument is already written
+     * out in {@code ProfilePatchFieldCoverageIT.anAbsentTeamIdsIsNotAChange}: an initialised
+     * collection is <em>never null</em> on a bound {@code Profile}, so the {@code != null} guard
+     * {@code ProfileService.applyProvidedFields} uses would fire on every partial write and
+     * <b>empty a clinician's next of kin whenever they changed a phone number</b>. Left null,
+     * "the caller sent no contacts" and "the caller sent an empty list" stay distinguishable on the
+     * only path that matters. A getter that answered an empty list instead of null would reintroduce
+     * exactly the same defect one layer up.
+     */
+    @Field("contacts")
+    private List<EmergencyContact> contacts;
 
     @Field("status")
     private ProfileStatus status;
@@ -374,17 +397,65 @@ public class Profile implements Serializable {
         this.title = title;
     }
 
-    public EmergencyContact getEmergencyContact() {
-        return this.emergencyContact;
+    public List<EmergencyContact> getContacts() {
+        return this.contacts;
     }
 
-    public Profile emergencyContact(EmergencyContact emergencyContact) {
-        this.setEmergencyContact(emergencyContact);
+    public Profile contacts(List<EmergencyContact> contacts) {
+        this.setContacts(contacts);
         return this;
     }
 
+    public void setContacts(List<EmergencyContact> contacts) {
+        this.contacts = contacts;
+    }
+
+    /**
+     * The singular {@code emergencyContact} this document carried until profile.md's T1, kept
+     * <b>on the wire only</b> so the clients that have not migrated yet keep working.
+     *
+     * <h2>Why a compatibility shim rather than a clean break</h2>
+     *
+     * <p>{@code PUT /api/onboarding/profile} is still live and still the path two shipped clients
+     * write a profile through. Re-pointing {@code web/} is T6 and is scheduled <b>last</b>; and
+     * <b>{@code mobile/} is in no scheduled task at all</b> — {@code me.page.ts} reads
+     * {@code profile?.emergencyContact?.name} and PUTs {@code emergencyContact: {…}} back. Dropping
+     * the name from the wire would therefore leave the mobile Me tab silently unable to save a next
+     * of kin, with nothing in any backlog that would fix it: a 200 with the field quietly gone,
+     * which is precisely the "answered wrongly" failure this repository keeps closing.
+     *
+     * <p><b>It is a projection of {@link #contacts}, never a second stored field.</b> There is one
+     * {@code contacts} array in Mongo and no {@code emergency_contact} key after
+     * {@code EmergencyContactListMigration} runs. The read answers the first contact; the write puts
+     * one contact into the list.
+     *
+     * <p><b>{@code contacts} wins when a body carries both</b>, whichever order Jackson binds them
+     * in — the setter below only fills a list that is still empty. Without that guard a client
+     * round-tripping a document it had just read would have the outcome depend on field order in the
+     * JSON, which is not a contract anybody could rely on.
+     *
+     * <p>⛔ <b>Not reflected by {@code ProfilePatchFieldCoverageIT}</b>, which enumerates declared
+     * fields and sees no such field. The alias has its own named cases there instead. Retire this
+     * pair with T6, and only once {@code mobile/} has a task that moves it too.
+     *
+     * @deprecated use {@link #getContacts()}; retires with the last client that names it (T6).
+     */
+    @Deprecated(since = "profile.md T1")
+    @Transient
+    @JsonGetter("emergencyContact")
+    public EmergencyContact getEmergencyContact() {
+        return this.contacts == null || this.contacts.isEmpty() ? null : this.contacts.get(0);
+    }
+
+    /** @deprecated see {@link #getEmergencyContact()}. */
+    @Deprecated(since = "profile.md T1")
+    @JsonSetter("emergencyContact")
     public void setEmergencyContact(EmergencyContact emergencyContact) {
-        this.emergencyContact = emergencyContact;
+        if (this.contacts != null && !this.contacts.isEmpty()) {
+            // `contacts` was bound first and is the newer name; it wins. See the note above.
+            return;
+        }
+        this.contacts = emergencyContact == null ? null : new ArrayList<>(List.of(emergencyContact));
     }
 
     public String getSpecialtyCategoryId() {
@@ -464,7 +535,7 @@ public class Profile implements Serializable {
                 ", cardNumber='" + getCardNumber() + "'" +
                 ", address='" + getAddress() + "'" +
                 ", title='" + getTitle() + "'" +
-                ", emergencyContact='" + getEmergencyContact() + "'" +
+                ", contacts='" + getContacts() + "'" +
                 ", specialtyCategoryId='" + getSpecialtyCategoryId() + "'" +
                 ", teamIds='" + getTeamIds() + "'" +
                 ", status='" + getStatus() + "'" +

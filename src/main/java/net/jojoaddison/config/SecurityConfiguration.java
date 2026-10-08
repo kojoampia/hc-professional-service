@@ -41,6 +41,36 @@ public class SecurityConfiguration {
                     // endpoints stay open to authenticated users, with admin-only decisions
                     // enforced via method security on OnboardingResource.
                     .requestMatchers("/api/onboarding/**").authenticated()
+                    // THE CALLER'S OWN PROFILE, and the same island as onboarding above because it is
+                    // the same caller: profile.md's step 2 is written by an applicant holding
+                    // ROLE_USER and nothing else, so it cannot be gated on a clinical role. See
+                    // OwnProfileResource, which carries the argument.
+                    //
+                    // IT MUST SIT ABOVE THE METHOD RULES BELOW. Without this line the PUT falls
+                    // through to `PUT /api/** -> CLINICAL_MUTATION` and EVERY APPLICANT IS 403'd ON
+                    // THEIR OWN PROFILE — the one state the endpoint exists to serve. The GET would
+                    // survive on `/api/** -> .authenticated()`, which is the trap: a half-working
+                    // endpoint reads as "the write is broken" rather than "the rule is missing".
+                    //
+                    // /api/profile IS NOT /api/profiles, and this is the line that depends on it. The
+                    // admin read gate below names the literal "/api/profiles" plus
+                    // "/api/profiles/**"; neither pattern matches the singular path, so it inherits
+                    // the catch-all and not the gate — and, read the other way, this matcher cannot
+                    // widen the plural surface. ClinicalAuthorityMatrixIT asserts BOTH halves,
+                    // because that is a claim about Spring's pattern matching and not about this
+                    // comment.
+                    //
+                    // METHOD-AGNOSTIC, SO HEAD IS COVERED. Spring MVC dispatches a HEAD to the
+                    // @GetMapping handler, and a rule scoped to HttpMethod.GET lets it fall to
+                    // whatever sits below — a measured fail-open on /api/profiles, caught in review
+                    // (item 143). This path names no subject, so it is not an existence oracle about
+                    // anyone; what a method-scoped rule would still do is answer the same request
+                    // under a different authority depending on the verb. Add a verb here, never an
+                    // exception below.
+                    //
+                    // The handler carries a matching @PreAuthorize("isAuthenticated()"). Two layers,
+                    // as api/ PR #55 settled, and neither is deletable on the strength of the other.
+                    .requestMatchers("/api/profile").authenticated()
                     // EVERY READ ON /api/profiles NAMES ITS SUBJECT IN THE PATH, so authentication
                     // gates nothing: every caller is authenticated as somebody and the subject is
                     // whoever they ask for. Held at .authenticated() below, a carer read a doctor's
