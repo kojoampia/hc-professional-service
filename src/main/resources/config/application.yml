@@ -102,9 +102,24 @@ spring:
     name: HC-Professional-Service
   servlet:
     multipart:
-      # OnboardingDocumentResource documents and enforces a 5,000,000-byte limit, but Spring's
-      # DEFAULT max-file-size is 1MB and fires FIRST — at the container, before any controller code
-      # runs. Every upload between 1MB and 5MB therefore failed with an opaque
+      # ⚠ INERT SINCE T2, AND KEPT RATHER THAN DELETED — profile.md step 3, 2026-10-08.
+      # These two properties apply to multipart request parsing and NOTHING IN THIS SERVICE PARSES
+      # MULTIPART ANY MORE. The one endpoint that did — the document upload, then
+      # POST /api/onboarding/documents — is now POST /api/personal-document carrying profile.md's
+      # specified JSON body with `data` as the uploaded file, so the container's multipart parser is
+      # never entered and this ceiling is never consulted. Left in place deliberately: the value is
+      # correct for the shape it describes, the reasoning below is what a future upload endpoint
+      # would need, and removing a limit is not the way to record that nothing currently hits it.
+      #
+      # ⛔ SO THE CEILING CHAIN IS NOW TWO RUNGS, NOT THREE, and the middle one is this file's.
+      # OwnPersonalDocumentResource.MAX_BYTES carries the arithmetic: base64 is 4/3 of the document,
+      # so nginx's 8MB cap on the RAW body is reached at roughly 6MB of document, and between the
+      # app's 5MB check and that figure the application's clear message still wins.
+      #
+      # The history is worth keeping because it is why anyone wrote a number here at all.
+      # The resource documents and enforces a 5,000,000-byte limit, but Spring's DEFAULT
+      # max-file-size is 1MB and fired FIRST — at the container, before any controller code ran.
+      # Every upload between 1MB and 5MB therefore failed with an opaque
       # MaxUploadSizeExceededException instead of the application's own clear message. Camera
       # captures land squarely in that range, which is how MOB8 would have hit it.
       #

@@ -4,7 +4,6 @@ import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
 import static net.jojoaddison.security.WithMockGatewayUser.Factory.gatewayUser;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -12,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.util.Base64;
 import java.util.List;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.Category;
@@ -35,7 +35,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -128,15 +127,12 @@ class OnboardingFlowIT {
 
         // wrong content type
         restMockMvc
-            .perform(uploadFile(new MockMultipartFile("file", "x.txt", MediaType.TEXT_PLAIN_VALUE, PDF_BYTES), DocumentType.CERTIFICATE))
+            .perform(upload("x.txt", MediaType.TEXT_PLAIN_VALUE, PDF_BYTES, DocumentType.CERTIFICATE))
             .andExpect(status().isBadRequest());
         // declared pdf, wrong magic bytes
         restMockMvc
             .perform(
-                uploadFile(
-                    new MockMultipartFile("file", "x.pdf", MediaType.APPLICATION_PDF_VALUE, "not a pdf".getBytes()),
-                    DocumentType.CERTIFICATE
-                )
+                upload("x.pdf", MediaType.APPLICATION_PDF_VALUE, "not a pdf".getBytes(StandardCharsets.UTF_8), DocumentType.CERTIFICATE)
             )
             .andExpect(status().isBadRequest());
         // oversize
@@ -146,22 +142,20 @@ class OnboardingFlowIT {
         big[2] = 'D';
         big[3] = 'F';
         restMockMvc
-            .perform(uploadFile(new MockMultipartFile("file", "big.pdf", MediaType.APPLICATION_PDF_VALUE, big), DocumentType.CERTIFICATE))
+            .perform(upload("big.pdf", MediaType.APPLICATION_PDF_VALUE, big, DocumentType.CERTIFICATE))
             .andExpect(status().isBadRequest());
         // OTHER without label
         restMockMvc
-            .perform(uploadFile(new MockMultipartFile("file", "o.pdf", MediaType.APPLICATION_PDF_VALUE, PDF_BYTES), DocumentType.OTHER))
+            .perform(upload("o.pdf", MediaType.APPLICATION_PDF_VALUE, PDF_BYTES, DocumentType.OTHER))
             .andExpect(status().isBadRequest());
         // license without expiry
         restMockMvc
-            .perform(uploadFile(new MockMultipartFile("file", "l.pdf", MediaType.APPLICATION_PDF_VALUE, PDF_BYTES), DocumentType.LICENSE))
+            .perform(upload("l.pdf", MediaType.APPLICATION_PDF_VALUE, PDF_BYTES, DocumentType.LICENSE))
             .andExpect(status().isBadRequest());
 
         // valid upload: stored PENDING with checksum + size, bytes not echoed
         restMockMvc
-            .perform(
-                uploadFile(new MockMultipartFile("file", "cert.pdf", MediaType.APPLICATION_PDF_VALUE, PDF_BYTES), DocumentType.CERTIFICATE)
-            )
+            .perform(upload("cert.pdf", MediaType.APPLICATION_PDF_VALUE, PDF_BYTES, DocumentType.CERTIFICATE))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.verificationStatus").value("PENDING"))
             .andExpect(jsonPath("$.sizeBytes").value(PDF_BYTES.length))
@@ -221,7 +215,7 @@ class OnboardingFlowIT {
         doc.setData("%PDF".getBytes());
         personalDocumentRepository.save(doc);
         restMockMvc
-            .perform(get("/api/onboarding/documents"))
+            .perform(get("/api/personal-document"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].type").value("CERTIFICATE"))
             .andExpect(jsonPath("$[0].data").isEmpty());
@@ -356,12 +350,34 @@ class OnboardingFlowIT {
         return CompleteOnboardingFixture.document(profile, type, expiry);
     }
 
-    private org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder uploadFile(
-        MockMultipartFile file,
+    /**
+     * One {@code POST /api/personal-document} carrying profile.md's specified body.
+     *
+     * <p>⚠ <b>JSON, and this helper built a multipart request until T2.</b> {@code data} is base64
+     * on the wire, which is what {@code profile.md}'s {@code byte[]} means over HTTP — so the
+     * oversize case below encodes 5,000,001 bytes into roughly 6.7 MB of request, and what it proves
+     * is the application's own check rather than any container ceiling. {@code DocumentUploadLimitIT}
+     * is where a real socket and a real parser are exercised, and it says why this class cannot do it.
+     */
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder upload(
+        String name,
+        String contentType,
+        byte[] bytes,
         DocumentType type
     ) {
-        var builder = multipart("/api/onboarding/documents").file(file).param("type", type.name());
-        return builder;
+        return post("/api/personal-document")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(
+                "{\"name\":\"" +
+                name +
+                "\",\"type\":\"" +
+                type.name() +
+                "\",\"dataContentType\":\"" +
+                contentType +
+                "\",\"data\":\"" +
+                Base64.getEncoder().encodeToString(bytes) +
+                "\"}"
+            );
     }
 
     private org.springframework.test.web.servlet.ResultActions decide(String id, String decision, String reason) throws Exception {

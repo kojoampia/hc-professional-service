@@ -82,7 +82,7 @@ public class ComplianceService {
      * granted on — because the defect was precisely that the two questions had separate answers.
      * <p>
      * <b>Item 20 added a second, independent defence and did not replace this one.</b> A renewal
-     * uploaded through {@code /api/onboarding/documents} marks the row the clinician names as
+     * uploaded through {@code /api/personal-document} marks the row the clinician names as
      * replaced, and the query below skips marked rows, so the loop never reaches the guard for that
      * professional. The guard still has to be here, and it covers strictly more: the profiles whose
      * lapsed rows predate the marker, rows renewed by any other path, and — since a clinician who

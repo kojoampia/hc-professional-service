@@ -166,7 +166,7 @@ class ComplianceFlowIT {
         // 2026-08-20 — see setUp(): 409 was the right answer to an incomplete profile, not a defect
         // in the reactivation path.
         //
-        // Saved straight to the repository rather than posted to /api/onboarding/documents, and that
+        // Saved straight to the repository rather than posted to /api/personal-document, and that
         // choice is now load-bearing (backlog.md item 20). The upload path marks the row a renewal
         // replaces, and the sweep skips marked rows — so renewing through it here would make every
         // assertion below pass because the lapsed row had vanished from the query, while the sweep

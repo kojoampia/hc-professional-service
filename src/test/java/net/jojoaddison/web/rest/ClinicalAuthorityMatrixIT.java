@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -379,6 +380,104 @@ class ClinicalAuthorityMatrixIT {
     void aClinicianRefusedTheDirectoryStillReachesTheirOwnProfile() throws Exception {
         restMockMvc.perform(get("/api/profiles")).andExpect(status().isForbidden());
         restMockMvc.perform(get("/api/profile")).andExpect(status().isNotFound());
+    }
+
+    // --- /api/personal-document (singular): the applicant's own credentials, T2's T0 rules ---------
+    //
+    // Same island and same argument as /api/profile above, one step further along the wizard:
+    // profile.md's step 3 is uploaded by an APPLICANT holding ROLE_USER and nothing else.
+    // OwnPersonalDocumentResource takes no subject on either collection mapping — profileId is
+    // derived from the caller's own profile through the uid claim — so .authenticated() is the gate.
+    //
+    // THE RULE HERE IS A PREFIX AND /api/profile's IS NOT, which is the one real difference: this
+    // path has a sub-resource, /{id}/content, the only route by which document bytes leave the
+    // service. A prefix is a widening, so the cases below assert where it STOPS as carefully as they
+    // assert what it admits — above all that it does not reach /api/personal-documents, PLURAL, whose
+    // three GETs return `data` inline with no ownership check at all (profile-addendum.md S1).
+
+    /**
+     * An applicant lists their own documents. <b>Not a 403</b> is the assertion; the 400 is
+     * {@code ownProfile}'s answer for a caller who has not completed step 2, which is step 3's
+     * dependency on step 2 and not an authorization answer.
+     */
+    @Test
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
+    void anApplicantReachesTheirOwnDocuments() throws Exception {
+        restMockMvc.perform(get("/api/personal-document")).andExpect(status().isBadRequest());
+    }
+
+    /** And a {@code HEAD} of it — the verb a {@code GET}-scoped rule drops onto the matrix below. */
+    @Test
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
+    void anApplicantsHeadOfTheirOwnDocumentsIsNotRefused() throws Exception {
+        restMockMvc.perform(head("/api/personal-document")).andExpect(status().isBadRequest());
+    }
+
+    /**
+     * An applicant <b>uploads</b>, which is the half the mutation matrix would otherwise refuse.
+     *
+     * <p>This is the case T0 exists for on this path and the one most easily lost: {@code ROLE_USER}
+     * is outside {@code CLINICAL_MUTATION}, so without {@code /api/personal-document} sitting above
+     * {@code POST /api/** -> CLINICAL_MUTATION} every applicant is 403'd uploading their own licence
+     * — while the list {@code GET} keeps working on {@code /api/** -> .authenticated()}. That
+     * asymmetry reads as a broken upload rather than as a missing rule.
+     *
+     * <p>The 400 is {@code ownProfile}'s, reached <em>because</em> authorization let the request
+     * through; the point is that it is not a 403.
+     */
+    @Test
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
+    void anApplicantCanPostTheirOwnDocument() throws Exception {
+        restMockMvc
+            .perform(post("/api/personal-document").contentType(MediaType.APPLICATION_JSON).content("{\"type\":\"CERTIFICATE\"}"))
+            .andExpect(status().isBadRequest());
+    }
+
+    /** The sub-resource the prefix exists for: a read of bytes reaches the handler's own 404. */
+    @Test
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
+    void anApplicantReachesTheDocumentContentSubResource() throws Exception {
+        restMockMvc.perform(get("/api/personal-document/{id}/content", "matrix-no-such-document")).andExpect(status().isNotFound());
+    }
+
+    /**
+     * ⛔ <b>The prefix stops at the singular path and does not open the plural CRUD surface.</b>
+     *
+     * <p>{@code /api/personal-document} is a prefix of {@code /api/personal-documents} as a string, so
+     * "does one match the other" is a question about Spring's pattern matching that no amount of
+     * reading the configuration settles — and the stakes are higher here than on
+     * {@code /api/profile}, because {@code PersonalDocumentResource}'s writes are the only thing
+     * keeping a role-less account off a surface that edits and deletes any clinician's documents.
+     *
+     * <p>⚠ <b>Asserted on the WRITES, not on the reads, and that is deliberate.</b> The plural
+     * {@code GET}s already answer a role-less caller today — they carry no {@code @PreAuthorize} and
+     * fall to {@code /api/** -> .authenticated()}, which is standing defect S1 and is not this task's
+     * to close. So a {@code GET} here could not tell a widened matcher from the existing hole. The
+     * mutation matrix is the discriminator: if the new rule reached the plural path these would be
+     * admitted to the handler instead of refused.
+     */
+    @Test
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
+    void theSingularDocumentPathDoesNotOpenThePluralCrudSurface() throws Exception {
+        restMockMvc
+            .perform(post("/api/personal-documents").contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isForbidden());
+        restMockMvc
+            .perform(put("/api/personal-documents/{id}", "matrix-any-document").contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isForbidden());
+        restMockMvc.perform(delete("/api/personal-documents/{id}", "matrix-any-document")).andExpect(status().isForbidden());
+    }
+
+    /**
+     * And the same for the read-only disciplines: hoisting the singular path above the matrix must not
+     * have given a carer a write anywhere.
+     */
+    @Test
+    @WithMockGatewayUser(authorities = { "ROLE_CARER" })
+    void aReadOnlyDisciplineStillCannotWriteThePluralDocumentSurface() throws Exception {
+        restMockMvc
+            .perform(post("/api/personal-documents").contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isForbidden());
     }
 
     // --- And where a ROLE_ANGEL token sits, which is not where the read-only disciplines do -------

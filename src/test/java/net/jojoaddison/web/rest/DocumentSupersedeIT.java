@@ -7,7 +7,6 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -15,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.util.Base64;
 import java.util.List;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.PersonalDocument;
@@ -34,11 +34,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
-import org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 /**
@@ -137,7 +135,7 @@ class DocumentSupersedeIT {
         // The credential history stays readable from the clinician's own screen too — hiding the
         // archived row would make a renewal look like a deletion.
         restMockMvc
-            .perform(get("/api/onboarding/documents"))
+            .perform(get("/api/personal-document"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(2))
             // On the wire, not merely in the collection: the marker is what lets a client label an
@@ -392,19 +390,30 @@ class DocumentSupersedeIT {
         String otherLabel,
         String supersedesDocumentId
     ) throws Exception {
-        MockMultipartHttpServletRequestBuilder builder = multipart("/api/onboarding/documents")
-            .file(new MockMultipartFile("file", filename, MediaType.APPLICATION_PDF_VALUE, PDF_BYTES))
-            .param("type", type.name());
+        // profile.md's specified body (T2): one JSON document with `data` as the uploaded file,
+        // base64 on the wire. This built a multipart request with four form parts until then;
+        // `supersedesDocumentId` was one of them and now rides in the body, which is why this helper
+        // takes it as a plain argument either way.
+        StringBuilder body = new StringBuilder("{\"name\":\"")
+            .append(filename)
+            .append("\",\"type\":\"")
+            .append(type.name())
+            .append("\",\"dataContentType\":\"")
+            .append(MediaType.APPLICATION_PDF_VALUE)
+            .append("\",\"data\":\"")
+            .append(Base64.getEncoder().encodeToString(PDF_BYTES))
+            .append("\"");
         if (expiryDate != null) {
-            builder.param("expiryDate", expiryDate.toString());
+            body.append(",\"expiryDate\":\"").append(expiryDate).append("\"");
         }
         if (otherLabel != null) {
-            builder.param("otherLabel", otherLabel);
+            body.append(",\"otherLabel\":\"").append(otherLabel).append("\"");
         }
         if (supersedesDocumentId != null) {
-            builder.param("supersedesDocumentId", supersedesDocumentId);
+            body.append(",\"supersedesDocumentId\":\"").append(supersedesDocumentId).append("\"");
         }
-        return restMockMvc.perform(builder);
+        body.append("}");
+        return restMockMvc.perform(post("/api/personal-document").contentType(MediaType.APPLICATION_JSON).content(body.toString()));
     }
 
     /** The reviewer clearing the queue — live rows only, since an archived one is not theirs to judge. */

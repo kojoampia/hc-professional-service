@@ -71,6 +71,41 @@ public class SecurityConfiguration {
                     // The handler carries a matching @PreAuthorize("isAuthenticated()"). Two layers,
                     // as api/ PR #55 settled, and neither is deletable on the strength of the other.
                     .requestMatchers("/api/profile").authenticated()
+                    // AND THE SAME ISLAND CARRIES THE CALLER'S OWN DOCUMENTS, for the same caller and
+                    // by the same reasoning extended rather than re-argued (profile.md step 3, T2).
+                    // OwnPersonalDocumentResource takes no subject on either of its collection
+                    // mappings: profileId is derived from the caller's own profile through the uid
+                    // claim and the client never sends it. An applicant holding ROLE_USER is who
+                    // uploads a licence, so this cannot be gated on a clinical role.
+                    //
+                    // IT MUST SIT ABOVE THE METHOD RULES BELOW, for the sharper version of the
+                    // /api/profile reason: step 3 is a POST, so without this line EVERY APPLICANT IS
+                    // 403'd UPLOADING THEIR OWN CREDENTIALS while the list GET keeps working on
+                    // `/api/** -> .authenticated()`. The asymmetry reads as a broken upload rather
+                    // than as a missing rule.
+                    //
+                    // TWO PATTERNS, AND THE PREFIX IS A WIDENING THIS PATH ACTUALLY NEEDS. Unlike
+                    // /api/profile, which is the exact path and nothing under it, this resource has a
+                    // real sub-resource -- /{id}/content, the only route by which document bytes leave
+                    // this service. So the prefix is required, and the plural literal is spelled too
+                    // because "/api/personal-document/**" does not match "/api/personal-document".
+                    //
+                    // /api/personal-document IS NOT /api/personal-documents, and this is the line that
+                    // depends on it. The PLURAL path is PersonalDocumentResource -- the generated CRUD
+                    // surface, whose three GETs carry no @PreAuthorize and return `data` INLINE with no
+                    // owner check (profile-addendum.md S1). A matcher that reached it would hand that
+                    // surface to a role-less applicant on top of the clinical roles that can already
+                    // read it. ClinicalAuthorityMatrixIT asserts the separation in both directions,
+                    // because it is a claim about Spring's pattern matching and not about this comment.
+                    //
+                    // METHOD-AGNOSTIC, SO HEAD IS COVERED, exactly as on /api/profile above: Spring MVC
+                    // dispatches a HEAD to the @GetMapping handler, and a rule scoped to HttpMethod.GET
+                    // lets it fall to whatever sits below (item 143's measured fail-open). A body-less
+                    // read of a document list is still a read. Add a verb here, never an exception below.
+                    //
+                    // The handlers carry matching @PreAuthorize("isAuthenticated()"). Two layers, as
+                    // api/ PR #55 settled, and neither is deletable on the strength of the other.
+                    .requestMatchers("/api/personal-document", "/api/personal-document/**").authenticated()
                     // EVERY READ ON /api/profiles NAMES ITS SUBJECT IN THE PATH, so authentication
                     // gates nothing: every caller is authenticated as somebody and the subject is
                     // whoever they ask for. Held at .authenticated() below, a carer read a doctor's
