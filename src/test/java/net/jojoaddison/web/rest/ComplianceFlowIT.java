@@ -102,7 +102,7 @@ class ComplianceFlowIT {
             CompleteOnboardingFixture.consentedApplication(accountIdFor(PRO), ProfileStatus.ACTIVE)
                 .login(PRO)
                 .profileId(profile.getId())
-                .requestedRole("ROLE_NURSE")
+                .authority("ROLE_NURSE")
                 .source("web-careers")
         );
         // The lapsed licence satisfies the `license` requirement like any other — that one only asks
@@ -131,14 +131,14 @@ class ComplianceFlowIT {
     void expiredLicenseSweepRestrictsAndReactivationNeedsANewLicense() throws Exception {
         // the lapsed license shows up on the watchlist before the sweep
         restMockMvc
-            .perform(get("/api/onboarding/compliance/expiring?days=30"))
+            .perform(get("/api/professional-application/compliance/expiring?days=30"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].documentId").value(expiredLicense.getId()))
             .andExpect(jsonPath("$[0].login").value(PRO));
 
         // sweep suspends the ACTIVE application
         restMockMvc
-            .perform(post("/api/onboarding/compliance/sweep"))
+            .perform(post("/api/professional-application/compliance/sweep"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.expiredLicenses").value(1))
             .andExpect(jsonPath("$.applicationsSuspended").value(1));
@@ -149,7 +149,7 @@ class ComplianceFlowIT {
 
         // re-running is idempotent: nothing left to suspend
         restMockMvc
-            .perform(post("/api/onboarding/compliance/sweep"))
+            .perform(post("/api/professional-application/compliance/sweep"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.applicationsSuspended").value(0));
 
@@ -158,7 +158,7 @@ class ComplianceFlowIT {
         // it reached requireCurrentVerifiedLicense, so it would have passed with a perfectly current
         // licence too. It is the expired licence that has to be refusing it, so the body is asserted.
         restMockMvc
-            .perform(put("/api/onboarding/applications/" + application.getId() + "/activate"))
+            .perform(put("/api/professional-application/" + application.getId() + "/activate"))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.detail").value(containsString(OnboardingService.REACTIVATION_REQUIRES_LICENSE)));
 
@@ -181,7 +181,7 @@ class ComplianceFlowIT {
             ).name("nursing-license-renewed.pdf")
         );
         restMockMvc
-            .perform(put("/api/onboarding/applications/" + application.getId() + "/activate"))
+            .perform(put("/api/professional-application/" + application.getId() + "/activate"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("ACTIVE"));
 
@@ -201,7 +201,7 @@ class ComplianceFlowIT {
             .as("the lapsed row must stay un-superseded, or this test stops exercising the item 17 guard")
             .isNull();
         restMockMvc
-            .perform(post("/api/onboarding/compliance/sweep"))
+            .perform(post("/api/professional-application/compliance/sweep"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.expiredLicenses").value(1))
             .andExpect(jsonPath("$.applicationsSuspended").value(0));
@@ -224,7 +224,7 @@ class ComplianceFlowIT {
     void metricsCountFunnelByStatusAndSource() throws Exception {
         applicationRepository.save(new ProfessionalApplication().accountId("direct-1").status(ProfileStatus.CREDENTIAL_REVIEW));
         restMockMvc
-            .perform(get("/api/onboarding/compliance/metrics"))
+            .perform(get("/api/professional-application/compliance/metrics"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.byStatus.ACTIVE").value(1))
             .andExpect(jsonPath("$.byStatus.CREDENTIAL_REVIEW").value(1))
@@ -236,9 +236,9 @@ class ComplianceFlowIT {
     @Test
     @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void recentEventsFeedIsNewestFirstAcrossApplications() throws Exception {
-        restMockMvc.perform(post("/api/onboarding/compliance/sweep")).andExpect(status().isOk());
+        restMockMvc.perform(post("/api/professional-application/compliance/sweep")).andExpect(status().isOk());
         restMockMvc
-            .perform(get("/api/onboarding/compliance/events"))
+            .perform(get("/api/professional-application/compliance/events"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].applicationId").value(application.getId()))
             .andExpect(jsonPath("$[*].toStatus").value(hasItem("SUSPENDED")));
@@ -247,9 +247,9 @@ class ComplianceFlowIT {
     @Test
     @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void complianceSurfaceIsAdminOnly() throws Exception {
-        restMockMvc.perform(post("/api/onboarding/compliance/sweep")).andExpect(status().isForbidden());
-        restMockMvc.perform(get("/api/onboarding/compliance/expiring")).andExpect(status().isForbidden());
-        restMockMvc.perform(get("/api/onboarding/compliance/metrics")).andExpect(status().isForbidden());
-        restMockMvc.perform(get("/api/onboarding/compliance/events")).andExpect(status().isForbidden());
+        restMockMvc.perform(post("/api/professional-application/compliance/sweep")).andExpect(status().isForbidden());
+        restMockMvc.perform(get("/api/professional-application/compliance/expiring")).andExpect(status().isForbidden());
+        restMockMvc.perform(get("/api/professional-application/compliance/metrics")).andExpect(status().isForbidden());
+        restMockMvc.perform(get("/api/professional-application/compliance/events")).andExpect(status().isForbidden());
     }
 }

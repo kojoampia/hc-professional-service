@@ -173,6 +173,15 @@ public class DomainEventPublisher {
      * on one field instead of matching a family of event names.
      *
      * @param state one of {@code IN_PROGRESS}, {@code COMPLETED}, {@code ACTIVE}.
+     * @param requestedRole the role string, which is {@code ProfessionalApplication.authority} since
+     *     T3 renamed the field. ⛔ <b>The payload KEY below is deliberately still
+     *     {@code requestedRole}, and the parameter keeps its name to match it.</b>
+     *     {@code profile.md} § Gap Update renames <i>"the {@code String requestedRole}"</i> — a
+     *     field on an entity in this service — and says nothing about the wire. This key is a
+     *     published cross-product contract on {@code hc.professional.registration} that hc-admin
+     *     consumes, so renaming it here would be a silent breaking change on another product's
+     *     consumer, made on a reading the specification does not state. Raised with the owner;
+     *     change it only with hc-admin's half in the same cutover.
      */
     public void publishOnboardingState(String state, String accountId, String applicationId, String requestedRole, String actor) {
         Map<String, Object> payload = new LinkedHashMap<>();

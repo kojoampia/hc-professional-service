@@ -105,7 +105,82 @@ public class SecurityConfiguration {
                     //
                     // The handlers carry matching @PreAuthorize("isAuthenticated()"). Two layers, as
                     // api/ PR #55 settled, and neither is deletable on the strength of the other.
+                    //
+                    // THE REVIEWER'S VERDICT IS THE ONE THING UNDER THAT PREFIX THAT IS NOT THE
+                    // CALLER'S OWN, so it is lifted out of the island ABOVE the .authenticated()
+                    // line. PUT /api/personal-document/{id}/verify and .../reject are
+                    // PersonalDocumentReviewResource's, ROLE_ADMIN, and they moved onto this base in
+                    // T3 per profile.md § Other Elements ("api/onboarding/document should migrate to
+                    // api/personal-document").
+                    //
+                    // UNTIL THIS LINE THE @PreAuthorize ON THOSE TWO HANDLERS WAS THE ONLY LAYER.
+                    // The island rule below is deliberately wide — an applicant holds ROLE_USER and
+                    // nothing else — so a deleted annotation would have handed a carer a credential
+                    // verdict with nothing else to catch it. Now there are two, and NEITHER IS
+                    // DELETABLE ON THE STRENGTH OF THE OTHER.
+                    //
+                    // VERB-SCOPED, AND HERE THAT IS CORRECT RATHER THAN THE FAIL-OPEN item 143
+                    // RECORDS. Both mappings are @PutMapping, so there is no read to leave behind:
+                    // a GET or HEAD of either path matches no handler and 405s whatever authority
+                    // the caller holds. The danger a method-agnostic rule guards against is a
+                    // SECOND verb on the same path answering under a different authority — so if a
+                    // GET is ever added here, widen this rule in the same change.
+                    .requestMatchers(HttpMethod.PUT, "/api/personal-document/*/verify", "/api/personal-document/*/reject")
+                    .hasAuthority(AuthoritiesConstants.ADMIN)
                     .requestMatchers("/api/personal-document", "/api/personal-document/**").authenticated()
+                    // AND THE SAME ISLAND CARRIES THE CALLER'S OWN APPLICATION (profile.md step 4,
+                    // T3). /api/professional-application is where api/onboarding/applications
+                    // migrated to, so these lines REPLACE what `/api/onboarding/**` used to give
+                    // those fifteen mappings — they are not an addition. Miss them and every
+                    // applicant is locked out of their own step 4, with the refusal attributed to
+                    // the service.
+                    //
+                    // THE ORDER OF THE FOUR RULES BELOW IS LOAD-BEARING. First-match wins, so the
+                    // applicant's own /me island is spelled FIRST: the three narrower admin rules
+                    // after it use wildcards that would otherwise swallow it — in particular
+                    // `PUT /api/professional-application/*/**` matches `/me/submit`, and an
+                    // applicant submitting their own application would be 403'd by a rule written
+                    // for the reviewer's transitions.
+                    //
+                    // BOTH PATTERNS, because "/me/**" does not match "/me" itself — the bare path is
+                    // step 4's Save (PUT) and the applicant's own read (GET).
+                    //
+                    // METHOD-AGNOSTIC, SO HEAD AND PUT ARE BOTH COVERED. Step 4 WRITES through this
+                    // path, so a GET-scoped matcher would admit the read and refuse the save; and
+                    // Spring MVC dispatches a HEAD to the @GetMapping handler besides, which is the
+                    // omission item 143 records as a measured fail-open. Nothing under /me is an
+                    // existence oracle, because the path names nobody but the caller.
+                    .requestMatchers("/api/professional-application/me", "/api/professional-application/me/**").authenticated()
+                    // The WP7 compliance and operations surface — sweep, watchlist, funnel metrics
+                    // and the cross-application audit feed. ROLE_ADMIN on every one of its four
+                    // mappings, so the rule is method-agnostic: there is no verb under this prefix
+                    // that anyone but an administrator may use, and that is the shape in which a
+                    // HEAD cannot fall through to a different authority. ComplianceResource carried
+                    // a class-level @PreAuthorize and this is its chain-level half, which it never
+                    // had.
+                    .requestMatchers("/api/professional-application/compliance/**").hasAuthority(AuthoritiesConstants.ADMIN)
+                    // The seven reviewer transitions — decide, organization, authority-assigned,
+                    // roster-configured, activate, suspend, deactivate. All PUT on
+                    // /{id}/<verb>, and the only non-admin PUTs on this base are under /me, which
+                    // the rule above has already claimed. VERB-SCOPED deliberately, because the
+                    // /{id} READS below are admin-OR-OWNER and a method-agnostic rule here would
+                    // refuse an applicant their own application's event trail.
+                    .requestMatchers(HttpMethod.PUT, "/api/professional-application/*/**").hasAuthority(AuthoritiesConstants.ADMIN)
+                    // The review queue — every application on the estate, so ROLE_ADMIN, and HEAD is
+                    // listed beside GET for item 143's reason: a body-less read of a queue still
+                    // answers how many people are waiting. EXACT PATH, so neither verb rule touches
+                    // /me above or the admin-or-owner /{id} reads below, and POST on the same
+                    // literal — the applicant starting an application — falls to the island rule
+                    // after this.
+                    .requestMatchers(HttpMethod.GET, "/api/professional-application").hasAuthority(AuthoritiesConstants.ADMIN)
+                    .requestMatchers(HttpMethod.HEAD, "/api/professional-application").hasAuthority(AuthoritiesConstants.ADMIN)
+                    // What is left on this base: POST on the bare path (the applicant's create) and
+                    // the three /{id} reads, which are admin-or-owner and carry their owner check in
+                    // ProfessionalApplicationResource.assertAdminOrOwner. Authentication is the
+                    // right chain gate for both — an applicant holds ROLE_USER and nothing else —
+                    // and the handlers carry matching @PreAuthorize. Two layers, as api/ PR #55
+                    // settled, and neither is deletable on the strength of the other.
+                    .requestMatchers("/api/professional-application", "/api/professional-application/**").authenticated()
                     // EVERY READ ON /api/profiles NAMES ITS SUBJECT IN THE PATH, so authentication
                     // gates nothing: every caller is authenticated as somebody and the subject is
                     // whoever they ask for. Held at .authenticated() below, a carer read a doctor's

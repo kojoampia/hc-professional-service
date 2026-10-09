@@ -181,6 +181,7 @@ class ProfileStatusEventTest {
         assertThat(capture().data()).doesNotContainKeys(
             "role",
             "requestedRole",
+            "authority",
             "licenceNumber",
             "licenseNumber",
             "licenceVerified",

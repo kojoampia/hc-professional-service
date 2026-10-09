@@ -199,9 +199,10 @@ class OnboardingContractsIT {
             new ProfessionalApplication()
                 .accountId("account-2")
                 .login("ama.serwaa")
-                .requestedRole("ROLE_NURSE")
+                .authority("ROLE_NURSE")
                 .status(ProfileStatus.APPLICATION_STARTED)
-                .consentAcceptedAt(Instant.parse("2026-07-28T07:00:00Z"))
+                .agreed(true)
+                .agreedDate(Instant.parse("2026-07-28T07:00:00Z"))
         );
 
         assertThat(professionalApplicationRepository.findByAccountId("account-2")).contains(application);

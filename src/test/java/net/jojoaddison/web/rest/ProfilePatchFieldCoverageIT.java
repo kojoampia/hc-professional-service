@@ -349,7 +349,7 @@ class ProfilePatchFieldCoverageIT {
     }
 
     /** The endpoint that owns the organisation assignment, per {@code PATCH_REFUSED_FIELDS}. */
-    private static final String ORGANISATION_ENDPOINT = "PUT /api/onboarding/applications/{id}/organization";
+    private static final String ORGANISATION_ENDPOINT = "PUT /api/professional-application/{id}/organization";
 
     /** The endpoint that owns the push preferences, per {@code PATCH_REFUSED_FIELDS}. */
     private static final String PREFERENCES_ENDPOINT = "PUT /api/notifications/preferences";
@@ -361,10 +361,10 @@ class ProfilePatchFieldCoverageIT {
      * {@code /activate}, {@code /suspend} and {@code /deactivate} each move the status, and all seven
      * are {@code ROLE_ADMIN}.
      */
-    private static final String ONBOARDING_TRANSITION_ENDPOINT = "PUT /api/onboarding/applications/{id}/decide";
+    private static final String ONBOARDING_TRANSITION_ENDPOINT = "PUT /api/professional-application/{id}/decide";
 
     /**
-     * The specialty is assigned by {@code PUT /api/onboarding/applications/&#123;id&#125;/organization},
+     * The specialty is assigned by {@code PUT /api/professional-application/&#123;id&#125;/organization},
      * which is {@code ROLE_ADMIN} only and appends an {@code OnboardingEvent}. This endpoint is open
      * to six roles and appends nothing, so copying the field here would be a strictly weaker second
      * writer whose result the application's own history would not explain.
@@ -405,7 +405,7 @@ class ProfilePatchFieldCoverageIT {
      * {@code status} is the state machine's own field, and this endpoint is not the state machine.
      *
      * <p>Every legal move between {@code ProfileStatus} values is a {@code ROLE_ADMIN}
-     * {@code PUT /api/onboarding/applications/&#123;id&#125;/**} that checks
+     * {@code PUT /api/professional-application/&#123;id&#125;/**} that checks
      * {@code OnboardingService.LEGAL_TRANSITIONS} and appends an {@code OnboardingEvent}. The probe
      * below is deliberately a value no transition could reach from a fresh profile: applying it here
      * would write an approval with no credential review before it and no event recording either,

@@ -152,7 +152,8 @@ public class ProfileStatusAnnouncer extends AbstractMongoEventListener<Object> {
      *
      * <p>{@code ProfessionalApplication} is here for a reason that is easy to miss: {@code isComplete}
      * counts eight requirements and the first of them, consent, is
-     * {@code ProfessionalApplication.consentAcceptedAt}. So starting an application moves a published
+     * {@code ProfessionalApplication.agreed} ({@code consentAcceptedAt} until T3). So starting an
+     * application moves a published
      * field without touching either of the other two collections.
      */
     private String profileIdOf(Object entity) {

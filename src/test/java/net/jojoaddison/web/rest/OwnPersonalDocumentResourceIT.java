@@ -322,15 +322,21 @@ class OwnPersonalDocumentResourceIT {
     void theFourMandatoryDocumentsUploadedHereSatisfySubmitForReview() throws Exception {
         restMockMvc
             .perform(
-                post("/api/onboarding/applications")
+                post("/api/professional-application")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"requestedRole\":\"ROLE_NURSE\",\"consentAccepted\":true}")
+                    .content("{\"authority\":\"ROLE_NURSE\",\"agreed\":true}")
             )
             .andExpect(status().isCreated());
-        restMockMvc.perform(put("/api/onboarding/applications/me/complete-profile")).andExpect(status().isOk());
+        restMockMvc.perform(put("/api/professional-application/me/complete-profile")).andExpect(status().isOk());
 
         // Red first, in the same walk: without the documents the submit is refused.
-        restMockMvc.perform(put("/api/onboarding/applications/me/submit")).andExpect(status().isBadRequest());
+        restMockMvc
+            .perform(
+                put("/api/professional-application/me/submit")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"authority\":\"ROLE_NURSE\",\"agreed\":true}")
+            )
+            .andExpect(status().isBadRequest());
 
         upload(DocumentType.CERTIFICATE, "certificate.pdf", null, null, null).andExpect(status().isCreated());
         upload(DocumentType.LICENSE, "licence.pdf", LocalDate.now().plusYears(1), null, null).andExpect(status().isCreated());
@@ -338,7 +344,11 @@ class OwnPersonalDocumentResourceIT {
         upload(DocumentType.PASSPHOTO, "photo.pdf", null, null, null).andExpect(status().isCreated());
 
         restMockMvc
-            .perform(put("/api/onboarding/applications/me/submit"))
+            .perform(
+                put("/api/professional-application/me/submit")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"authority\":\"ROLE_NURSE\",\"agreed\":true}")
+            )
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("CREDENTIAL_REVIEW"));
     }

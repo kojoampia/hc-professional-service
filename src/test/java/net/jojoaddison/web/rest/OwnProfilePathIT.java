@@ -366,11 +366,11 @@ class OwnProfilePathIT {
             .isEqualTo("Ama");
     }
 
-    private static final String ORGANISATION_ENDPOINT = "PUT /api/onboarding/applications/{id}/organization";
+    private static final String ORGANISATION_ENDPOINT = "PUT /api/professional-application/{id}/organization";
 
     private static final String PREFERENCES_ENDPOINT = "PUT /api/notifications/preferences";
 
-    private static final String ONBOARDING_TRANSITION_ENDPOINT = "PUT /api/onboarding/applications/{id}/decide";
+    private static final String ONBOARDING_TRANSITION_ENDPOINT = "PUT /api/professional-application/{id}/decide";
 
     /**
      * ⛔ <b>{@code status} is the case that shows the refusals are not about disclosure.</b>

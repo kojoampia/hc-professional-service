@@ -89,7 +89,7 @@ class MessagingFlowIT {
         ProfessionalApplication application = new ProfessionalApplication();
         application.setAccountId(accountId);
         application.setLogin(accountId);
-        application.setRequestedRole("ROLE_NURSE");
+        application.setAuthority("ROLE_NURSE");
         application.setStatus(ProfileStatus.ACTIVE);
         return professionalApplicationRepository.save(application);
     }

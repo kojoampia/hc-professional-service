@@ -206,11 +206,11 @@ class DocumentSupersedeIT {
         // The lapsed licence is on the watchlist and counted, which is correct while it is the only
         // one this professional holds.
         restMockMvc
-            .perform(get("/api/onboarding/compliance/expiring?days=30").with(admin()))
+            .perform(get("/api/professional-application/compliance/expiring?days=30").with(admin()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(1));
         restMockMvc
-            .perform(get("/api/onboarding/compliance/metrics").with(admin()))
+            .perform(get("/api/professional-application/compliance/metrics").with(admin()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.expiringLicenses30d").value(1));
 
@@ -220,11 +220,11 @@ class DocumentSupersedeIT {
         // Renewing is now an action that clears the entry, which is the whole complaint item 20 was
         // opened about: before this, nothing a clinician or an operator could do ever would.
         restMockMvc
-            .perform(get("/api/onboarding/compliance/expiring?days=30").with(admin()))
+            .perform(get("/api/professional-application/compliance/expiring?days=30").with(admin()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(0));
         restMockMvc
-            .perform(get("/api/onboarding/compliance/metrics").with(admin()))
+            .perform(get("/api/professional-application/compliance/metrics").with(admin()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.expiringLicenses30d").value(0));
 
@@ -233,7 +233,7 @@ class DocumentSupersedeIT {
         // = 0 for the same professional-is-safe outcome reached the other way, through the item 17
         // guard. Neither test can pass for the other's reason.
         restMockMvc
-            .perform(post("/api/onboarding/compliance/sweep").with(admin()))
+            .perform(post("/api/professional-application/compliance/sweep").with(admin()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.expiredLicenses").value(0))
             .andExpect(jsonPath("$.applicationsSuspended").value(0));
@@ -258,7 +258,7 @@ class DocumentSupersedeIT {
 
         restMockMvc
             .perform(
-                put("/api/onboarding/documents/" + byName("certificate-blurred.pdf").getId() + "/reject")
+                put("/api/personal-document/" + byName("certificate-blurred.pdf").getId() + "/reject")
                     .with(admin())
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"reason\":\"unreadable scan\"}")
@@ -292,7 +292,7 @@ class DocumentSupersedeIT {
         // The reviewer surface still shows all five, so the refused scan and its reason remain part of
         // the credential history. That is the point of not deleting it.
         restMockMvc
-            .perform(get("/api/onboarding/applications/" + application.getId() + "/documents").with(admin()))
+            .perform(get("/api/professional-application/" + application.getId() + "/documents").with(admin()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(5));
     }
@@ -337,7 +337,7 @@ class DocumentSupersedeIT {
         // backdated row (expiredLicenses = 1, unlike the renewal walk-through above), and the item 17
         // guard is what spares the professional — which it can only do because the valid row is live.
         restMockMvc
-            .perform(post("/api/onboarding/compliance/sweep").with(admin()))
+            .perform(post("/api/professional-application/compliance/sweep").with(admin()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.expiredLicenses").value(1))
             .andExpect(jsonPath("$.applicationsSuspended").value(0));
@@ -429,7 +429,7 @@ class DocumentSupersedeIT {
 
     private org.springframework.test.web.servlet.ResultActions decideApproved(ProfessionalApplication application) throws Exception {
         return restMockMvc.perform(
-            put("/api/onboarding/applications/" + application.getId() + "/decide")
+            put("/api/professional-application/" + application.getId() + "/decide")
                 .with(admin())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"decision\":\"APPROVED\"}")

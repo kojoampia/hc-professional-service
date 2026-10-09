@@ -170,13 +170,13 @@ public class MessagingService {
 
     /**
      * Who currently holds a clinical authority, per this service's own records. See
-     * {@code ProfessionalApplicationRepository.findByRequestedRoleAndStatus} for why that is an
+     * {@code ProfessionalApplicationRepository.findByAuthorityAndStatus} for why that is an
      * approximation of the gateway's grant.
      */
     private Set<String> resolveRole(String role) {
         Set<String> accounts = new LinkedHashSet<>();
         professionalApplicationRepository
-            .findByRequestedRoleAndStatus(role, ProfileStatus.ACTIVE)
+            .findByAuthorityAndStatus(role, ProfileStatus.ACTIVE)
             .forEach(application -> {
                 if (application.getAccountId() != null) {
                     accounts.add(application.getAccountId());
@@ -292,8 +292,8 @@ public class MessagingService {
             .findByStatusOrderBySubmittedAtDesc(ProfileStatus.ACTIVE)
             .stream()
             .filter(application -> application.getAccountId() != null)
-            .filter(application -> role == null || role.isBlank() || role.equalsIgnoreCase(application.getRequestedRole()))
-            .map(application -> new Recipient(application.getAccountId(), application.getLogin(), application.getRequestedRole()))
+            .filter(application -> role == null || role.isBlank() || role.equalsIgnoreCase(application.getAuthority()))
+            .map(application -> new Recipient(application.getAccountId(), application.getLogin(), application.getAuthority()))
             .filter(recipient -> needle == null || needle.isBlank() || matches(recipient, needle))
             .sorted(Comparator.comparing(Recipient::displayName, Comparator.nullsLast(Comparator.naturalOrder())))
             .toList();

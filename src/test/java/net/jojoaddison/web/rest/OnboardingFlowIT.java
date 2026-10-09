@@ -104,18 +104,18 @@ class OnboardingFlowIT {
     void consentIsRequiredAndApplicationsAreUniquePerAccount() throws Exception {
         restMockMvc
             .perform(
-                post("/api/onboarding/applications")
+                post("/api/professional-application")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"requestedRole\":\"ROLE_NURSE\",\"consentAccepted\":false}")
+                    .content("{\"authority\":\"ROLE_NURSE\",\"agreed\":false}")
             )
             .andExpect(status().isBadRequest());
 
         startApplication();
         restMockMvc
             .perform(
-                post("/api/onboarding/applications")
+                post("/api/professional-application")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"requestedRole\":\"ROLE_NURSE\",\"consentAccepted\":true}")
+                    .content("{\"authority\":\"ROLE_NURSE\",\"agreed\":true}")
             )
             .andExpect(status().isConflict());
     }
@@ -171,9 +171,9 @@ class OnboardingFlowIT {
         String longSource = "web-careers-" + "x".repeat(100);
         restMockMvc
             .perform(
-                post("/api/onboarding/applications")
+                post("/api/professional-application")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"requestedRole\":\"ROLE_NURSE\",\"consentAccepted\":true,\"source\":\"" + longSource + "\"}")
+                    .content("{\"authority\":\"ROLE_NURSE\",\"agreed\":true,\"source\":\"" + longSource + "\"}")
             )
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.source").value(longSource.substring(0, 64)));
@@ -225,8 +225,14 @@ class OnboardingFlowIT {
     @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void submitRequiresMandatoryDocumentSet() throws Exception {
         startApplication();
-        restMockMvc.perform(put("/api/onboarding/applications/me/complete-profile")).andExpect(status().isOk());
-        restMockMvc.perform(put("/api/onboarding/applications/me/submit")).andExpect(status().isBadRequest());
+        restMockMvc.perform(put("/api/professional-application/me/complete-profile")).andExpect(status().isOk());
+        restMockMvc
+            .perform(
+                put("/api/professional-application/me/submit")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"authority\":\"ROLE_NURSE\",\"agreed\":true}")
+            )
+            .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -235,7 +241,13 @@ class OnboardingFlowIT {
         startApplication();
         // APPLICATION_STARTED -> CREDENTIAL_REVIEW without completing the profile
         seedMandatoryDocuments();
-        restMockMvc.perform(put("/api/onboarding/applications/me/submit")).andExpect(status().isConflict());
+        restMockMvc
+            .perform(
+                put("/api/professional-application/me/submit")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"authority\":\"ROLE_NURSE\",\"agreed\":true}")
+            )
+            .andExpect(status().isConflict());
     }
 
     @Test
@@ -245,7 +257,7 @@ class OnboardingFlowIT {
         );
         restMockMvc
             .perform(
-                put("/api/onboarding/applications/" + application.getId() + "/decide")
+                put("/api/professional-application/" + application.getId() + "/decide")
                     .with(gatewayUser("nurse", "ROLE_NURSE"))
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"decision\":\"APPROVED\"}")
@@ -256,7 +268,7 @@ class OnboardingFlowIT {
     @Test
     @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void fullLegalPathWithGuardsAndAuditTrail() throws Exception {
-        // Applicant part done directly through the repositories/service guards. consentAcceptedAt comes
+        // Applicant part done directly through the repositories/service guards. agreed/agreedDate come
         // stamped from the fixture because this test skips the applicant steps that would normally set
         // it, and the transition to ACTIVE counts consent among the eight completion requirements.
         ProfessionalApplication application = applicationRepository.save(
@@ -269,7 +281,7 @@ class OnboardingFlowIT {
         // approval blocked while documents are PENDING
         restMockMvc
             .perform(
-                put("/api/onboarding/applications/" + application.getId() + "/decide")
+                put("/api/professional-application/" + application.getId() + "/decide")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"decision\":\"APPROVED\"}")
             )
@@ -278,7 +290,7 @@ class OnboardingFlowIT {
         // correction without reason is rejected
         restMockMvc
             .perform(
-                put("/api/onboarding/applications/" + application.getId() + "/decide")
+                put("/api/professional-application/" + application.getId() + "/decide")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"decision\":\"RETURNED_FOR_CORRECTION\"}")
             )
@@ -295,16 +307,16 @@ class OnboardingFlowIT {
         teamRepository.save(new Team().id("team-1").name("Home visits \u00b7 North"));
         restMockMvc
             .perform(
-                put("/api/onboarding/applications/" + application.getId() + "/organization")
+                put("/api/professional-application/" + application.getId() + "/organization")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"specialtyCategoryId\":\"cat-1\",\"teamIds\":[\"team-1\"]}")
             )
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("ORGANIZATION_ASSIGNED"));
-        restMockMvc.perform(put("/api/onboarding/applications/" + application.getId() + "/authority-assigned")).andExpect(status().isOk());
-        restMockMvc.perform(put("/api/onboarding/applications/" + application.getId() + "/roster-configured")).andExpect(status().isOk());
+        restMockMvc.perform(put("/api/professional-application/" + application.getId() + "/authority-assigned")).andExpect(status().isOk());
+        restMockMvc.perform(put("/api/professional-application/" + application.getId() + "/roster-configured")).andExpect(status().isOk());
         restMockMvc
-            .perform(put("/api/onboarding/applications/" + application.getId() + "/activate"))
+            .perform(put("/api/professional-application/" + application.getId() + "/activate"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("ACTIVE"));
 
@@ -316,7 +328,7 @@ class OnboardingFlowIT {
         // skipping states is illegal: ACTIVE -> ORGANIZATION_ASSIGNED
         restMockMvc
             .perform(
-                put("/api/onboarding/applications/" + application.getId() + "/organization")
+                put("/api/professional-application/" + application.getId() + "/organization")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"specialtyCategoryId\":\"cat-2\"}")
             )
@@ -324,7 +336,7 @@ class OnboardingFlowIT {
 
         // audit trail: one event per transition, chronological
         restMockMvc
-            .perform(get("/api/onboarding/applications/" + application.getId() + "/events"))
+            .perform(get("/api/professional-application/" + application.getId() + "/events"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].toStatus").value("APPROVED"))
             .andExpect(jsonPath("$[4].toStatus").value("ACTIVE"));
@@ -334,9 +346,9 @@ class OnboardingFlowIT {
     private void startApplication() throws Exception {
         restMockMvc
             .perform(
-                post("/api/onboarding/applications")
+                post("/api/professional-application")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"requestedRole\":\"ROLE_NURSE\",\"consentAccepted\":true}")
+                    .content("{\"authority\":\"ROLE_NURSE\",\"agreed\":true}")
             )
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.status").value("APPLICATION_STARTED"));
@@ -383,7 +395,7 @@ class OnboardingFlowIT {
     private org.springframework.test.web.servlet.ResultActions decide(String id, String decision, String reason) throws Exception {
         String reasonJson = reason == null ? "" : ",\"reason\":\"" + reason + "\"";
         return restMockMvc.perform(
-            put("/api/onboarding/applications/" + id + "/decide")
+            put("/api/professional-application/" + id + "/decide")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"decision\":\"" + decision + "\"" + reasonJson + "}")
         );

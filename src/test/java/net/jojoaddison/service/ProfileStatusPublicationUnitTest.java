@@ -159,7 +159,8 @@ class ProfileStatusPublicationUnitTest {
             .accountId("user-42")
             .profileId("profile-7")
             .status(ProfileStatus.APPLICATION_STARTED)
-            .consentAcceptedAt(Instant.now());
+            .agreed(true)
+            .agreedDate(Instant.now());
 
         inOneRequest(() -> announcer.onAfterSave(saved(application)));
 

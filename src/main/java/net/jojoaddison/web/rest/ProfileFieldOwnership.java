@@ -52,7 +52,7 @@ import tools.jackson.databind.node.ObjectNode;
  *
  * <ul>
  *   <li>{@code specialtyCategoryId} and {@code teamIds} are set by
- *       {@code PUT /api/onboarding/applications/&#123;id&#125;/organization}, which is
+ *       {@code PUT /api/professional-application/&#123;id&#125;/organization}, which is
  *       {@code ROLE_ADMIN} only and appends an {@code OnboardingEvent} as part of the state machine.
  *       Copying them on the {@code PATCH} would give every nurse the power to file any colleague
  *       under any discipline, and would move an assignment that the application's own history could
@@ -64,7 +64,7 @@ import tools.jackson.databind.node.ObjectNode;
  *   <li>{@code status} is the sixth, and it is the one that could not be anything else.
  *       {@code ProfileStatus} is the alphabet of {@code OnboardingService}'s server-side state
  *       machine, and every legal move between its values is a {@code ROLE_ADMIN}
- *       {@code PUT /api/onboarding/applications/&#123;id&#125;/**} that checks
+ *       {@code PUT /api/professional-application/&#123;id&#125;/**} that checks
  *       {@code LEGAL_TRANSITIONS} and appends an {@code OnboardingEvent}. A merge here checks nothing
  *       and appends nothing, so copying the field would let a caller write {@code APPROVED} over
  *       {@code APPLICATION_STARTED} — jumping credential review outright — and leave an application
@@ -83,9 +83,9 @@ final class ProfileFieldOwnership {
     /** Field -> the endpoint that sets it. See the class note; read the set, never a count. */
     static final Map<String, String> REFUSED_FIELDS = Map.of(
         "specialtyCategoryId",
-        "PUT /api/onboarding/applications/{id}/organization",
+        "PUT /api/professional-application/{id}/organization",
         "teamIds",
-        "PUT /api/onboarding/applications/{id}/organization",
+        "PUT /api/professional-application/{id}/organization",
         "pushMessagesEnabled",
         "PUT /api/notifications/preferences",
         "pushComplianceEnabled",
@@ -93,7 +93,7 @@ final class ProfileFieldOwnership {
         "pushShowSenderName",
         "PUT /api/notifications/preferences",
         "status",
-        "PUT /api/onboarding/applications/{id}/decide and the transitions beside it"
+        "PUT /api/professional-application/{id}/decide and the transitions beside it"
     );
 
     private ProfileFieldOwnership() {}

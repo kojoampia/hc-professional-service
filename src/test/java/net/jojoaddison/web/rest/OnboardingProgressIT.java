@@ -165,7 +165,7 @@ class OnboardingProgressIT {
         // the same code, so a status-only assertion would keep passing while this test stopped being
         // about completeness at all. That is how backlog item 14 started.
         restMockMvc
-            .perform(put("/api/onboarding/applications/" + application.getId() + "/activate"))
+            .perform(put("/api/professional-application/" + application.getId() + "/activate"))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.detail").value(containsString(OnboardingService.ACTIVATION_REQUIRES_COMPLETE_PROFILE)));
     }
@@ -177,7 +177,7 @@ class OnboardingProgressIT {
         uploadAllMandatoryDocuments(profileRepository.save(completeProfile()));
 
         restMockMvc
-            .perform(put("/api/onboarding/applications/" + application.getId() + "/activate"))
+            .perform(put("/api/professional-application/" + application.getId() + "/activate"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value(ProfileStatus.ACTIVE.name()));
     }
@@ -192,7 +192,7 @@ class OnboardingProgressIT {
      * satisfies is the test's own business, and several deliberately satisfy none of them.
      */
     private ProfessionalApplication applicationIn(ProfileStatus status) {
-        return CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), status).login(APPLICANT).requestedRole("ROLE_NURSE");
+        return CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), status).login(APPLICANT).authority("ROLE_NURSE");
     }
 
     private Profile completeProfile() {

@@ -57,10 +57,10 @@ final class CompleteOnboardingFixture {
     /**
      * Satisfies the {@code consent} requirement: an application in {@code status} whose consent is
      * stamped. Callers chain whatever else their own subject needs — {@code login},
-     * {@code requestedRole}, {@code profileId}, {@code source} — none of which the contract reads.
+     * {@code authority}, {@code profileId}, {@code source} — none of which the contract reads.
      */
     static ProfessionalApplication consentedApplication(String accountId, ProfileStatus status) {
-        return new ProfessionalApplication().accountId(accountId).status(status).consentAcceptedAt(Instant.now());
+        return new ProfessionalApplication().accountId(accountId).status(status).agreed(true).agreedDate(Instant.now());
     }
 
     /**

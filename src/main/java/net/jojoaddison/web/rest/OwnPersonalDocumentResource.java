@@ -88,11 +88,15 @@ import org.springframework.web.server.ResponseStatusException;
  * <h2>What moved here, and what deliberately did not</h2>
  *
  * <p>The upload, the own-document list and the content stream came from
- * {@link OnboardingDocumentResource} and the applicant-facing mappings there are gone — this is the
- * only path a clinician uploads through now. ⛔ <b>What stayed behind is the reviewer's half</b>:
- * {@code PUT /api/onboarding/documents/{id}/verify} and {@code .../reject}, both {@code ROLE_ADMIN},
- * which migrate with the rest of the admin surface in T3. Two paths for one collection is a
- * transitional state with a task behind it, not a design.
+ * {@code OnboardingDocumentResource} on {@code /api/onboarding/documents}, and the applicant-facing
+ * mappings there are gone — this is the only path a clinician uploads through now.
+ *
+ * <p>⭐ <b>The reviewer's half caught up in T3 and is now on this base too</b>:
+ * {@code PUT /api/personal-document/{id}/verify} and {@code .../reject}, both {@code ROLE_ADMIN},
+ * in {@link PersonalDocumentReviewResource} — the same class, renamed with its path. Two classes
+ * still serve this one base, and that is now a split <b>by gate</b> rather than the transitional
+ * state this paragraph used to describe: this one is {@code .authenticated()} and never echoes
+ * document bytes back, that one is the administrator's verdict.
  */
 @RestController
 @RequestMapping("/api/personal-document")

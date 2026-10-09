@@ -57,6 +57,16 @@ public class OnboardingService {
     /** Refusal prefix when a transition to ACTIVE fails the eight-requirement completion contract; the missing keys follow. */
     public static final String ACTIVATION_REQUIRES_COMPLETE_PROFILE = "Activation requires a complete profile";
 
+    /**
+     * Refusal when {@code agreed} is false on any of the three writes that record consent.
+     *
+     * <p>Public and shared by all three rather than reworded per endpoint: there is one fact —
+     * consent was not given — and three places that may discover it, so a second wording would be a
+     * second copy of the same rule with nothing holding them in step. The integration tests assert
+     * this constant rather than a copy of its text.
+     */
+    public static final String CONSENT_REQUIRED = "Consent must be accepted to start an application";
+
     private static final Logger log = LoggerFactory.getLogger(OnboardingService.class);
 
     private static final Set<DocumentType> IDENTITY_TYPES = EnumSet.of(
@@ -122,21 +132,28 @@ public class OnboardingService {
     }
 
     /**
+     * Creates the caller's application, recording step 4's consent and requested authority
+     * (profile.md step 4; {@code POST /api/professional-application}).
+     *
      * @param accountId the caller's gateway {@code User.id} — the key this application is found by.
      * @param login the caller's login, stored beside it as the human-readable name. Until item 50
      *     both fields were written from one value, because both <em>were</em> the login; they are
      *     now two identifiers and the caller passes each explicitly.
+     * @param authority the role string being applied for. Named {@code requestedRole} until T3;
+     *     {@code profile.md} § Gap Update renamed it and kept it a {@code String}, because
+     *     {@code Authority} is the gateway's class and this service holds only the role.
+     * @param agreed the consent tick. Named {@code consentAccepted} until T3.
      */
     public ProfessionalApplication startApplication(
         String accountId,
         String login,
-        String requestedRole,
-        boolean consentAccepted,
+        String authority,
+        boolean agreed,
         String invitedBy,
         String source
     ) {
-        if (!consentAccepted) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Consent must be accepted to start an application");
+        if (!agreed) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, CONSENT_REQUIRED);
         }
         applicationRepository
             .findByAccountId(accountId)
@@ -147,9 +164,14 @@ public class OnboardingService {
             new ProfessionalApplication()
                 .accountId(accountId)
                 .login(login)
-                .requestedRole(requestedRole)
+                .authority(authority)
+                // profile.md step 4: "profileId | string | Set to Profile.id". Null when the
+                // applicant has no profile yet, which is legal and is what completeProfile fills in;
+                // every reader already answers 409 "Application has no linked profile" for that.
+                .profileId(ownProfileId(accountId))
                 .status(ProfileStatus.APPLICATION_STARTED)
-                .consentAcceptedAt(Instant.now())
+                .agreed(true)
+                .agreedDate(Instant.now())
                 .invitedBy(invitedBy)
                 .source(normalizeSource(source))
         );
@@ -298,9 +320,56 @@ public class OnboardingService {
         return transition(application, ProfileStatus.PROFILE_COMPLETED, accountId, "profile completed");
     }
 
-    public ProfessionalApplication submitForReview(String accountId) {
+    /**
+     * Step 4's write: records consent and the requested authority, links the profile, moves the
+     * application to {@code CREDENTIAL_REVIEW} and announces it (profile.md step 4 and § Gap
+     * Update).
+     *
+     * <h2>⭐ One operation, and both of step 4's buttons call it</h2>
+     *
+     * <p>{@code profile.md} step 4: <i>"A <b>Save</b> and a <b>Submit</b> button store the consent
+     * and the requested authority, and set {@code application.status} to
+     * {@code CREDENTIAL_REVIEW}."</i> — one sentence, a compound subject, <b>identical effects
+     * attributed to both buttons</b>. § Gap Update adds the rest to the same operation:
+     * <i>"Submitting sets {@code Application.status} to {@code CREDENTIAL_REVIEW} and triggers the
+     * Kafka event, when all requirements are satisfied."</i>
+     *
+     * <p>So there is one service method, reached by two mappings, and the difference between Save
+     * and Submit is the <b>wizard's</b> — which pane stays open — not the server's. That is T8's.
+     *
+     * <p>⛔ <b>A Kafka-less "Save" variant was considered and refused.</b> It is the reading in
+     * which Save differs from Submit by the event, and it produces a status change the estate is
+     * never told about: hc-admin consumes {@code onboarding.state} {@code COMPLETED} to learn that
+     * an application is waiting on a reviewer, so an application that reached
+     * {@code CREDENTIAL_REVIEW} silently would sit in this service's queue and in nobody else's.
+     * <b>A consumer reading where nobody writes is silence that looks like health</b>, and a
+     * producer that sometimes stays quiet is the same defect from the other end. The requirements
+     * gate was refused on the same ground: a second path to {@code CREDENTIAL_REVIEW} that skipped
+     * {@link #requireMandatoryDocuments} would let an applicant into the review queue with no
+     * licence, and {@code profile.md} conditions the move on <i>"all requirements are
+     * satisfied"</i> without naming a button.
+     *
+     * @param accountId the caller's gateway {@code User.id}.
+     * @param agreed step 4's consent tick; false is refused.
+     * @param authority the role string being applied for.
+     */
+    public ProfessionalApplication submitForReview(String accountId, boolean agreed, String authority) {
+        if (!agreed) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, CONSENT_REQUIRED);
+        }
         ProfessionalApplication application = getOwnApplication(accountId);
         requireMandatoryDocuments(application);
+        // The authority is whatever the applicant last declared; the consent DATE is not re-stamped
+        // over an existing one. profile.md renders it — "dated Application.agreedDate" — and a
+        // re-affirmation of a consent already given is not a new consent, so moving the date would
+        // make the page state something untrue about when the subject agreed.
+        application.authority(authority);
+        if (!application.isAgreed()) {
+            application.agreed(true).agreedDate(Instant.now());
+        }
+        if (application.getProfileId() == null) {
+            application.profileId(ownProfileId(accountId));
+        }
         application.submittedAt(Instant.now());
         ProfessionalApplication saved = transition(
             application,
@@ -311,8 +380,20 @@ public class OnboardingService {
         // COMPLETED means the applicant is done, not that they are cleared to work — the ACTIVE
         // event below says that. Keeping them apart is what lets the admin portal tell an
         // application stalled on us from one stalled on the clinician.
-        domainEventPublisher.publishOnboardingState("COMPLETED", accountId, saved.getId(), saved.getRequestedRole(), accountId);
+        domainEventPublisher.publishOnboardingState("COMPLETED", accountId, saved.getId(), saved.getAuthority(), accountId);
         return saved;
+    }
+
+    /**
+     * The caller's own {@code Profile.id}, or null when they have none yet.
+     *
+     * <p>Resolved here rather than taken from a request body, for the reason
+     * {@code ProfileFieldOwnership} gives about every other linking field: a client-supplied
+     * {@code profileId} would let an applicant attach their application to a colleague's profile,
+     * and the reviewer's document list is keyed on exactly that value.
+     */
+    private String ownProfileId(String accountId) {
+        return profileRepository.findByAccountId(accountId).map(Profile::getId).orElse(null);
     }
 
     public ProfessionalApplication decide(
@@ -376,7 +457,7 @@ public class OnboardingService {
         }
         ProfessionalApplication saved = transition(application, target, actor, reason);
         if (target == ProfileStatus.ACTIVE) {
-            domainEventPublisher.publishOnboardingState("ACTIVE", saved.getAccountId(), saved.getId(), saved.getRequestedRole(), actor);
+            domainEventPublisher.publishOnboardingState("ACTIVE", saved.getAccountId(), saved.getId(), saved.getAuthority(), actor);
         }
         return saved;
     }
@@ -598,7 +679,7 @@ public class OnboardingService {
             : personalDocumentRepository.findByProfileId(profile.getId()).stream().filter(PersonalDocumentService::isLive).toList();
 
         List<OnboardingProgressDTO.Requirement> requirements = List.of(
-            new OnboardingProgressDTO.Requirement(REQ_CONSENT, application != null && application.getConsentAcceptedAt() != null),
+            new OnboardingProgressDTO.Requirement(REQ_CONSENT, application != null && application.isAgreed()),
             new OnboardingProgressDTO.Requirement(REQ_PROFILE, personalDetailsComplete(profile)),
             new OnboardingProgressDTO.Requirement(REQ_ADDRESS, addressComplete(profile)),
             new OnboardingProgressDTO.Requirement(REQ_NEXT_OF_KIN, nextOfKinComplete(profile)),

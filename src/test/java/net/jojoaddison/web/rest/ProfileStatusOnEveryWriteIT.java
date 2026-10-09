@@ -52,7 +52,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
  *
  * <p>Item 47 § 2b hung {@code ProfileStatus} off a table of four call sites and the table read as
  * though it were exhaustive. It was not. The document upload — {@code POST
- * /api/onboarding/documents} then, {@code POST /api/personal-document} since T2 — the path a
+ * /api/personal-document} then, {@code POST /api/personal-document} since T2 — the path a
  * clinician renews their own licence by, was missing, and so was the whole
  * {@code PersonalDocumentResource} CRUD surface. An upload adds a {@code PENDING} row, so
  * {@code isVerified} went <em>true to false on the server</em> while hc-admin's directory went on
@@ -290,7 +290,7 @@ class ProfileStatusOnEveryWriteIT {
 
         restMockMvc
             .perform(
-                put("/api/onboarding/applications/" + application.getId() + "/organization")
+                put("/api/professional-application/" + application.getId() + "/organization")
                     .with(admin())
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"specialtyCategoryId\":\"cardiology\"}")

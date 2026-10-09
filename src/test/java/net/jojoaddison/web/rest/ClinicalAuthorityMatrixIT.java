@@ -487,6 +487,203 @@ class ClinicalAuthorityMatrixIT {
             .andExpect(status().isForbidden());
     }
 
+    // --- /api/professional-application: one base path, three gates, T3's T0 rules ----------------
+    //
+    // profile.md step 4 is declared by an APPLICANT holding ROLE_USER and nothing else, and the
+    // fifteen /api/onboarding/applications mappings migrated onto this base — so the rules here
+    // REPLACE what `/api/onboarding/**` used to give them rather than adding anything. Miss them and
+    // every applicant is locked out of their own step 4, with the refusal attributed to the service.
+    //
+    // THIS PATH IS THE WIDEST T0 CASE IN THE SERVICE, because one base carries three gates: the
+    // applicant's own /me island, three admin-or-owner /{id} reads, and an admin-only surface made
+    // of the review queue, seven transitions and /compliance. The cases below assert each boundary
+    // from BOTH sides, because the rules that separate them are ordered wildcards and ordering is
+    // not something reading the configuration settles — in particular
+    // `PUT /api/professional-application/*/**` matches `/me/submit`, so if the /me rule were ever
+    // moved below it an applicant would be 403'd submitting their own application by a rule written
+    // for the reviewer.
+
+    /**
+     * An applicant reads their own application. <b>Not a 403</b> is the assertion; the 404 is
+     * {@code getOwnApplication}'s answer for someone who has never applied, which is the normal
+     * state and not an authorization answer.
+     */
+    @Test
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
+    void anApplicantReachesTheirOwnApplication() throws Exception {
+        restMockMvc.perform(get("/api/professional-application/me")).andExpect(status().isNotFound());
+    }
+
+    /** And a {@code HEAD} of it — the verb a {@code GET}-scoped rule drops onto the matrix below. */
+    @Test
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
+    void anApplicantsHeadOfTheirOwnApplicationIsNotRefused() throws Exception {
+        restMockMvc.perform(head("/api/professional-application/me")).andExpect(status().isNotFound());
+    }
+
+    /**
+     * An applicant <b>starts</b> an application, which is the half the mutation matrix would refuse.
+     *
+     * <p>{@code ROLE_USER} is outside {@code CLINICAL_MUTATION}, so without the island rule above
+     * {@code POST /api/** -> CLINICAL_MUTATION} every applicant is 403'd beginning their own
+     * application while the {@code /me} read keeps working on
+     * {@code /api/** -> .authenticated()} — the asymmetry that reads as a broken form rather than as
+     * a missing rule.
+     *
+     * <p>⚠ Sent with {@code agreed: false} deliberately, so the assertion is the handler's own 400
+     * — {@link net.jojoaddison.service.OnboardingService#CONSENT_REQUIRED} — reached
+     * <em>because</em> authorization let the request through, and no application is created by a
+     * matrix case.
+     */
+    @Test
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
+    void anApplicantCanPostTheirOwnApplication() throws Exception {
+        restMockMvc
+            .perform(
+                post("/api/professional-application")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"authority\":\"ROLE_NURSE\",\"agreed\":false}")
+            )
+            .andExpect(status().isBadRequest());
+    }
+
+    /**
+     * ⛔ <b>Step 4's two writes reach the applicant, and this is the case the ordered wildcards put
+     * most at risk.</b>
+     *
+     * <p>Both are {@code PUT} under {@code /me}, and the reviewer rule
+     * {@code PUT /api/professional-application/*&#47;**} matches them as surely as it matches
+     * {@code /{id}/activate}. The 404 is {@code getOwnApplication}'s, so each assertion says two
+     * things at once: the mutation matrix did not refuse it, and neither did the {@code ROLE_ADMIN}
+     * rule written for the transitions.
+     */
+    @Test
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
+    void anApplicantCanWriteTheirOwnConsentAndSubmit() throws Exception {
+        restMockMvc
+            .perform(
+                put("/api/professional-application/me")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"authority\":\"ROLE_NURSE\",\"agreed\":true}")
+            )
+            .andExpect(status().isNotFound());
+        restMockMvc
+            .perform(
+                put("/api/professional-application/me/submit")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"authority\":\"ROLE_NURSE\",\"agreed\":true}")
+            )
+            .andExpect(status().isNotFound());
+        restMockMvc.perform(put("/api/professional-application/me/complete-profile")).andExpect(status().isNotFound());
+    }
+
+    /**
+     * ⛔ <b>And the island stops at {@code /me}: an applicant is refused the review queue.</b>
+     *
+     * <p>{@code GET} on the bare path returns <em>every</em> application on the estate — login,
+     * requested authority, status and the careers attribution for each — so it is {@code ROLE_ADMIN}
+     * where the same literal admits an applicant's {@code POST}. That makes this the one path in the
+     * service where two verbs on one exact literal answer under two different authorities, which is
+     * why {@code HEAD} is spelled beside {@code GET} in the chain rather than left to fall through:
+     * a body-less read of a queue still answers how many people are waiting (item 143).
+     */
+    @Test
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
+    void anApplicantCannotReadTheReviewQueue() throws Exception {
+        restMockMvc.perform(get("/api/professional-application")).andExpect(status().isForbidden());
+        restMockMvc.perform(head("/api/professional-application")).andExpect(status().isForbidden());
+    }
+
+    /** Nor may an applicant drive a reviewer transition on anybody's application, their own included. */
+    @Test
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
+    void anApplicantCannotDriveAReviewerTransition() throws Exception {
+        restMockMvc.perform(put("/api/professional-application/{id}/activate", "matrix-any-application")).andExpect(status().isForbidden());
+        restMockMvc
+            .perform(
+                put("/api/professional-application/{id}/decide", "matrix-any-application")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"decision\":\"APPROVED\"}")
+            )
+            .andExpect(status().isForbidden());
+    }
+
+    /**
+     * Nor the compliance surface, on any verb.
+     *
+     * <p>Its rule is method-agnostic because every one of its four mappings is {@code ROLE_ADMIN} —
+     * there is no verb under this prefix anyone else may use — which is the shape in which a
+     * {@code HEAD} cannot fall through to a different authority. {@code ComplianceResource} carried
+     * a class-level annotation and <em>no</em> chain rule of its own; this is the layer T3 added.
+     */
+    @Test
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
+    void anApplicantCannotReachTheComplianceSurface() throws Exception {
+        restMockMvc.perform(get("/api/professional-application/compliance/metrics")).andExpect(status().isForbidden());
+        restMockMvc.perform(head("/api/professional-application/compliance/expiring")).andExpect(status().isForbidden());
+        restMockMvc.perform(post("/api/professional-application/compliance/sweep")).andExpect(status().isForbidden());
+    }
+
+    /**
+     * And the admin surface is admin's, not every clinician's: a carer is the read-only discipline
+     * and a doctor the widest clinical one, and both are refused the queue, the transitions and
+     * compliance.
+     *
+     * <p>Worth both roles rather than one: the queue rule is an authority list, so a role added to
+     * {@code CLINICAL_MUTATION} or {@code CLINICAL_AND_ADMIN} later must not acquire the review
+     * queue by being named somewhere else.
+     */
+    @Test
+    @WithMockGatewayUser(authorities = { "ROLE_CARER" })
+    void aReadOnlyDisciplineCannotReachTheApplicationAdminSurface() throws Exception {
+        restMockMvc.perform(get("/api/professional-application")).andExpect(status().isForbidden());
+        restMockMvc.perform(get("/api/professional-application/compliance/metrics")).andExpect(status().isForbidden());
+        restMockMvc.perform(put("/api/professional-application/{id}/activate", "matrix-any-application")).andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockGatewayUser(authorities = { "ROLE_DOCTOR" })
+    void theWidestClinicalRoleCannotReachTheApplicationAdminSurface() throws Exception {
+        restMockMvc.perform(get("/api/professional-application")).andExpect(status().isForbidden());
+        restMockMvc.perform(head("/api/professional-application")).andExpect(status().isForbidden());
+        restMockMvc.perform(get("/api/professional-application/compliance/events")).andExpect(status().isForbidden());
+    }
+
+    /**
+     * ⛔ <b>The document verdict moved onto the applicant island's base and must not have become
+     * reachable from it.</b>
+     *
+     * <p>{@code PUT /api/personal-document/{id}/verify} and {@code .../reject} were
+     * {@code OnboardingDocumentResource}'s on {@code /api/onboarding/documents} and are
+     * {@link PersonalDocumentReviewResource}'s on {@code /api/personal-document} since T3 — a base
+     * whose chain rule is {@code .authenticated()} for the applicant's own upload. So the verdict
+     * needed a rule of its own, and these cases are what distinguishes "refused by the new
+     * {@code ROLE_ADMIN} rule" from "admitted by the island and refused only by the annotation".
+     *
+     * <p>A carer is the case that matters: a read-only clinical discipline reaching a credential
+     * verdict is the failure {@code docs/CLAUDE.md} warns about at the point where it was nearly
+     * shipped.
+     */
+    @Test
+    @WithMockGatewayUser(authorities = { "ROLE_CARER" })
+    void aReadOnlyDisciplineCannotVerifyOrRejectADocument() throws Exception {
+        restMockMvc.perform(put("/api/personal-document/{id}/verify", "matrix-any-document")).andExpect(status().isForbidden());
+        restMockMvc
+            .perform(
+                put("/api/personal-document/{id}/reject", "matrix-any-document")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"reason\":\"matrix\"}")
+            )
+            .andExpect(status().isForbidden());
+    }
+
+    /** And neither can the applicant whose own documents live under the same base. */
+    @Test
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
+    void anApplicantCannotVerifyTheirOwnDocument() throws Exception {
+        restMockMvc.perform(put("/api/personal-document/{id}/verify", "matrix-any-document")).andExpect(status().isForbidden());
+    }
+
     // --- And where a ROLE_ANGEL token sits, which is not where the read-only disciplines do -------
     //
     // ROLE_ANGEL IS NOT AN AUTHORITY OF THIS SUBSYSTEM. The estate decided on 2026-09-06 that an angel
