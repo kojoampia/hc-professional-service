@@ -50,7 +50,8 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
  * {@code profile.md}'s specified shape: that the server owns the fields a caller must not claim, that
  * the bytes are never echoed back, that ownership is what gates the one handler which names a
  * subject, and — the property most easily broken by moving a path — that
- * {@code requireMandatoryDocuments} still counts documents created this way.
+ * {@code requireEverySubmissionRequirement} still counts documents created this way (named
+ * {@code requireMandatoryDocuments} until F-B widened it past step 3).
  *
  * <p>Run as {@code ROLE_USER} throughout: an applicant, which is who step 3 is written by.
  */
@@ -302,11 +303,10 @@ class OwnPersonalDocumentResourceIT {
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * ⛔ <b>{@code requireMandatoryDocuments} still counts documents uploaded through the new
-     * endpoint.</b>
+     * ⛔ <b>The submission gate still counts documents uploaded through the new endpoint.</b>
      *
      * <p>This is the property T2 most easily breaks and the one no other test would notice.
-     * {@code OnboardingService.requireMandatoryDocuments} joins on {@code PersonalDocument.profileId}
+     * {@code OnboardingService.requireEverySubmissionRequirement} joins on {@code PersonalDocument.profileId}
      * and demands a {@code CERTIFICATE}, a {@code LICENSE} <em>with an expiry date</em>, one of the
      * four identity types and a {@code PASSPHOTO} — all <b>live</b>. Nothing about that gate names an
      * endpoint, so a path change cannot fail it by construction; what would fail it is deriving

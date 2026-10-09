@@ -57,18 +57,39 @@ import org.springframework.stereotype.Component;
  * reads it, no collection stores these separately, and inventing identifiers is how a field nobody
  * set starts looking like a field somebody meant. {@code Profile.address} already stores null there.
  *
+ * <h2>⭐ A row carrying BOTH names, which is where this class was wrong until F-D</h2>
+ *
+ * <p>The query was <b>legacy exists AND target NOT exists</b>, and the javadoc here argued for it:
+ *
+ * <blockquote>⛔ <i>"It also matches only documents that do NOT already have {@code contacts}, so a
+ * row written by the new code before this ever ran cannot be overwritten by its own legacy key …
+ * the newer field has to win."</i></blockquote>
+ *
+ * <p><b>The premise is right and the conclusion does not follow.</b> The newer field does have to
+ * win — but an {@code AND} query wins it by <em>never matching the row at all</em>, so the
+ * {@code unset} never reaches it either and <b>the stale {@code emergency_contact} stays in the
+ * document for ever</b>: not on this run, and not on any later one, because nothing will ever match
+ * it again. A second source of truth that nothing reads is how this estate's own notes describe two
+ * correct-for-now copies becoming one wrong one — and here the dead copy is the one a future reader
+ * would find first, since it is the name the wire alias still answers to.
+ *
+ * <p>So the match is on the legacy key <b>alone</b> and the two effects are separated: the value is
+ * copied <em>only</em> when {@code contacts} is absent, and the legacy key is unset <em>always</em>.
+ * That is {@code ProfessionalApplicationConsentMigration.rename}'s construction, two files away —
+ * which reached the right shape by making this mistake first and whose own class note names this
+ * migration as the one it copied and should not have. The correction has arrived back here.
+ *
+ * <p>The both-keys case is reachable rather than theoretical, and the old javadoc said so correctly:
+ * {@code Profile.getEmergencyContact()} is a wire alias that writes into {@code contacts}, so a
+ * client sending the old name through the new endpoint produces a {@code contacts} row and no
+ * {@code emergency_contact} key — but a database restored from a backup taken mid-migration can hold
+ * both. {@code EmergencyContactListMigrationIT} covers it specifically.
+ *
  * <h2>Idempotent, and by the same construction as its neighbours</h2>
  *
  * <p>It matches on documents that <em>have</em> {@code emergency_contact} and unsets the key as part
  * of the same update, so a second run matches nothing. There is no marker document to keep in step
  * and no "has this run" flag that could be wrong; deployments roll forward and restart freely.
- *
- * <p>⚠ <b>It also matches only documents that do NOT already have {@code contacts}</b>, so a row
- * written by the new code before this ever ran cannot be overwritten by its own legacy key. That
- * combination can genuinely occur: {@code Profile.getEmergencyContact()} is a wire alias that writes
- * into {@code contacts}, so a client sending the old name through the new endpoint produces a
- * {@code contacts} row and no {@code emergency_contact} key — but a database restored from a backup
- * taken mid-migration could hold both, and the newer field has to win.
  *
  * <p>Raw {@link Document}s through {@link MongoTemplate} rather than mapped {@code Profile}s, and
  * necessarily so: the stored {@code address} is a {@code String} where the mapped type is now an
@@ -116,9 +137,17 @@ public class EmergencyContactListMigration implements ApplicationRunner {
         this.mongoTemplate = mongoTemplate;
     }
 
+    /**
+     * Matches the legacy key <b>alone</b>; {@code unset}s it always; {@code set}s {@code contacts}
+     * only where there is nothing newer to overwrite (F-D).
+     *
+     * <p>⚠ <b>The two effects are deliberately not conditional together</b> — see the class note on a
+     * row carrying both names. This is {@code ProfessionalApplicationConsentMigration.rename}'s shape,
+     * two files away, whose own comment names this migration as the one it copied and should not have.
+     */
     @Override
     public void run(ApplicationArguments args) {
-        Query pending = new Query(Criteria.where(LEGACY_FIELD).exists(true).and(CONTACTS_FIELD).exists(false));
+        Query pending = new Query(Criteria.where(LEGACY_FIELD).exists(true));
         List<Document> rows = mongoTemplate.find(pending, Document.class, COLLECTION);
         if (rows.isEmpty()) {
             log.debug("No singular {} found on {} — nothing to migrate", LEGACY_FIELD, COLLECTION);
@@ -129,13 +158,14 @@ public class EmergencyContactListMigration implements ApplicationRunner {
         for (Document row : rows) {
             Object legacy = row.get(LEGACY_FIELD);
             Update update = new Update().unset(LEGACY_FIELD);
-            if (legacy instanceof Document contact) {
+            // Copied only where there is nothing newer to overwrite, and only when there is something
+            // to copy. A row whose emergency_contact is not a sub-document holds nothing a contact
+            // could be built from, so the key is dropped without a contacts entry rather than
+            // wrapping whatever is there in a list. Never seen; stated so the `instanceof` does not
+            // read as defensive clutter.
+            if (legacy instanceof Document contact && !row.containsKey(CONTACTS_FIELD)) {
                 update.set(CONTACTS_FIELD, List.of(withStructuredAddress(contact)));
             }
-            // A row whose emergency_contact is not a sub-document holds nothing a contact could be
-            // built from, so the key is dropped without a contacts entry rather than wrapping
-            // whatever is there in a list. Never seen; stated so the `instanceof` does not read as
-            // defensive clutter.
             mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(row.get("_id"))), update, COLLECTION);
             migrated++;
         }

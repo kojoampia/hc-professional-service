@@ -191,19 +191,33 @@ class EmergencyContactListMigrationIT {
     }
 
     /**
-     * ⚠ <b>A row that already has {@code contacts} is left alone, even if a legacy key is beside
-     * it.</b>
+     * ⭐ <b>A row carrying BOTH names keeps the newer value AND loses the stale key (F-D).</b>
      *
      * <p>That combination can genuinely occur. {@code Profile.getEmergencyContact()} is a wire alias
      * that writes into {@code contacts}, so a client sending the old name through the new endpoint
      * produces a {@code contacts} row and no legacy key at all — but a database restored from a
-     * backup taken part-way through a migration could hold both, and the newer field has to win.
-     * Without the {@code contacts} exists-false clause this run would overwrite current data with a
-     * stale copy of it, which is the one way a migration whose whole point is preservation could lose
-     * something.
+     * backup taken part-way through a migration can hold both, and the newer field has to win.
+     *
+     * <h2>⛔ The second assertion was the exact opposite of this until F-D</h2>
+     *
+     * <p>It read {@code .as("and the stale key is still left in place to be looked at").isNotNull()}
+     * — <b>a defect pinned as a feature</b>, and the reason the finding survived review. The query
+     * was <em>legacy exists AND contacts NOT exists</em>, so this row matched on no run, ever: the
+     * {@code unset} could not reach it, and <i>"left in place to be looked at"</i> dressed that up as
+     * a decision. Nothing was ever going to look at it.
+     *
+     * <p>The two effects are separated now — match the legacy key alone, {@code unset} always,
+     * {@code set} only when {@code contacts} is absent — which is
+     * {@code ProfessionalApplicationConsentMigration.rename}'s shape, the class that made this same
+     * mistake first, fixed it, and left a comment naming this migration as the one it had copied.
+     *
+     * <p>⚠ <b>Both halves asserted in one case, deliberately.</b> Either alone is satisfiable by a
+     * wrong implementation: dropping the exists-false clause entirely passes the unset and overwrites
+     * {@code Current} with {@code Stale}, and the old {@code AND} query passes the value check and
+     * leaves the key. Only the pair pins the shape.
      */
     @Test
-    void aRowThatAlreadyHasAListIsNotOverwrittenByItsLegacyKey() {
+    void aRowCarryingBothNamesKeepsTheNewerValueAndLosesTheStaleKey() {
         mongoTemplate.insert(
             new Document("account_id", "legacy-6")
                 .append("contacts", List.of(new Document("name", "Current")))
@@ -215,8 +229,35 @@ class EmergencyContactListMigrationIT {
 
         @SuppressWarnings("unchecked")
         List<Document> contacts = (List<Document>) raw("legacy-6").get("contacts");
+        assertThat(contacts).as("the newer field wins and is not replaced by the legacy copy").hasSize(1);
         assertThat(contacts.get(0).getString("name")).as("the newer field wins").isEqualTo("Current");
-        assertThat(raw("legacy-6").get("emergency_contact")).as("and the stale key is still left in place to be looked at").isNotNull();
+        assertThat(raw("legacy-6").containsKey("emergency_contact"))
+            .as("and the stale key is gone — an AND query would have left it here for ever (F-D)")
+            .isFalse();
+    }
+
+    /**
+     * ⚠ And a second run over the same row still changes nothing, which is the property the
+     * separation could plausibly have broken.
+     *
+     * <p>Idempotence here is not "the query stops matching because the target exists" — it never did
+     * mean that — but "the key it matches on is the key it removes". Asserted on the both-names row
+     * specifically, since that is the one whose match condition F-D widened.
+     */
+    @Test
+    void aSecondRunOverARowThatCarriedBothNamesChangesNothing() {
+        mongoTemplate.insert(
+            new Document("account_id", "legacy-6b")
+                .append("contacts", List.of(new Document("name", "Current")))
+                .append("emergency_contact", new Document("name", "Stale")),
+            COLLECTION
+        );
+
+        migration.run(null);
+        Document afterFirst = raw("legacy-6b");
+        migration.run(null);
+
+        assertThat(raw("legacy-6b")).isEqualTo(afterFirst);
     }
 
     /** A profile that never had a next of kin is not given an empty list. */

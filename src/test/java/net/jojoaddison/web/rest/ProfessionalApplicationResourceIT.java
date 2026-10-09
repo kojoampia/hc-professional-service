@@ -202,8 +202,9 @@ class ProfessionalApplicationResourceIT {
     // --- Step 4's write: Save and Submit ---------------------------------------------------------
 
     /**
-     * ⭐ <b>Step 4's write stores the consent and the authority and sets {@code CREDENTIAL_REVIEW} —
-     * and it appends an {@code OnboardingEvent} doing it.</b>
+     * ⭐ <b>A Save on a COMPLETE application stores the answers, advances to
+     * {@code CREDENTIAL_REVIEW} and appends an {@code OnboardingEvent} doing it</b> — the owner's
+     * <i>"Save advances only when complete"</i> (2026-10-09).
      *
      * <p>The event is the half that cannot be read off the response, and it is the point of the
      * owner's instruction that the status write go through {@code OnboardingService.transition()}
@@ -211,8 +212,16 @@ class ProfessionalApplicationResourceIT {
      * application whose own history does not contain the step. So this asserts the status <em>and</em>
      * that the trail gained a {@code PROFILE_COMPLETED → CREDENTIAL_REVIEW} row.
      *
+     * <p>⛔ <b>It is also the half of T3's refused "Kafka-less Save" that survives the owner's
+     * decision.</b> hc-admin consumes {@code onboarding.state COMPLETED} to learn that an application
+     * is waiting on a reviewer, so a Save that reached {@code CREDENTIAL_REVIEW} <em>quietly</em>
+     * would leave it in this service's queue and in nobody else's — <b>a consumer reading where
+     * nobody writes is silence that looks like health</b>. The event is not assertable from here, so
+     * the transition and its trail row stand in for it.
+     *
      * <p>The authority sent here differs from the one the application was created with, which is
-     * what makes "stores the requested authority" an assertion rather than a tautology.
+     * what makes "stores the requested authority" an assertion rather than a tautology. The
+     * incomplete counterpart is {@link #aSaveStoresAndStaysPutWhenTheApplicationIsIncomplete}.
      */
     @Test
     @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
@@ -237,16 +246,24 @@ class ProfessionalApplicationResourceIT {
     }
 
     /**
-     * ⭐ <b>Submit is the same operation under the path the old mapping migrated to.</b>
+     * ⭐ <b>On a COMPLETE application Submit does what Save does</b> — which is the whole of what
+     * the two paths still share, and the reason they share one service body.
      *
-     * <p>{@code profile.md} step 4 attributes identical effects to both buttons, so there is one
-     * service method and two mappings — see {@link OnboardingService#submitForReview} for why a
-     * Kafka-less Save variant was refused. Asserted as a <em>pair</em>, because "the two cannot
-     * drift" is the claim and it is only worth anything if both paths are exercised.
+     * <p>⚠ <b>This case was named for a claim that is no longer true in general.</b> T3 read
+     * {@code profile.md} step 4 — <i>"A <b>Save</b> and a <b>Submit</b> button store the consent and
+     * the requested authority, and set {@code application.status} to {@code CREDENTIAL_REVIEW}"</i>
+     * — as one operation behind two mappings. The owner's decision of 2026-10-09 keeps the identical
+     * <em>effects</em> and separates the <em>preconditions</em>: when incomplete, Save stores and
+     * stays put while Submit refuses. So the equivalence holds here, where the application is
+     * complete, and nowhere else; {@link #neitherWriteReachesReviewWithoutTheMandatoryDocuments} is
+     * the case that draws the difference.
+     *
+     * <p>Asserted as a <em>pair</em> with the Save case above, because "the two cannot drift apart on
+     * the complete path" is the claim and it is only worth anything if both paths are exercised.
      */
     @Test
     @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
-    void submitDoesWhatSaveDoes() throws Exception {
+    void onACompleteApplicationSubmitDoesWhatSaveDoes() throws Exception {
         readyToSubmit();
 
         restMockMvc
@@ -257,26 +274,285 @@ class ProfessionalApplicationResourceIT {
     }
 
     /**
-     * ⛔ <b>Neither write is a way past the mandatory-document gate.</b>
+     * ⛔ <b>Neither write reaches the review queue without the mandatory documents</b> — and they
+     * decline differently, which is the owner's decision of 2026-10-09.
      *
      * <p>{@code profile.md} conditions the move on <i>"when all requirements are satisfied"</i>
-     * without naming a button, so the gate is on the shared method and both paths meet it. This is
-     * the case that would have gone quiet had Save been built as the ungated variant: an applicant
-     * with no licence on file would have reached the review queue.
+     * without naming a button, so <b>neither path advances</b>; what differs is the answer. Submit
+     * <b>refuses with 400</b>, Save <b>stores and stays put with 200</b>. This is the case that would
+     * have gone quiet had Save been built as a transitioning-but-ungated variant: an applicant with
+     * no licence on file would have reached the review queue.
+     *
+     * <p>⚠ The status is re-read <em>after both</em> calls, because the claim that matters is not
+     * which code each returned but that the application did not move — which is the only thing a
+     * reviewer would ever see.
      */
     @Test
     @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
-    void neitherWriteSkipsTheMandatoryDocuments() throws Exception {
+    void neitherWriteReachesReviewWithoutTheMandatoryDocuments() throws Exception {
         readyToSubmit();
         personalDocumentRepository.deleteAll();
 
-        restMockMvc.perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(CONSENT)).andExpect(status().isBadRequest());
         restMockMvc
             .perform(put(BASE + "/me/submit").contentType(MediaType.APPLICATION_JSON).content(CONSENT))
-            .andExpect(status().isBadRequest());
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value(containsString("certificate")))
+            .andExpect(jsonPath("$.detail").value(containsString("license")));
+        restMockMvc
+            .perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(CONSENT))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("PROFILE_COMPLETED"));
+
         assertThat(applicationRepository.findByAccountId(accountIdFor(APPLICANT)).orElseThrow().getStatus()).isEqualTo(
             ProfileStatus.PROFILE_COMPLETED
         );
+    }
+
+    // --- F-B: "all requirements", not step 3's documents -----------------------------------------
+
+    /**
+     * ⛔ <b>A single blank step-2 field refuses the submit, and the refusal names the requirement.</b>
+     *
+     * <p>{@code profile.md} § Gap Update: <i>"Submitting sets {@code Application.status} to
+     * {@code CREDENTIAL_REVIEW} and triggers the Kafka event, <b>when all requirements are
+     * satisfied</b>."</i> Before F-B the only check here was step 3's four documents, so this exact
+     * applicant — every document uploaded, one field blank — got <b>200</b>, reached
+     * {@code CREDENTIAL_REVIEW} and had {@code onboarding.state COMPLETED} published to hc-admin;
+     * activation then failed with {@code ACTIVATION_REQUIRES_COMPLETE_PROFILE} <em>after a reviewer
+     * had done the work</em>.
+     *
+     * <p>⭐ <b>{@code phoneNumber} is the field chosen on purpose.</b> It is one of the seven the
+     * progress meter's own predicates never looked at, so this case is red under
+     * {@code ProfileCompleteness} and would be green under the meter — which is the whole of why the
+     * gate reads the stricter definition. {@code digitalAddress}, {@code town} and {@code district}
+     * are the same shape and {@link #aSecondEmergencyContactIsRequiredToSubmit} covers the other
+     * group.
+     *
+     * <p>The status is re-read, because "it answered 400" and "it did not advance the application"
+     * are two claims and only the second is the defect.
+     *
+     * <p>⚠ <b>Submit only. Save answers 200 for this same applicant</b> — see
+     * {@link #aSaveStoresAndStaysPutWhenTheApplicationIsIncomplete}, which is the owner's decision of
+     * 2026-10-09 and the one behaviour the two paths do not share.
+     */
+    @Test
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
+    void oneBlankProfileFieldRefusesTheSubmitAndNamesIt() throws Exception {
+        Profile profile = readyToSubmit();
+        profileRepository.save(profile.phoneNumber(null));
+
+        restMockMvc
+            .perform(put(BASE + "/me/submit").contentType(MediaType.APPLICATION_JSON).content(CONSENT))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value(containsString(OnboardingService.SUBMISSION_REQUIRES_ALL_REQUIREMENTS)))
+            .andExpect(jsonPath("$.detail").value(containsString("profile")));
+
+        assertThat(applicationRepository.findByAccountId(accountIdFor(APPLICANT)).orElseThrow().getStatus()).isEqualTo(
+            ProfileStatus.PROFILE_COMPLETED
+        );
+    }
+
+    // --- The owner's Save/Submit split, 2026-10-09 ------------------------------------------------
+
+    /**
+     * ⭐ <b>Save stores the answers and stays put when the application is incomplete</b> — the owner's
+     * <i>"Save should be non-advancing — store answers only"</i>.
+     *
+     * <p>200, not 400: an applicant saving mid-wizard is not making a mistake. The assertions are
+     * four, because "it answered 200" is the least of what has to be true — the <b>answers must be
+     * stored</b> (that is the whole purpose of the path), the status must <b>not</b> have moved, and
+     * {@code submittedAt} must still be null, which is the field that would betray a transition
+     * having been attempted.
+     *
+     * <p>The authority sent differs from the one the application was created with, so "it stored the
+     * answers" is an assertion rather than a tautology.
+     */
+    @Test
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
+    void aSaveStoresAndStaysPutWhenTheApplicationIsIncomplete() throws Exception {
+        Profile profile = readyToSubmit();
+        profileRepository.save(profile.phoneNumber(null));
+
+        restMockMvc
+            .perform(
+                put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content("{\"authority\":\"ROLE_PARAMEDIC\",\"agreed\":true}")
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("PROFILE_COMPLETED"))
+            .andExpect(jsonPath("$.authority").value("ROLE_PARAMEDIC"));
+
+        ProfessionalApplication stored = applicationRepository.findByAccountId(accountIdFor(APPLICANT)).orElseThrow();
+        assertThat(stored.getAuthority()).as("the answers are stored — that is what Save is for").isEqualTo("ROLE_PARAMEDIC");
+        assertThat(stored.getStatus()).as("and nothing advanced").isEqualTo(ProfileStatus.PROFILE_COMPLETED);
+        assertThat(stored.getSubmittedAt()).as("nor was a transition even attempted").isNull();
+    }
+
+    /**
+     * ⚠ <b>Save is repeatable — twice while incomplete, and twice while complete.</b>
+     *
+     * <p>The owner's <i>"It must be repeatable. Saving twice must not 409"</i>. Both halves matter and
+     * they fail differently: an incomplete Save repeated would 409 if the path ever started
+     * transitioning unconditionally, and a <em>complete</em> Save repeated would 409 if it let the
+     * state machine answer instead of checking {@code LEGAL_TRANSITIONS} first — because the second
+     * call starts from {@code CREDENTIAL_REVIEW}, out of which that move is illegal.
+     *
+     * <p>⭐ The second half is the one the one-method shape could not have had, and it is why
+     * {@code aSecondWriteIsRefusedByTheStateMachine} moved to Submit.
+     */
+    @Test
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
+    void aSaveCanBeCalledTwice() throws Exception {
+        Profile profile = readyToSubmit();
+        profileRepository.save(profile.phoneNumber(null));
+
+        restMockMvc.perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(CONSENT)).andExpect(status().isOk());
+        restMockMvc.perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(CONSENT)).andExpect(status().isOk());
+
+        // Now complete it, so the next Save advances — and the one after that finds itself already
+        // in CREDENTIAL_REVIEW, which is the half that needs the legality check rather than the
+        // state machine's refusal.
+        profileRepository.save(profile.phoneNumber("+233300000000"));
+        restMockMvc
+            .perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(CONSENT))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("CREDENTIAL_REVIEW"));
+        restMockMvc
+            .perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(CONSENT))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("CREDENTIAL_REVIEW"));
+    }
+
+    /**
+     * ⛔ <b>One emergency contact is not two</b> — {@code profile.md} step 2: <i>"At least <b>two</b>
+     * emergency contacts are required."</i>
+     *
+     * <p>The {@code nextOfKin} half of the same finding, asserted separately because it is a
+     * different group key and a different predicate: {@code ProfileCompleteness.contactsProvided}
+     * requires at least {@code REQUIRED_CONTACTS} and <em>every</em> contact complete, where the
+     * meter counts the complete ones.
+     */
+    @Test
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
+    void aSecondEmergencyContactIsRequiredToSubmit() throws Exception {
+        Profile profile = readyToSubmit();
+        profileRepository.save(profile.contacts(java.util.List.of(profile.getContacts().get(0))));
+
+        restMockMvc
+            .perform(put(BASE + "/me/submit").contentType(MediaType.APPLICATION_JSON).content(CONSENT))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value(containsString("nextOfKin")));
+    }
+
+    /**
+     * ⛔ <b>Step 4's own other half: a submission naming no authority is refused.</b>
+     *
+     * <p>{@code profile.md} step 4 is <i>"The professional declares the role they are applying for
+     * <b>and</b> consents"</i>, and nothing refused a blank role before F-B — the application simply
+     * stored {@code authority: null} over whatever it held and went to review with no discipline on
+     * it. Consent is refused earlier and with its own message, because a withheld tick is a different
+     * answer from an incomplete form.
+     */
+    @Test
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
+    void aSubmissionNamingNoAuthorityIsRefused() throws Exception {
+        readyToSubmit();
+
+        restMockMvc
+            .perform(put(BASE + "/me/submit").contentType(MediaType.APPLICATION_JSON).content("{\"agreed\":true}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value(containsString("authority")));
+    }
+
+    // --- F-F: `source` belongs to the create ------------------------------------------------------
+
+    /**
+     * ⛔ <b>Save and Submit refuse a {@code source} rather than dropping it, and the refusal names the
+     * endpoint that owns it (F-F).</b>
+     *
+     * <p>{@link ApplicationConsentRequest} is bound by all three writes and only the create passes
+     * the component on, so before F-F a client sending one got <b>200 with the field ignored</b> —
+     * the silence {@code ProfileFieldOwnership} exists to refuse, one file along.
+     *
+     * <p>Both paths asserted, because "the gate is on the shared method" is not true of this one: the
+     * refusal is per handler, since the create is the handler that legitimately accepts the component.
+     */
+    @Test
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
+    void neitherLaterWriteAcceptsACareersAttribution() throws Exception {
+        readyToSubmit();
+        String withSource = "{\"authority\":\"ROLE_NURSE\",\"agreed\":true,\"source\":\"web-careers\"}";
+
+        restMockMvc
+            .perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(withSource))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value(containsString("source is set by POST " + BASE)));
+        restMockMvc
+            .perform(put(BASE + "/me/submit").contentType(MediaType.APPLICATION_JSON).content(withSource))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value(containsString("source")));
+
+        assertThat(applicationRepository.findByAccountId(accountIdFor(APPLICANT)).orElseThrow().getStatus())
+            .as("and the refusal happens before the transition")
+            .isEqualTo(ProfileStatus.PROFILE_COMPLETED);
+    }
+
+    /**
+     * ⭐ <b>The attribution the create recorded survives a Save that does not mention it.</b>
+     *
+     * <p>The half of F-F that the refusal exists to protect: a clinician who arrived through
+     * {@code web.abofonsa.com/careers} must still read as {@code web-careers} in the review queue and
+     * the WP7 funnel count after step 4's write. Asserted positively rather than inferred from the
+     * refusal, because "the service has no {@code source} parameter" is a fact about today's code and
+     * this is a fact about the data.
+     */
+    @Test
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
+    void aSaveDoesNotBlankTheAttributionTheCreateRecorded() throws Exception {
+        Profile profile = profileRepository.save(CompleteOnboardingFixture.completeProfile(accountIdFor(APPLICANT)));
+        restMockMvc
+            .perform(
+                post(BASE)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"authority\":\"ROLE_NURSE\",\"agreed\":true,\"source\":\"web-careers\"}")
+            )
+            .andExpect(status().isCreated());
+        for (PersonalDocument document : CompleteOnboardingFixture.mandatoryDocuments(profile)) {
+            personalDocumentRepository.save(document);
+        }
+        restMockMvc.perform(put(BASE + "/me/complete-profile")).andExpect(status().isOk());
+
+        restMockMvc
+            .perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(CONSENT))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.source").value("web-careers"));
+
+        assertThat(applicationRepository.findByAccountId(accountIdFor(APPLICANT)).orElseThrow().getSource()).isEqualTo("web-careers");
+    }
+
+    /**
+     * ⚠ <b>An applicant with no profile at all is told what is missing rather than met with a 409.</b>
+     *
+     * <p>{@code documentsFor(application)} raises {@code CONFLICT} <i>"Application has no linked
+     * profile"</i>, which is what the old gate hit first for this caller — a refusal naming an
+     * internal linkage rather than the four things the applicant has to go and do. The gate resolves
+     * documents from the profile now, so all seven visible requirements are reported at once.
+     */
+    @Test
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
+    void anApplicantWithNoProfileIsToldEveryRequirement() throws Exception {
+        readyToSubmit();
+        profileRepository.deleteAll();
+
+        restMockMvc
+            .perform(put(BASE + "/me/submit").contentType(MediaType.APPLICATION_JSON).content(CONSENT))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value(containsString("profile")))
+            .andExpect(jsonPath("$.detail").value(containsString("address")))
+            .andExpect(jsonPath("$.detail").value(containsString("nextOfKin")))
+            .andExpect(jsonPath("$.detail").value(containsString("certificate")))
+            .andExpect(jsonPath("$.detail").value(containsString("license")))
+            .andExpect(jsonPath("$.detail").value(containsString("identity")))
+            .andExpect(jsonPath("$.detail").value(containsString("photo")));
     }
 
     /** And consent cannot be withdrawn into the write: {@code agreed: false} is 400 on both paths. */
@@ -299,32 +575,55 @@ class ProfessionalApplicationResourceIT {
      * Application.agreedDate}"</i>, so moving the date on every Save would make the page state
      * something untrue about when the subject agreed. A re-affirmation of a consent already given is
      * not a new consent.
+     *
+     * <p>⭐ <b>Asserted across the full Save → Save → Submit sequence since the owner's decision of
+     * 2026-10-09</b>, which is what makes this case bite: with Save non-advancing and repeatable,
+     * step 4 is now a path a clinician walks several times before finishing, and a date re-stamped by
+     * any one of those writes would be the page quietly restating when consent was given. It used to
+     * exercise a single Submit.
      */
     @Test
     @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
-    void aLaterWriteDoesNotMoveTheConsentDate() throws Exception {
-        readyToSubmit();
+    void noLaterWriteInTheSequenceMovesTheConsentDate() throws Exception {
+        Profile profile = readyToSubmit();
         Instant atCreation = applicationRepository.findByAccountId(accountIdFor(APPLICANT)).orElseThrow().getAgreedDate();
 
-        restMockMvc.perform(put(BASE + "/me/submit").contentType(MediaType.APPLICATION_JSON).content(CONSENT)).andExpect(status().isOk());
+        // A Save while incomplete, a second one, then a Save and a Submit once complete — every
+        // write step 4 has.
+        profileRepository.save(profile.phoneNumber(null));
+        restMockMvc.perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(CONSENT)).andExpect(status().isOk());
+        restMockMvc.perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(CONSENT)).andExpect(status().isOk());
+        profileRepository.save(profile.phoneNumber("+233300000000"));
+        restMockMvc.perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(CONSENT)).andExpect(status().isOk());
+        restMockMvc
+            .perform(put(BASE + "/me/submit").contentType(MediaType.APPLICATION_JSON).content(CONSENT))
+            .andExpect(status().isConflict());
 
         assertThat(applicationRepository.findByAccountId(accountIdFor(APPLICANT)).orElseThrow().getAgreedDate()).isEqualTo(atCreation);
     }
 
     /**
-     * ⛔ <b>A second write is the state machine's 409, not a silent second pass.</b>
+     * ⛔ <b>A second <em>Submit</em> is the state machine's 409, not a silent second pass.</b>
      *
      * <p>{@code PROFILE_COMPLETED → CREDENTIAL_REVIEW} is the only legal move out, so an application
-     * already in review has nowhere to go. Pinned because the alternative — tolerating it as a
-     * no-op — would be this endpoint deciding transition legality, which is the one thing
+     * already in review has nowhere to go. Pinned because the alternative — tolerating it as a no-op
+     * — would be this endpoint deciding transition legality, which is the one thing
      * {@code OnboardingService} exists to keep away from clients.
+     *
+     * <p>⚠ <b>This case asserted the same 409 for {@code PUT /me} until the owner's decision of
+     * 2026-10-09, and its subject has changed rather than its assertion being wrong.</b> Save is now
+     * required to be repeatable, so <em>it</em> answers 200 on a second call (see
+     * {@link #aSaveCanBeCalledTwice}) and the conflict belongs here: Submit means "I am finished", and
+     * saying that twice is a conflict in a way that saving twice is not.
      */
     @Test
     @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
-    void aSecondWriteIsRefusedByTheStateMachine() throws Exception {
+    void aSecondSubmitIsRefusedByTheStateMachine() throws Exception {
         readyToSubmit();
-        restMockMvc.perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(CONSENT)).andExpect(status().isOk());
-        restMockMvc.perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(CONSENT)).andExpect(status().isConflict());
+        restMockMvc.perform(put(BASE + "/me/submit").contentType(MediaType.APPLICATION_JSON).content(CONSENT)).andExpect(status().isOk());
+        restMockMvc
+            .perform(put(BASE + "/me/submit").contentType(MediaType.APPLICATION_JSON).content(CONSENT))
+            .andExpect(status().isConflict());
     }
 
     // --- The migrated surface answers on the new base --------------------------------------------
@@ -381,12 +680,16 @@ class ProfessionalApplicationResourceIT {
      * {@code CREDENTIAL_REVIEW} row directly, so the walk that reaches the subject is the walk a
      * clinician takes.
      */
-    private void readyToSubmit() throws Exception {
+    private Profile readyToSubmit() throws Exception {
         Profile profile = profileRepository.save(CompleteOnboardingFixture.completeProfile(accountIdFor(APPLICANT)));
         restMockMvc.perform(post(BASE).contentType(MediaType.APPLICATION_JSON).content(CONSENT)).andExpect(status().isCreated());
         for (PersonalDocument document : CompleteOnboardingFixture.mandatoryDocuments(profile)) {
             personalDocumentRepository.save(document);
         }
         restMockMvc.perform(put(BASE + "/me/complete-profile")).andExpect(status().isOk());
+        // Returned since F-B: the cases that prove the submit gate work by taking this complete
+        // profile and removing exactly one requirement from it, which is only possible if the caller
+        // holds the saved row. The walk itself is unchanged.
+        return profile;
     }
 }

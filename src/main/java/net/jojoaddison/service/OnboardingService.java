@@ -58,6 +58,19 @@ public class OnboardingService {
     public static final String ACTIVATION_REQUIRES_COMPLETE_PROFILE = "Activation requires a complete profile";
 
     /**
+     * Refusal prefix when step 4's submit is attempted with a requirement unsatisfied; the missing
+     * keys follow (F-B).
+     *
+     * <p>Public and asserted by the integration tests rather than copied into them, for the reason
+     * {@link #REACTIVATION_REQUIRES_LICENSE} gives: a reword must not be able to break a test
+     * silently. It is deliberately a <em>different</em> sentence from
+     * {@link #ACTIVATION_REQUIRES_COMPLETE_PROFILE} — that one refuses an administrator activating
+     * somebody, this one refuses the applicant submitting themselves, and the two gates read
+     * different definitions of complete.
+     */
+    public static final String SUBMISSION_REQUIRES_ALL_REQUIREMENTS = "Submission requires every onboarding requirement to be satisfied";
+
+    /**
      * Refusal when {@code agreed} is false on any of the three writes that record consent.
      *
      * <p>Public and shared by all three rather than reworded per endpoint: there is one fact —
@@ -321,48 +334,108 @@ public class OnboardingService {
     }
 
     /**
-     * Step 4's write: records consent and the requested authority, links the profile, moves the
-     * application to {@code CREDENTIAL_REVIEW} and announces it (profile.md step 4 and § Gap
-     * Update).
+     * <b>Step 4's Save</b> — stores the consent and the requested authority, and advances to
+     * {@code CREDENTIAL_REVIEW} <em>only</em> when every requirement is satisfied (profile.md step 4
+     * and § Gap Update; owner decision 2026-10-09).
      *
-     * <h2>⭐ One operation, and both of step 4's buttons call it</h2>
+     * <h2>⭐ Save is non-advancing when the application is incomplete, and that is not an error</h2>
      *
-     * <p>{@code profile.md} step 4: <i>"A <b>Save</b> and a <b>Submit</b> button store the consent
-     * and the requested authority, and set {@code application.status} to
-     * {@code CREDENTIAL_REVIEW}."</i> — one sentence, a compound subject, <b>identical effects
-     * attributed to both buttons</b>. § Gap Update adds the rest to the same operation:
-     * <i>"Submitting sets {@code Application.status} to {@code CREDENTIAL_REVIEW} and triggers the
-     * Kafka event, when all requirements are satisfied."</i>
+     * <p>The owner's words: <i>"Save should be non-advancing — store answers only"</i>, refined by
+     * <i>"Save advances only when complete"</i>. So this path <b>always stores</b>, and an incomplete
+     * application gets <b>200 with the application as stored</b> — no transition, no Kafka event and
+     * <b>no 400</b>. An applicant filling the wizard in several sittings has to be able to keep their
+     * answers, and a refusal is the wrong answer to "I am not finished yet".
      *
-     * <p>So there is one service method, reached by two mappings, and the difference between Save
-     * and Submit is the <b>wizard's</b> — which pane stays open — not the server's. That is T8's.
+     * <p>⛔ <b>This replaces the reading T3 shipped, and the argument T3 made for it is left here
+     * because it was half right.</b> That javadoc said {@code profile.md} step 4 — <i>"A <b>Save</b>
+     * and a <b>Submit</b> button store the consent and the requested authority, and set
+     * {@code application.status} to {@code CREDENTIAL_REVIEW}"</i> — is one sentence with a compound
+     * subject attributing identical effects to both buttons, so there was one service method and the
+     * difference was the wizard's. It then refused a Kafka-less Save on the ground that a status
+     * change the estate is never told about is <b>a consumer reading where nobody writes</b>: hc-admin
+     * consumes {@code onboarding.state COMPLETED} to learn an application is waiting on a reviewer.
+     * <b>That half still holds and is honoured here</b> — Save does not reach
+     * {@code CREDENTIAL_REVIEW} quietly; when it advances it publishes, exactly as Submit does. What
+     * was wrong was treating "identical effects" as "identical preconditions".
      *
-     * <p>⛔ <b>A Kafka-less "Save" variant was considered and refused.</b> It is the reading in
-     * which Save differs from Submit by the event, and it produces a status change the estate is
-     * never told about: hc-admin consumes {@code onboarding.state} {@code COMPLETED} to learn that
-     * an application is waiting on a reviewer, so an application that reached
-     * {@code CREDENTIAL_REVIEW} silently would sit in this service's queue and in nobody else's.
-     * <b>A consumer reading where nobody writes is silence that looks like health</b>, and a
-     * producer that sometimes stays quiet is the same defect from the other end. The requirements
-     * gate was refused on the same ground: a second path to {@code CREDENTIAL_REVIEW} that skipped
-     * {@link #requireMandatoryDocuments} would let an applicant into the review queue with no
-     * licence, and {@code profile.md} conditions the move on <i>"all requirements are
-     * satisfied"</i> without naming a button.
+     * <p>⚠ <b>Repeatable, which is the property the one-method shape could not have.</b> Save is
+     * callable any number of times: it checks whether the move is legal from the current status
+     * <em>before</em> transitioning rather than letting {@link #transition} refuse, so a second Save,
+     * and a Save on an application already in {@code CREDENTIAL_REVIEW}, store and return 200. The
+     * 409 belongs to Submit, which is where {@code aSecondWriteIsRefusedByTheStateMachine} now lives.
      *
      * @param accountId the caller's gateway {@code User.id}.
-     * @param agreed step 4's consent tick; false is refused.
+     * @param agreed step 4's consent tick; {@code false} is refused on both paths — a withheld tick
+     *     is a different answer from an unfinished form.
      * @param authority the role string being applied for.
      */
+    public ProfessionalApplication saveConsent(String accountId, boolean agreed, String authority) {
+        return storeThenAdvanceWhenComplete(accountId, agreed, authority, false);
+    }
+
+    /**
+     * <b>Step 4's Submit</b> — stores the same two answers, then <b>requires</b> every requirement
+     * this service can see and refuses naming the unsatisfied ones (profile.md § Gap Update: <i>"…
+     * when all requirements are satisfied"</i>).
+     *
+     * <h2>⛔ "All requirements" means all of them, not step 3's documents (F-B)</h2>
+     *
+     * <p>This checked {@code requireMandatoryDocuments} and nothing else, and the transition before
+     * it — {@link #completeProfile} — requires only that a {@code Profile} <em>row exist</em>. So an
+     * applicant with all four documents and a blank {@code phoneNumber}, {@code digitalAddress},
+     * {@code town} or {@code district}, or one emergency contact instead of two, got <b>200</b> here,
+     * reached {@code CREDENTIAL_REVIEW}, and had {@code onboarding.state COMPLETED} published to
+     * hc-admin — <b>and then {@link #markStatus}({@code ACTIVE}) refused with
+     * {@link #ACTIVATION_REQUIRES_COMPLETE_PROFILE} after a reviewer had done the work</b>, with
+     * nothing at any point having told the applicant their profile was short.
+     *
+     * <p>⚠ <b>Step 1's four account fields are the gateway's and this service cannot see them.</b>
+     * {@code firstName}, {@code lastName}, {@code langKey} and {@code imageUrl} live on {@code User}
+     * in {@code hcProfessionalGateway}; there is deliberately <b>no cross-service call invented
+     * here</b> to read them, so what this gate enforces is steps 2, 3 and 4. A submission whose
+     * account is incomplete still passes, and the client is what keeps step 1 ahead of step 2. Raised
+     * with the owner rather than guessed at.
+     *
+     * @see #saveConsent the same storing and the same completeness evaluation, without the refusal
+     */
     public ProfessionalApplication submitForReview(String accountId, boolean agreed, String authority) {
+        return storeThenAdvanceWhenComplete(accountId, agreed, authority, true);
+    }
+
+    /**
+     * The whole of step 4's write, shared by both buttons: store, then advance if complete.
+     *
+     * <p><b>One body rather than two, deliberately.</b> The owner's instruction is explicit that the
+     * storing and the completeness evaluation must not be duplicated between the paths — and this
+     * repository's own notes say why in general terms: two correct-for-now copies is how an estate
+     * arrives at one wrong one, and {@code quality/}'s items 84, 91 and 92 are a fix applied to one of
+     * two copies. So the only thing the two paths disagree about is {@code refuseWhenIncomplete},
+     * which is the single difference the owner's table draws.
+     *
+     * @param refuseWhenIncomplete Submit passes {@code true} and refuses with
+     *     {@link #SUBMISSION_REQUIRES_ALL_REQUIREMENTS} naming the unsatisfied keys; Save passes
+     *     {@code false} and returns the stored application unadvanced.
+     */
+    private ProfessionalApplication storeThenAdvanceWhenComplete(
+        String accountId,
+        boolean agreed,
+        String authority,
+        boolean refuseWhenIncomplete
+    ) {
         if (!agreed) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, CONSENT_REQUIRED);
         }
         ProfessionalApplication application = getOwnApplication(accountId);
-        requireMandatoryDocuments(application);
+
+        // --- Store. Unconditional on both paths, and BEFORE any completeness question: the owner's
+        // "Save should be non-advancing — store answers only" makes keeping the answers the one thing
+        // this write always does.
+        //
         // The authority is whatever the applicant last declared; the consent DATE is not re-stamped
         // over an existing one. profile.md renders it — "dated Application.agreedDate" — and a
         // re-affirmation of a consent already given is not a new consent, so moving the date would
-        // make the page state something untrue about when the subject agreed.
+        // make the page state something untrue about when the subject agreed. That holds across a
+        // Save-then-Submit sequence as much as across two Saves.
         application.authority(authority);
         if (!application.isAgreed()) {
             application.agreed(true).agreedDate(Instant.now());
@@ -370,6 +443,31 @@ public class OnboardingService {
         if (application.getProfileId() == null) {
             application.profileId(ownProfileId(accountId));
         }
+
+        // --- Evaluate, once, for both paths.
+        List<String> missing = unsatisfiedRequirements(accountId, authority);
+        if (!missing.isEmpty()) {
+            if (refuseWhenIncomplete) {
+                // Nothing is saved: the refusal is the whole answer, and a Submit that stored and
+                // then 400ed would leave the caller unable to tell which of the two happened.
+                throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    SUBMISSION_REQUIRES_ALL_REQUIREMENTS + "; still missing: " + String.join(", ", missing)
+                );
+            }
+            return applicationRepository.save(application);
+        }
+
+        // --- Advance. Save asks whether the move is legal first so that it can be called twice;
+        // Submit lets the state machine answer, which is where the 409 belongs.
+        boolean legal = LEGAL_TRANSITIONS.getOrDefault(application.getStatus(), Set.of()).contains(ProfileStatus.CREDENTIAL_REVIEW);
+        if (!legal && !refuseWhenIncomplete) {
+            // A complete application that is already in CREDENTIAL_REVIEW, or past it — the answers
+            // are stored and there is nothing to announce a second time. Publishing again would send
+            // hc-admin a COMPLETED for an application it has already queued.
+            return applicationRepository.save(application);
+        }
+
         application.submittedAt(Instant.now());
         ProfessionalApplication saved = transition(
             application,
@@ -378,8 +476,8 @@ public class OnboardingService {
             "submitted for credential review"
         );
         // COMPLETED means the applicant is done, not that they are cleared to work — the ACTIVE
-        // event below says that. Keeping them apart is what lets the admin portal tell an
-        // application stalled on us from one stalled on the clinician.
+        // event says that. Keeping them apart is what lets the admin portal tell an application
+        // stalled on us from one stalled on the clinician.
         domainEventPublisher.publishOnboardingState("COMPLETED", accountId, saved.getId(), saved.getAuthority(), accountId);
         return saved;
     }
@@ -650,13 +748,33 @@ public class OnboardingService {
      * itself, mid-screen, with nothing thrown and nothing logged.
      */
     private static final String REQ_CONSENT = "consent";
-    private static final String REQ_PROFILE = "profile";
-    private static final String REQ_ADDRESS = "address";
-    private static final String REQ_NEXT_OF_KIN = "nextOfKin";
+
+    /**
+     * The three step-2 keys, <b>taken from {@link ProfileCompleteness} rather than spelled again</b>
+     * (F-B). They were private literals here until the submit gate started naming the same keys; one
+     * declaration is what stops the meter and the refusal disagreeing about a translated label.
+     */
+    private static final String REQ_PROFILE = ProfileCompleteness.REQ_PROFILE;
+
+    private static final String REQ_ADDRESS = ProfileCompleteness.REQ_ADDRESS;
+
+    private static final String REQ_NEXT_OF_KIN = ProfileCompleteness.REQ_NEXT_OF_KIN;
+
     private static final String REQ_CERTIFICATE = "certificate";
     private static final String REQ_LICENSE = "license";
     private static final String REQ_IDENTITY = "identity";
     private static final String REQ_PHOTO = "photo";
+
+    /**
+     * Step 4's other half: the role the applicant declares they are applying for.
+     *
+     * <p>Not one of the eight progress-meter requirements, and deliberately so — the meter measures
+     * what the <em>profile</em> holds, and the authority is a property of the application. It is a
+     * submission requirement all the same: {@code profile.md} step 4 is <i>"The professional declares
+     * the role they are applying for <b>and</b> consents"</i>, so a submission naming no role has not
+     * satisfied it. Nothing refused one before F-B.
+     */
+    private static final String REQ_AUTHORITY = "authority";
 
     /**
      * How far this account has got, for its own eyes.
@@ -787,18 +905,82 @@ public class OnboardingService {
         );
     }
 
-    private void requireMandatoryDocuments(ProfessionalApplication application) {
-        List<PersonalDocument> documents = liveDocumentsFor(application);
-        boolean hasCertificate = documents.stream().anyMatch(d -> d.getType() == DocumentType.CERTIFICATE);
-        boolean hasLicenseWithExpiry = documents.stream().anyMatch(d -> d.getType() == DocumentType.LICENSE && d.getExpiryDate() != null);
-        boolean hasIdentity = documents.stream().anyMatch(d -> IDENTITY_TYPES.contains(d.getType()));
-        boolean hasPhoto = documents.stream().anyMatch(d -> d.getType() == DocumentType.PASSPHOTO);
-        if (!hasCertificate || !hasLicenseWithExpiry || !hasIdentity || !hasPhoto) {
-            throw new ResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                "Mandatory documents missing: certificate, license (with expiry), government identity, and passport photo are required"
-            );
+    /**
+     * ⛔ <b>Every requirement this service can see, named when it is not satisfied</b> —
+     * {@code profile.md} § Gap Update: <i>"Submitting sets {@code Application.status} to
+     * {@code CREDENTIAL_REVIEW} and triggers the Kafka event, <b>when all requirements are
+     * satisfied</b>."</i> (F-B)
+     *
+     * <table>
+     *   <caption>What is gated, and by which definition</caption>
+     *   <tr><th>step</th><th>requirement</th><th>read from</th></tr>
+     *   <tr><td>1</td><td>the four account fields</td>
+     *       <td><b>not gated</b> — they are {@code User}'s, in the gateway; see
+     *           {@link #submitForReview}</td></tr>
+     *   <tr><td>2</td><td>{@code profile}, {@code address}, {@code nextOfKin}</td>
+     *       <td>{@link ProfileCompleteness#missingRequirements} — the predicate built for
+     *           {@code profile.md}'s <i>"Every field in the Profile model is required"</i></td></tr>
+     *   <tr><td>3</td><td>{@code certificate}, {@code license}, {@code identity}, {@code photo}</td>
+     *       <td>the live documents on the caller's profile, as before</td></tr>
+     *   <tr><td>4</td><td>{@code authority}</td>
+     *       <td>the role on the submitted body; consent is refused earlier and separately, with
+     *           {@link #CONSENT_REQUIRED}, because a withheld tick is a different answer from an
+     *           incomplete one</td></tr>
+     * </table>
+     *
+     * <p>⭐ <b>Step 2's definition is {@link ProfileCompleteness}, not the progress meter's three
+     * predicates.</b> Those are deliberately weaker — {@code addressComplete} leaves
+     * {@code digitalAddress}, {@code town} and {@code district} optional, and
+     * {@code nextOfKinComplete} counts complete contacts rather than requiring every contact
+     * complete, so that a meter does not go <em>down</em> when a clinician starts typing a third
+     * contact. A <em>gate</em> has no such problem and {@code profile.md} says every field, so the
+     * gate reads the stricter one. That also closes the gap {@code ProfileCompleteness}'s own javadoc
+     * records: a profile could read 100% on the meter and carry no {@code status}.
+     *
+     * <p><b>400 on Submit, not 409.</b> Every one of these is something the applicant can fix and
+     * then retry, which is what distinguishes it from {@link #markStatus}'s {@code ACTIVE} gate —
+     * that one refuses an <em>administrator</em> acting on a state only the clinician can change, and
+     * answers {@code CONFLICT}. On Save a non-empty answer is not an error at all; see
+     * {@link #saveConsent}.
+     *
+     * <p>⚠ <b>Documents are resolved from the profile, not via {@code documentsFor(application)}</b>,
+     * which raises 409 <i>"Application has no linked profile"</i> for an application with no
+     * {@code profileId} — precisely one of the incomplete states this is asked about. That is the
+     * same reasoning {@link #progressFor} records for the same choice; before F-B an applicant with
+     * no profile at all met that 409 instead of being told what was missing.
+     *
+     * <p>⭐ <b>It returns the keys and refuses nothing</b> (owner decision 2026-10-09). Both of
+     * step 4's buttons ask the same question and only one of them turns a non-empty answer into a
+     * 400 — so the evaluation cannot live inside the refusal, or Save would have to re-derive it.
+     *
+     * @return the unsatisfied requirement keys, in the order the profile page shows them; empty when
+     *     every requirement this service can see is satisfied.
+     */
+    private List<String> unsatisfiedRequirements(String accountId, String authority) {
+        Profile profile = profileRepository.findByAccountId(accountId).orElse(null);
+        List<String> missing = new java.util.ArrayList<>(ProfileCompleteness.missingRequirements(profile));
+
+        List<PersonalDocument> documents = profile == null || profile.getId() == null
+            ? List.<PersonalDocument>of()
+            : personalDocumentRepository.findByProfileId(profile.getId()).stream().filter(PersonalDocumentService::isLive).toList();
+        if (documents.stream().noneMatch(d -> d.getType() == DocumentType.CERTIFICATE)) {
+            missing.add(REQ_CERTIFICATE);
         }
+        if (documents.stream().noneMatch(d -> d.getType() == DocumentType.LICENSE && d.getExpiryDate() != null)) {
+            missing.add(REQ_LICENSE);
+        }
+        if (documents.stream().noneMatch(d -> IDENTITY_TYPES.contains(d.getType()))) {
+            missing.add(REQ_IDENTITY);
+        }
+        if (documents.stream().noneMatch(d -> d.getType() == DocumentType.PASSPHOTO)) {
+            missing.add(REQ_PHOTO);
+        }
+
+        if (!hasText(authority)) {
+            missing.add(REQ_AUTHORITY);
+        }
+
+        return List.copyOf(missing);
     }
 
     /**
@@ -828,9 +1010,12 @@ public class OnboardingService {
         }
         return personalDocumentRepository.findByProfileId(profileId);
     }
-
-    /** What the professional holds now — the form every gate reads. See {@link PersonalDocumentService#isLive}. */
-    private List<PersonalDocument> liveDocumentsFor(ProfessionalApplication application) {
-        return documentsFor(application).stream().filter(PersonalDocumentService::isLive).toList();
-    }
+    /*
+     * liveDocumentsFor(ProfessionalApplication) is GONE — its one caller was requireMandatoryDocuments,
+     * which F-B folded into requireEverySubmissionRequirement. That gate resolves documents from the
+     * PROFILE rather than from the application, deliberately: documentsFor() raises 409 "Application has
+     * no linked profile" for an application with no profileId, which is one of the very states the gate
+     * exists to report on. Deleted rather than left behind, because a private helper with no caller is
+     * the next reader's evidence that this path still goes through the application.
+     */
 }

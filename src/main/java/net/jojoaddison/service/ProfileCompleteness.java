@@ -1,5 +1,6 @@
 package net.jojoaddison.service;
 
+import java.util.ArrayList;
 import java.util.List;
 import net.jojoaddison.domain.Address;
 import net.jojoaddison.domain.EmergencyContact;
@@ -77,6 +78,23 @@ public final class ProfileCompleteness {
     /** {@code profile.md} step 2: <i>"At least <b>two</b> emergency contacts are required."</i> */
     public static final int REQUIRED_CONTACTS = 2;
 
+    /**
+     * The three requirement keys this predicate can report, and the <b>single</b> spelling of each.
+     *
+     * <p>They are declared here and referenced by {@code OnboardingService}'s progress meter rather
+     * than spelled twice, because the client maps every key to a translated label in four languages:
+     * a key that differs between the meter and a refusal renders as the key itself, mid-screen, with
+     * nothing thrown and nothing logged. {@code OnboardingService} held private copies of these three
+     * strings until F-B; two correct-for-now copies is how this estate arrives at one wrong one.
+     */
+    public static final String REQ_PROFILE = "profile";
+
+    /** @see #REQ_PROFILE */
+    public static final String REQ_ADDRESS = "address";
+
+    /** @see #REQ_PROFILE */
+    public static final String REQ_NEXT_OF_KIN = "nextOfKin";
+
     private ProfileCompleteness() {}
 
     /**
@@ -86,10 +104,50 @@ public final class ProfileCompleteness {
      * @return {@code true} when every required value is present.
      */
     public static boolean isComplete(Profile profile) {
+        return missingRequirements(profile).isEmpty();
+    }
+
+    /**
+     * Which of the three groups this profile does not yet provide, in the order the page shows them
+     * — empty when {@link #isComplete} (F-B).
+     *
+     * <h2>Why a list of keys rather than the boolean the class opened with</h2>
+     *
+     * <p>{@code profile.md} § Gap Update conditions step 4's submit on <i>"when all requirements are
+     * satisfied"</i>, and the only check on that path was step 3's four documents: an applicant with
+     * every document and a blank {@code phoneNumber} got <b>200</b>, reached
+     * {@code CREDENTIAL_REVIEW}, and had {@code onboarding.state COMPLETED} published — then
+     * activation failed with {@code ACTIVATION_REQUIRES_COMPLETE_PROFILE} <em>after a reviewer had
+     * done the work</em>, with nothing having told the applicant their profile was short.
+     *
+     * <p><b>So the applicant has to learn which requirement is unsatisfied, and a boolean cannot say
+     * it.</b> {@code OnboardingService.requireCompleteProfile} already names its unsatisfied keys for
+     * exactly this reason; this is the same courtesy on the earlier gate, and the reason
+     * {@link #isComplete} is now derived from this method rather than the other way round — one
+     * traversal, one answer, no second definition that could disagree about a field.
+     *
+     * <p>⚠ <b>Three keys, not 39.</b> The grouping is {@code profile.md}'s own — the Profile model,
+     * the Address model, the EmergencyContact list — and it is what the client has labels for. Which
+     * of the eleven values inside a contact is missing is the form's to show, not the refusal's.
+     *
+     * @param profile the stored row after the write has been applied, or {@code null} — in which case
+     *     all three are missing, which is the honest answer for an applicant with no profile at all.
+     */
+    public static List<String> missingRequirements(Profile profile) {
         if (profile == null) {
-            return false;
+            return List.of(REQ_PROFILE, REQ_ADDRESS, REQ_NEXT_OF_KIN);
         }
-        return personalDetailsProvided(profile) && addressProvided(profile.getAddress()) && contactsProvided(profile.getContacts());
+        List<String> missing = new ArrayList<>();
+        if (!personalDetailsProvided(profile)) {
+            missing.add(REQ_PROFILE);
+        }
+        if (!addressProvided(profile.getAddress())) {
+            missing.add(REQ_ADDRESS);
+        }
+        if (!contactsProvided(profile.getContacts())) {
+            missing.add(REQ_NEXT_OF_KIN);
+        }
+        return List.copyOf(missing);
     }
 
     /** The ten fields of {@code Profile} itself. {@code sex} and {@code cardType} are enums (F9). */

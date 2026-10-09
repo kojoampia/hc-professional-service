@@ -172,26 +172,44 @@ public class DomainEventPublisher {
      * <p>{@code state} is carried in the payload rather than the event type so a consumer switches
      * on one field instead of matching a family of event names.
      *
+     * <h2>⭐ The role key is {@code authority}, on the wire as well as in storage (F-C)</h2>
+     *
+     * <p>{@code profile.md} § Gap Update: <i>"Refactor the {@code String requestedRole} to
+     * {@code authority}."</i> The field, the repository query, the service parameters,
+     * {@code MessagingService} and both clients were renamed by T3; <b>this payload key was not</b>,
+     * and the javadoc that stood here defended the exemption on a claim that was false:
+     *
+     * <blockquote>⛔ <i>"This key is a published cross-product contract on
+     * {@code hc.professional.registration} that hc-admin consumes, so renaming it here would be a
+     * silent breaking change on another product's consumer."</i></blockquote>
+     *
+     * <p><b>hc-admin does not consume it.</b> Measured 2026-10-09 at that product's checkout:
+     * {@code requestedRole} appears <b>nowhere</b> in {@code hc-admin/api/src/main} or
+     * {@code hc-admin/gateway/src/main}, and {@code SiblingEventParser.parseProfessionalEvent} reads
+     * exactly two keys off this payload — {@code accountId} and {@code state}. The only two
+     * occurrences of the string in that repository are JSON fixture literals in
+     * {@code SiblingEventParserTest} and {@code DirectoryEventConsumptionIT}, neither asserted; they
+     * are hc-admin's to tidy and nothing here depends on them.
+     *
+     * <p>⚠ <b>The lesson is about the shape of the argument, not about this key.</b> "A consumer
+     * depends on it" is a claim about another repository, and it was written without opening one —
+     * the same failure this estate's notes describe as a defect found by reading one side being a
+     * hypothesis about the other. Two of the six findings in this pass were false justifications
+     * rather than wrong behaviour, and both had outlived their subject.
+     *
      * @param state one of {@code IN_PROGRESS}, {@code COMPLETED}, {@code ACTIVE}.
-     * @param requestedRole the role string, which is {@code ProfessionalApplication.authority} since
-     *     T3 renamed the field. ⛔ <b>The payload KEY below is deliberately still
-     *     {@code requestedRole}, and the parameter keeps its name to match it.</b>
-     *     {@code profile.md} § Gap Update renames <i>"the {@code String requestedRole}"</i> — a
-     *     field on an entity in this service — and says nothing about the wire. This key is a
-     *     published cross-product contract on {@code hc.professional.registration} that hc-admin
-     *     consumes, so renaming it here would be a silent breaking change on another product's
-     *     consumer, made on a reading the specification does not state. Raised with the owner;
-     *     change it only with hc-admin's half in the same cutover.
+     * @param authority the role string — {@code ProfessionalApplication.authority}, which is both
+     *     the field's name since T3 and the payload key since F-C.
      */
-    public void publishOnboardingState(String state, String accountId, String applicationId, String requestedRole, String actor) {
+    public void publishOnboardingState(String state, String accountId, String applicationId, String authority, String actor) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("accountId", accountId);
         payload.put("state", state);
         if (applicationId != null) {
             payload.put("applicationId", applicationId);
         }
-        if (requestedRole != null) {
-            payload.put("requestedRole", requestedRole);
+        if (authority != null) {
+            payload.put("authority", authority);
         }
         DomainEventEnvelope envelope = new DomainEventEnvelope(
             UUID.randomUUID().toString(),

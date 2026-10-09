@@ -440,15 +440,42 @@ public class Profile implements Serializable {
      * The singular {@code emergencyContact} this document carried until profile.md's T1, kept
      * <b>on the wire only</b> so the clients that have not migrated yet keep working.
      *
-     * <h2>Why a compatibility shim rather than a clean break</h2>
+     * <h2>Why a compatibility shim rather than a clean break — the reason, corrected (F-E)</h2>
      *
-     * <p>{@code PUT /api/onboarding/profile} is still live and still the path two shipped clients
-     * write a profile through. Re-pointing {@code web/} is T6 and is scheduled <b>last</b>; and
-     * <b>{@code mobile/} is in no scheduled task at all</b> — {@code me.page.ts} reads
-     * {@code profile?.emergencyContact?.name} and PUTs {@code emergencyContact: {…}} back. Dropping
-     * the name from the wire would therefore leave the mobile Me tab silently unable to save a next
-     * of kin, with nothing in any backlog that would fix it: a 200 with the field quietly gone,
-     * which is precisely the "answered wrongly" failure this repository keeps closing.
+     * <p>⛔ <b>The justification that stood here had outlived its subject.</b> It read:
+     *
+     * <blockquote><i>"{@code PUT /api/onboarding/profile} is still live and still the path two
+     * shipped clients write a profile through."</i></blockquote>
+     *
+     * <p><b>That path is gone.</b> F8 retired {@code GET} and {@code PUT /api/onboarding/profile} per
+     * {@code profile.md} § Other Elements (<i>"{@code api/onboarding/profile} should migrate to
+     * {@code api/profile}"</i>); {@code OnboardingResource} now carries only {@code /progress} and the
+     * two {@code /acknowledgement} verbs, and {@code OnboardingService} four files away says so in as
+     * many words. Keeping a deprecated alias on the strength of a retired endpoint is the same shape
+     * as the false cross-product claim F-C deleted from {@code DomainEventPublisher}: a reason that
+     * reads as current because nobody re-checked its subject.
+     *
+     * <p>⭐ <b>The alias is still needed, and the mechanism is different: the clients name it on the
+     * NEW path.</b> Measured 2026-10-09 in both frontends — each builds its URL through
+     * {@code getEndpointFor('api/profile', 'professionalservice')} and each still speaks
+     * {@code emergencyContact}:
+     *
+     * <table>
+     *   <caption>The two live consumers of this alias</caption>
+     *   <tr><th>client</th><th>file</th><th>what it does</th></tr>
+     *   <tr><td>{@code mobile/}</td><td>{@code src/app/features/me/me.page.ts}</td>
+     *       <td>reads {@code profile?.emergencyContact?.name} / {@code .relationship} /
+     *           {@code .phone} and PUTs {@code emergencyContact: {…}} back</td></tr>
+     *   <tr><td>{@code web/}</td><td>{@code app/account/profile/clinical-profile.component.ts}</td>
+     *       <td>the same read and the same write, through
+     *           {@code OnboardingApiService}'s {@code profileUrl}</td></tr>
+     * </table>
+     *
+     * <p>⚠ <b>Two clients, not one</b> — F-E named only {@code mobile/}, and {@code web/}'s
+     * {@code ClinicalProfileComponent} is a second. {@code OnboardingApiService} records the pending
+     * move in its own comment. Dropping the name from the wire today would leave <em>both</em>
+     * next-of-kin forms silently unable to save: a 200 with the field quietly gone, which is
+     * precisely the "answered wrongly" failure this repository keeps closing.
      *
      * <p><b>It is a projection of {@link #contacts}, never a second stored field.</b> There is one
      * {@code contacts} array in Mongo and no {@code emergency_contact} key after
@@ -462,7 +489,9 @@ public class Profile implements Serializable {
      *
      * <p>⛔ <b>Not reflected by {@code ProfilePatchFieldCoverageIT}</b>, which enumerates declared
      * fields and sees no such field. The alias has its own named cases there instead. Retire this
-     * pair with T6, and only once {@code mobile/} has a task that moves it too.
+     * pair with T6, and only once <b>both</b> clients in the table above have been moved — the
+     * retirement is gated on the clients, which is a thing to measure, and no longer on an endpoint,
+     * which was a thing that had already happened.
      *
      * @deprecated use {@link #getContacts()}; retires with the last client that names it (T6).
      */

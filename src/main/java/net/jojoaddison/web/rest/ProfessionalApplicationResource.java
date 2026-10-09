@@ -129,9 +129,9 @@ public class ProfessionalApplicationResource {
      * @param authority the role string applied for. A {@code String} because {@code Authority} is
      *     the gateway's class and this service holds only the role (profile.md § Gap Update).
      * @param source the careers attribution, e.g. {@code web-careers}; read by the review queue and
-     *     the WP7 funnel count (careers-handoff-contract.md § 3). Honoured on the create only —
-     *     where a clinician came from is a fact about the application's origin, so a later write
-     *     cannot restate it.
+     *     the WP7 funnel count (careers-handoff-contract.md § 3). <b>Owned by the create, and
+     *     refused rather than ignored on the other two (F-F)</b> — see
+     *     {@link #refuseSourceOnAWriteThatDoesNotOwnIt}.
      */
     public record ApplicationConsentRequest(boolean agreed, String authority, String source) {}
 
@@ -189,43 +189,59 @@ public class ProfessionalApplicationResource {
     }
 
     /**
-     * {@code PUT /api/professional-application/me} : <b>step 4's Save</b>.
+     * {@code PUT /api/professional-application/me} : <b>step 4's Save</b> — <b>non-advancing when the
+     * application is incomplete</b> (owner decision 2026-10-09).
      *
-     * <p>Stores the consent and the requested authority and sets {@code status} to
-     * {@code CREDENTIAL_REVIEW}, which is what {@code profile.md} step 4 attributes to this button
-     * and to Submit alike. {@link #submitForReview} is the same operation under the path the old
-     * {@code /applications/me/submit} mapping migrated to; <b>one service method serves both</b>, so
-     * the two cannot drift, and {@link OnboardingService#submitForReview} carries the argument for
-     * why they are one operation rather than two differing by the Kafka event.
+     * <p>Always stores the consent and the requested authority, and <em>then</em> advances to
+     * {@code CREDENTIAL_REVIEW} only if every requirement is satisfied. An incomplete application
+     * answers <b>200 with the application as stored</b> — no transition, no Kafka event, no refusal:
+     * an applicant saving their answers mid-wizard is not making a mistake.
      *
-     * <p>⛔ <b>The status write goes through {@code OnboardingService.transition()}</b>, not an
-     * assignment: {@code PROFILE_COMPLETED → CREDENTIAL_REVIEW} is the only legal move out, and a
-     * write that checks nothing and appends nothing leaves an application whose own history does not
-     * contain the step. A second call therefore answers 409 from the state machine — that is the
-     * machine's own answer and not a special case here.
+     * <p>⛔ <b>It served {@link OnboardingService#submitForReview} until this decision</b>, which made
+     * the two buttons one operation on the reading that {@code profile.md} step 4 attributes
+     * identical effects to both. They share one body still — {@code storeThenAdvanceWhenComplete} —
+     * and differ in one argument, so the storing and the completeness evaluation cannot drift apart.
+     * {@link #submitForReview} is the path that refuses.
+     *
+     * <p>⚠ <b>Repeatable.</b> Save checks whether {@code CREDENTIAL_REVIEW} is legal from the current
+     * status before transitioning rather than letting the state machine refuse, so calling it twice —
+     * and calling it on an application already in review — stores and answers 200. The 409 that used
+     * to come from this path belongs to {@link #submitForReview} now.
+     *
+     * <p>⛔ <b>When it does advance, the status write goes through {@code transition()}</b>, not an
+     * assignment: a write that checks nothing and appends nothing leaves an application whose own
+     * history does not contain the step, and hc-admin would never be told it was queued.
      */
     @PutMapping(OWN)
     @PreAuthorize("isAuthenticated()")
     public ProfessionalApplication saveConsent(@RequestBody ApplicationConsentRequest request) {
         String accountId = currentAccountId();
         log.debug("REST request to save the consent and authority on {}'s own application", accountId);
-        return onboardingService.submitForReview(accountId, request.agreed(), request.authority());
+        refuseSourceOnAWriteThatDoesNotOwnIt(request);
+        return onboardingService.saveConsent(accountId, request.agreed(), request.authority());
     }
 
     /**
-     * {@code PUT /api/professional-application/me/submit} : <b>step 4's Submit</b> — the same
-     * operation as {@link #saveConsent}, under the path {@code /applications/me/submit} migrated to.
+     * {@code PUT /api/professional-application/me/submit} : <b>step 4's Submit</b>, under the path
+     * {@code /applications/me/submit} migrated to.
      *
      * <p>§ Gap Update: <i>"Submitting sets {@code Application.status} to {@code CREDENTIAL_REVIEW}
-     * and triggers the Kafka event, when all requirements are satisfied."</i> All three clauses are
-     * the service method's; the mandatory-document check is the requirements half and is what makes
-     * this a 400 rather than a transition for an applicant with no licence on file.
+     * and triggers the Kafka event, <b>when all requirements are satisfied</b>."</i> All of it is the
+     * service method's, and the last clause is the <b>only</b> thing that distinguishes this handler
+     * from {@link #saveConsent}: where Save stores and stays put, this <b>refuses with 400 naming the
+     * unsatisfied requirement keys</b> — step 2 by {@code ProfileCompleteness}, step 3's four
+     * documents, step 4's authority.
+     *
+     * <p>A second Submit on an application already in {@code CREDENTIAL_REVIEW} is the state
+     * machine's <b>409</b>, which is where that answer belongs: Submit means "I am finished", and
+     * saying it twice is a conflict in a way that saving twice is not.
      */
     @PutMapping(OWN + "/submit")
     @PreAuthorize("isAuthenticated()")
     public ProfessionalApplication submitForReview(@RequestBody ApplicationConsentRequest request) {
         String accountId = currentAccountId();
         log.debug("REST request to submit {}'s own application for credential review", accountId);
+        refuseSourceOnAWriteThatDoesNotOwnIt(request);
         return onboardingService.submitForReview(accountId, request.agreed(), request.authority());
     }
 
@@ -392,6 +408,47 @@ public class ProfessionalApplicationResource {
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     public List<OnboardingEvent> recentEvents() {
         return complianceService.recentEvents();
+    }
+
+    /**
+     * ⛔ <b>{@code source} belongs to the create, and Save and Submit refuse it rather than dropping
+     * it (F-F).</b>
+     *
+     * <p>{@link ApplicationConsentRequest} is bound by all three write handlers, and the service
+     * method behind the other two has no {@code source} parameter at all — so a client sending one
+     * had it <b>silently ignored</b>: 200, the attribution unchanged, and nothing to tell the caller
+     * their field went nowhere. That is the exact failure {@code ProfileFieldOwnership} exists to
+     * refuse, one file along, and it states the rule this method applies:
+     * <i>"Refuses, rather than silently ignores, a write that would change a field the calling
+     * endpoint does not own"</i>, with a message naming the field and the endpoint that does own it.
+     *
+     * <p><b>Why the create owns it.</b> {@code source} is the careers attribution
+     * (careers-handoff-contract.md § 3) — where a clinician came from is a fact about the
+     * application's <em>origin</em>, so a later write cannot restate it. Honouring it here would also
+     * let step 4 overwrite a real {@code web-careers} attribution with {@code null} on every Save, by
+     * a client that merely round-tripped the record it had read; refusing the component is what makes
+     * that unrepresentable rather than guarded against.
+     *
+     * <p>⚠ <b>Refused on the mention, not on a change</b> — unlike
+     * {@code ProfileFieldOwnership.refuseFieldsThisEndpointDoesNotOwn}, which tolerates a field named
+     * at its current value because its callers accept whole documents a client had just read. These
+     * two handlers take a three-component record that a client composes, not a document it echoes, so
+     * there is no honest reason to name {@code source} here at all. ⚠ A JSON body omitting the key and
+     * one sending {@code "source": null} are indistinguishable after binding — a record component is
+     * simply null for both — so the refusal necessarily keys on a <em>value</em> being present.
+     * {@code profile.md} does not mention {@code source}, so this follows the house rule rather than a
+     * reading of the specification.
+     */
+    private void refuseSourceOnAWriteThatDoesNotOwnIt(ApplicationConsentRequest request) {
+        if (request.source() != null) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "This endpoint does not set these fields, and will not quietly drop them: " +
+                "source is set by POST " +
+                BASE +
+                ", which records the careers attribution once when the application is created"
+            );
+        }
     }
 
     private void assertAdminOrOwner(ProfessionalApplication application) {
