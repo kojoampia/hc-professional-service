@@ -92,11 +92,17 @@ public class SecurityConfiguration {
                     //
                     // /api/personal-document IS NOT /api/personal-documents, and this is the line that
                     // depends on it. The PLURAL path is PersonalDocumentResource -- the generated CRUD
-                    // surface, whose three GETs carry no @PreAuthorize and return `data` INLINE with no
-                    // owner check (profile-addendum.md S1). A matcher that reached it would hand that
-                    // surface to a role-less applicant on top of the clinical roles that can already
-                    // read it. ClinicalAuthorityMatrixIT asserts the separation in both directions,
-                    // because it is a claim about Spring's pattern matching and not about this comment.
+                    // surface, and it maps NO GET since S1 closed (backlog.md row 226): its three GETs
+                    // carried no @PreAuthorize and returned `data` INLINE with no owner check, and they
+                    // are deleted rather than gated, because the reads a product surface makes are
+                    // served subject-scoped elsewhere -- this resource, and
+                    // ProfessionalApplicationResource's /{id}/documents for a reviewer's list. What a
+                    // matcher reaching the plural path would hand a role-less applicant is therefore the
+                    // POST/PUT/PATCH/DELETE that maintain any clinician's documents -- which is worse,
+                    // not better, than what it used to be, and the PATCH among them still answers with a
+                    // whole document (row 227). ClinicalAuthorityMatrixIT asserts the separation in both
+                    // directions, on the writes AND on the absent GET mappings, because it is a claim
+                    // about Spring's pattern matching and not about this comment.
                     //
                     // METHOD-AGNOSTIC, SO HEAD IS COVERED, exactly as on /api/profile above: Spring MVC
                     // dispatches a HEAD to the @GetMapping handler, and a rule scoped to HttpMethod.GET

@@ -86,6 +86,13 @@ class LocationHeaderIT {
      * back it belongs in this list again, and
      * {@code ProfileResourceIT.aCreateIsRefusedRatherThanMakingAProfileThatBelongsToNobody} is what
      * fails first to say so.
+     *
+     * <p>⚠ <b>{@code /api/personal-documents} is still here and its {@code Location} is no longer
+     * dereferenceable</b> — S1 deleted the {@code GET}s, not the {@code POST}. It stays in this list
+     * because the header it advertises still ships and is still worth asserting; see
+     * {@link #NOT_FOLLOWABLE} for what the follow asserts instead. Dropping the entry was the
+     * alternative and would have cost this live endpoint's {@code Location} assertion — the other
+     * seven entries are live creates too and keep theirs.
      */
     static final List<String> SIMPLE_CREATES = List.of(
         "/api/personal-documents",
@@ -164,7 +171,9 @@ class LocationHeaderIT {
      * {@code POST /api/duty-roster} advertised {@code /api/duty-roster/{id}} while
      * {@code DutyRosterResource} had no {@code GET /{id}} at all, so ten of eleven endpoints were
      * fixed and the eleventh's failure merely moved: right prefix, right host, still a 404. Every
-     * {@code Location} asserted in this class is now dereferenced.
+     * {@code Location} asserted in this class is dereferenced — <b>including the one whose read was
+     * deliberately removed</b>, which is dereferenced and held to its refusal rather than skipped; see
+     * {@link #NOT_FOLLOWABLE}.
      *
      * <p>The local path rather than the advertised absolute URL, because MockMvc dispatches against
      * this application and cannot resolve {@code professional.abofonsa.com}. That is exactly the
@@ -172,8 +181,52 @@ class LocationHeaderIT {
      * proves the resource is there to be seen. Neither implies the other.
      */
     private void followable(String path, String id) throws Exception {
+        if (NOT_FOLLOWABLE.contains(path)) {
+            restMockMvc.perform(get(path + "/" + id)).andExpect(status().isMethodNotAllowed());
+            return;
+        }
         restMockMvc.perform(get(path + "/" + id)).andExpect(status().is2xxSuccessful());
     }
+
+    /**
+     * The collections in {@link #SIMPLE_CREATES} whose {@code Location} names a real row that
+     * <b>no {@code GET} will serve</b>, so the follow asserts the refusal instead of a 2xx.
+     *
+     * <p>{@code /api/personal-documents} is the one entry and S1 is the reason (backlog.md row 226):
+     * its three {@code GET}s returned the document bytes to any authenticated caller with no ownership
+     * check at all, and they are deleted rather than gated, because the reads a product surface makes
+     * are served subject-scoped elsewhere — {@link OwnPersonalDocumentResource} for the caller's own
+     * list and the byte stream, {@code ProfessionalApplicationResource.applicationDocuments} for a
+     * reviewer's list. The {@code POST} is untouched and still ships, so the {@code Location} it
+     * advertises is still a header a client receives and still worth holding to the right value.
+     *
+     * <p><b>405, and the number is the assertion.</b> The path pattern still matches —
+     * {@code PUT}, {@code PATCH} and {@code DELETE} are mapped on {@code /{id}} — so Spring rejects the
+     * method rather than the route, and the {@code Allow} header carries those three verbs <b>in no
+     * guaranteed order</b>; it is asserted as a set, once, in
+     * {@code ClinicalAuthorityMatrixIT.allowedMethods}, rather than quoted here. Measured, not
+     * reasoned: the first version of this branch expected 404 and failed with
+     * {@code Status expected:<404> but was:<405>}. A 2xx here means a {@code GET} came back.
+     *
+     * <p>⚠ <b>405 is not the same as unreadable.</b> That resource's {@code PATCH} still answers with a
+     * whole document including its bytes — backlog.md row 227 — so this set records that the
+     * {@code Location} cannot be <em>followed</em>, not that the row it names is unreachable.
+     *
+     * <p>⚠ <b>Why the entry stayed in the list rather than leaving it, which is the same question
+     * {@link #NO_DELETE} answers.</b> {@code /api/profiles} left {@code SIMPLE_CREATES} because its
+     * {@code POST} went away, and the javadoc there is plain that the coverage went with it. Here the
+     * {@code POST} is alive, so dropping the entry would have given up a live endpoint's
+     * {@code Location} assertion to avoid writing four lines — and left this file silent about a path
+     * it used to cover. Keeping it and asserting the absence is two independent guards on one fact:
+     * a {@code GET} that came back would fail here as well as in
+     * {@code ClinicalAuthorityMatrixIT.thePluralDocumentReadsDoNotExistForARoleLessApplicant}.
+     *
+     * <p>⛔ <b>This set is not a waiver list.</b> An entry here says a read is <em>gone by decision</em>
+     * and names the row that decided it. A create whose {@code Location} 404s because nobody wrote the
+     * {@code GET} is the defect this class was built for — the {@code /api/duty-roster} case in
+     * {@link #followable}'s javadoc — and belongs in neither set.
+     */
+    private static final List<String> NOT_FOLLOWABLE = List.of("/api/personal-documents");
 
     /**
      * The header a client can follow, on nine creates at once.

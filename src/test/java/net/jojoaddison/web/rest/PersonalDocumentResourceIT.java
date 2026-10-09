@@ -3,14 +3,12 @@ package net.jojoaddison.web.rest;
 import static net.jojoaddison.domain.PersonalDocumentAsserts.*;
 import static net.jojoaddison.web.rest.TestUtil.createUpdateProxyForBean;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.Base64;
 import java.util.UUID;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.PersonalDocument;
@@ -25,7 +23,46 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * Integration tests for the {@link PersonalDocumentResource} REST controller.
+ * Integration tests for the {@link PersonalDocumentResource} REST controller — <b>its writes, which
+ * are the only verbs it maps</b>.
+ *
+ * <h2>⛔ The three read tests are gone with the three {@code GET} mappings (S1, backlog.md row 226)</h2>
+ *
+ * <p>{@code getAllPersonalDocuments}, {@code getPersonalDocument} and
+ * {@code getNonExistingPersonalDocument} stood here, and the first two asserted — among other fields —
+ * {@code $.[*].data} and {@code $.data} equal to the base64 of the stored bytes. <b>That is the
+ * defect, written down as an expectation.</b> The resource carried no {@code @PreAuthorize} anywhere,
+ * so those reads answered any authenticated caller with every document in the collection, bytes
+ * included; the only thing that ever exercised them was this class, and this class asserted the 200 was
+ * correct. A green suite was part of S1, which is why they are deleted rather than re-pointed at
+ * something.
+ *
+ * <p><b>What is no longer covered here, plainly.</b> Nothing in this class now reads a document back
+ * over HTTP — the {@code PUT}/{@code PATCH} cases verify through {@code personalDocumentRepository}
+ * instead, as they always did, and no test asserts the JSON projection of a {@code PersonalDocument} on
+ * this path, because there is no {@code GET} on this path to project it. The reads a product surface
+ * makes live on two other resources and are covered by their own ITs:
+ * {@link OwnPersonalDocumentResource}'s own list ({@code data} nulled) and {@code /{id}/content}
+ * (owner-or-reviewer) in {@code OwnPersonalDocumentResourceIT}, and a reviewer's document list,
+ * {@code GET /api/professional-application/&#123;id&#125;/documents} ({@code assertAdminOrOwner},
+ * {@code data} nulled), in {@code ProfessionalApplicationResourceIT}. The <em>absence</em> of the
+ * plural {@code GET}s is held by {@code ClinicalAuthorityMatrixIT}, which asserts the statuses measured
+ * for them — 405 on the collection and on {@code /{id}}, 404 on {@code /profile/{profileId}} — for an
+ * applicant, a read-only discipline and an administrator alike.
+ *
+ * <p>⚠ <b>"No {@code GET}" is not "no read", and this class is where that would mislead most.</b> The
+ * surviving {@code PATCH} returns the merged row, so a merge-patch body carrying only {@code id}
+ * answers 200 with the whole document, bytes included, to any of the six {@code CLINICAL_MUTATION}
+ * authorities with no ownership check — backlog.md row 227. {@code partialUpdatePersonalDocumentWithPatch}
+ * and {@code fullUpdatePersonalDocumentWithPatch} below run as {@code ROLE_DOCTOR} and <em>do</em>
+ * receive that body; they assert the persisted row rather than the response, and <b>no case here
+ * asserts the echo</b>, deliberately: a test pinning a defect in place is worse than a row naming it.
+ *
+ * <p>⚠ <b>This class is still the only description of the write surface</b>, and that surface is
+ * deliberately unchanged: it is the admin data-maintenance path for a document, including the
+ * whole-document {@code PUT} that un-archives a row by omitting {@code supersededAt} — backlog.md item
+ * 46, not fixed here and not made worse here. Row 227 is where the {@code PATCH} echo and that
+ * {@code PUT}'s blanking of {@code data} get decided together.
  */
 @IntegrationTest
 @AutoConfigureMockMvc
@@ -148,53 +185,11 @@ class PersonalDocumentResourceIT {
         assertSameRepositoryCount(databaseSizeBeforeCreate);
     }
 
-    @Test
-    void getAllPersonalDocuments() throws Exception {
-        // Initialize the database
-        personalDocumentRepository.save(personalDocument);
-
-        // Get all the personalDocumentList
-        restPersonalDocumentMockMvc
-            .perform(get(ENTITY_API_URL + "?sort=id,desc"))
-            .andExpect(status().isOk())
-            .andExpect(content().contentType(MediaType.APPLICATION_JSON_VALUE))
-            .andExpect(jsonPath("$.[*].id").value(hasItem(personalDocument.getId())))
-            .andExpect(jsonPath("$.[*].name").value(hasItem(DEFAULT_NAME)))
-            .andExpect(jsonPath("$.[*].profileId").value(hasItem(DEFAULT_PROFILE_ID)))
-            .andExpect(jsonPath("$.[*].dataContentType").value(hasItem(DEFAULT_DATA_CONTENT_TYPE)))
-            .andExpect(jsonPath("$.[*].data").value(hasItem(Base64.getEncoder().encodeToString(DEFAULT_DATA))))
-            .andExpect(jsonPath("$.[*].type").value(hasItem(DEFAULT_TYPE.toString())))
-            .andExpect(jsonPath("$.[*].createdDate").value(hasItem(DEFAULT_CREATED_DATE.toString())))
-            .andExpect(jsonPath("$.[*].modifiedDate").value(hasItem(DEFAULT_MODIFIED_DATE.toString())))
-            .andExpect(jsonPath("$.[*].lastModifiedBy").value(hasItem(DEFAULT_LAST_MODIFIED_BY)));
-    }
-
-    @Test
-    void getPersonalDocument() throws Exception {
-        // Initialize the database
-        personalDocumentRepository.save(personalDocument);
-
-        // Get the personalDocument
-        restPersonalDocumentMockMvc
-            .perform(get(ENTITY_API_URL_ID, personalDocument.getId()))
-            .andExpect(status().isOk())
-            .andExpect(content().contentType(MediaType.APPLICATION_JSON_VALUE))
-            .andExpect(jsonPath("$.id").value(personalDocument.getId()))
-            .andExpect(jsonPath("$.name").value(DEFAULT_NAME))
-            .andExpect(jsonPath("$.profileId").value(DEFAULT_PROFILE_ID))
-            .andExpect(jsonPath("$.dataContentType").value(DEFAULT_DATA_CONTENT_TYPE))
-            .andExpect(jsonPath("$.data").value(Base64.getEncoder().encodeToString(DEFAULT_DATA)))
-            .andExpect(jsonPath("$.type").value(DEFAULT_TYPE.toString()))
-            .andExpect(jsonPath("$.createdDate").value(DEFAULT_CREATED_DATE.toString()))
-            .andExpect(jsonPath("$.modifiedDate").value(DEFAULT_MODIFIED_DATE.toString()))
-            .andExpect(jsonPath("$.lastModifiedBy").value(DEFAULT_LAST_MODIFIED_BY));
-    }
-
-    @Test
-    void getNonExistingPersonalDocument() throws Exception {
-        // Get the personalDocument
-        restPersonalDocumentMockMvc.perform(get(ENTITY_API_URL_ID, Long.MAX_VALUE)).andExpect(status().isNotFound());
-    }
+    // The three generated read tests stood here. See the class javadoc: two of them asserted the
+    // document bytes on the wire, which was S1 stated as an expectation. They are deleted because the
+    // handlers are, and the absence is asserted in ClinicalAuthorityMatrixIT rather than here — a
+    // status-only case in this class would read as a gap in the generated CRUD coverage, where there
+    // it reads as the security claim it is.
 
     @Test
     void putExistingPersonalDocument() throws Exception {
