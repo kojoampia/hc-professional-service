@@ -49,6 +49,15 @@ class ProfessionalApplicationResourceIT {
     /** Step 4's body, as the specification types it: the tick and the role, and nothing else. */
     private static final String CONSENT = "{\"authority\":\"ROLE_NURSE\",\"agreed\":true}";
 
+    /**
+     * The tick alone — a body naming <b>no</b> authority, which since the owner's decision of
+     * 2026-10-09 leaves a stored role as it is rather than blanking it.
+     */
+    private static final String CONSENT_WITHOUT_AUTHORITY = "{\"agreed\":true}";
+
+    /** And the blank form of the same thing, which must behave identically. */
+    private static final String CONSENT_WITH_BLANK_AUTHORITY = "{\"agreed\":true,\"authority\":\"\"}";
+
     @Autowired
     private MockMvc restMockMvc;
 
@@ -445,23 +454,66 @@ class ProfessionalApplicationResourceIT {
     }
 
     /**
-     * ⛔ <b>Step 4's own other half: a submission naming no authority is refused.</b>
+     * ⛔ <b>Step 4's own other half: an applicant who has <em>never declared</em> a role is refused at
+     * Submit.</b>
      *
      * <p>{@code profile.md} step 4 is <i>"The professional declares the role they are applying for
      * <b>and</b> consents"</i>, and nothing refused a blank role before F-B — the application simply
      * stored {@code authority: null} over whatever it held and went to review with no discipline on
      * it. Consent is refused earlier and with its own message, because a withheld tick is a different
      * answer from an incomplete form.
+     *
+     * <p>⚠ <b>The premise changed with the owner's decision of 2026-10-09, not the claim.</b> This
+     * walked {@link #readyToSubmit()}, which <em>declares</em> {@code ROLE_NURSE} at the create — so
+     * the refusal it observed depended on the Submit body blanking that stored role on its way to the
+     * gate. Now that a body naming none leaves the stored value alone, the application has to have
+     * been created without one for "no authority" to be true of it at all; that is what
+     * {@code CONSENT_WITHOUT_AUTHORITY} is doing here. The other direction — an applicant who
+     * <em>did</em> declare one and submits without restating it — is
+     * {@link #aSubmitNamingNoAuthorityUsesTheStoredRole}.
      */
     @Test
     @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void aSubmissionNamingNoAuthorityIsRefused() throws Exception {
+        readyToSubmit(CONSENT_WITHOUT_AUTHORITY);
+
+        restMockMvc
+            .perform(put(BASE + "/me/submit").contentType(MediaType.APPLICATION_JSON).content(CONSENT_WITHOUT_AUTHORITY))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value(containsString("authority")));
+
+        assertThat(applicationRepository.findByAccountId(accountIdFor(APPLICANT)).orElseThrow().getStatus())
+            .as("an applicant with no discipline is not quietly advanced")
+            .isEqualTo(ProfileStatus.PROFILE_COMPLETED);
+    }
+
+    /**
+     * ⭐ <b>A Submit that does not restate the authority is satisfied by the one already stored.</b>
+     *
+     * <p>The consequence of <i>"don't blank it"</i> on the gate rather than on the field: step 4's
+     * requirement is evaluated against the authority the application <b>holds after the write</b>, not
+     * against the body. Keyed on the body instead, this Submit would be refused with
+     * {@code authority} among the missing requirements <em>while the stored application plainly
+     * carries {@code ROLE_NURSE}</em> — a refusal naming something the applicant has already done,
+     * which is the class of defect this repository's own notes call a message that is not true.
+     *
+     * <p>⚠ Asserted through the full walk, so the 200 is a real advance: {@code CREDENTIAL_REVIEW},
+     * {@code submittedAt} stamped, and the authority still on the row for the reviewer to act on.
+     */
+    @Test
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
+    void aSubmitNamingNoAuthorityUsesTheStoredRole() throws Exception {
         readyToSubmit();
 
         restMockMvc
-            .perform(put(BASE + "/me/submit").contentType(MediaType.APPLICATION_JSON).content("{\"agreed\":true}"))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.detail").value(containsString("authority")));
+            .perform(put(BASE + "/me/submit").contentType(MediaType.APPLICATION_JSON).content(CONSENT_WITHOUT_AUTHORITY))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("CREDENTIAL_REVIEW"))
+            .andExpect(jsonPath("$.authority").value("ROLE_NURSE"));
+
+        ProfessionalApplication stored = applicationRepository.findByAccountId(accountIdFor(APPLICANT)).orElseThrow();
+        assertThat(stored.getAuthority()).as("the declared discipline reaches the reviewer").isEqualTo("ROLE_NURSE");
+        assertThat(stored.getSubmittedAt()).isNotNull();
     }
 
     // --- The authority is validated against the eight professional disciplines --------------------
@@ -481,6 +533,12 @@ class ProfessionalApplicationResourceIT {
      * application at all, and Save must leave the authority the application already held — a 400 that
      * stored first would put a non-member in the field the reviewer acts on and merely tell the caller
      * about it.
+     *
+     * <p>⚠ That second assertion is also the invalid-value half of the owner's <i>"don't blank it"</i>
+     * decision of 2026-10-09 — a refused Save changes nothing — and is left here rather than copied
+     * into {@link #aSaveStoresWhatItNamesAndDoesNotBlankWhatItDoesNot}, since the refusal and the
+     * non-blanking are one line of this walk and two copies of an assertion is how one of them goes
+     * stale.
      */
     @Test
     @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
@@ -573,38 +631,98 @@ class ProfessionalApplicationResourceIT {
     }
 
     /**
-     * ⚠ <b>Naming no authority at all is unchanged by the gate — absent is not invalid.</b>
+     * ⭐ <b>A Save stores the authority it <em>names</em> and leaves a stored one alone when it names
+     * none</b> — the owner's <i>"Save should store what I named — don't blank it"</i> (2026-10-09).
      *
-     * <p>{@code careers-handoff-contract.md} has the client <b>drop</b> an unknown {@code ?track=}
-     * rather than raise, <i>"and the page still works with no parameters at all"</i>, so a body naming
-     * nothing is the contract working rather than an error to discover on the server. Both of the
-     * paths that tolerate one are asserted — the create answers <b>201 with {@code authority} null</b>
-     * and Save answers <b>200, stored and unadvanced</b> — because turning either into a 400 would be
-     * invisible here otherwise. Submit's refusal is the third case and is
-     * {@link #aSubmissionNamingNoAuthorityIsRefused}, which predates this gate and is left where it
-     * is.
+     * <p>⛔ <b>This case asserted the opposite until that decision, and the defect it was pinning was
+     * live.</b> It was {@code aWriteNamingNoAuthorityBehavesAsItDidBefore}, and "as it did before"
+     * meant the unconditional {@code application.authority(authority)}: a body of
+     * {@code {"agreed":true}} <b>erased the role the applicant had already declared</b> and answered
+     * 200 — the field {@code review-detail-page.component.ts} hands to the gateway's
+     * {@code grantAuthority}, cleared by a client that merely round-tripped the consent tick. The old
+     * case could not see it because it created the application <em>without</em> an authority, so there
+     * was never a stored value for the Save to destroy.
      *
-     * <p>⭐ <b>A blank string counts as absent</b>, by the same {@code hasText} the submission gate
-     * uses. One definition of absence in the file rather than two: a second one would make
-     * {@code "authority":""} a 400 on Save where it is a 200 today, which is the <em>create</em> half
-     * of the behaviour this case exists to pin.
+     * <p>So the walk declares a role first and the three writes are asserted against it in one
+     * application's lifetime, which is what makes the two negative cases non-vacuous: the same fixture
+     * that proves absent and blank <b>do not</b> change the field proves a named discipline <b>does</b>.
+     *
+     * <table>
+     *   <caption>The halves of the rule asserted here</caption>
+     *   <tr><th>body</th><th>stored authority</th></tr>
+     *   <tr><td>{@code {"agreed":true}}</td><td>unchanged</td></tr>
+     *   <tr><td>{@code {"agreed":true,"authority":""}}</td><td>unchanged — blank is not named</td></tr>
+     *   <tr><td>{@code {"agreed":true,"authority":"ROLE_PARAMEDIC"}}</td><td>changed</td></tr>
+     * </table>
+     *
+     * <p>⚠ The two remaining halves live where their subjects already were: an invalid value is still
+     * a 400 that changes nothing ({@link #anAuthorityOutsideTheEightIsRefusedOnEveryWritePath}) and an
+     * applicant who never declared one is still refused at Submit
+     * ({@link #aSubmissionNamingNoAuthorityIsRefused}).
+     *
+     * <p>⚠ <b>An explicit {@code "authority": null} is not asserted because it is not
+     * distinguishable</b> — {@link ApplicationConsentRequest} is a record, so after binding it is the
+     * same value as an omitted key, and it is therefore a no-op rather than a clear. That limit is
+     * recorded on the record itself.
+     *
+     * <p>The create's half is kept: a body naming nothing answers <b>201 with {@code authority}
+     * null</b>, which is unchanged and is what {@code careers-handoff-contract.md} needs — the client
+     * <b>drops</b> an unknown {@code ?track=} rather than raising, <i>"and the page still works with
+     * no parameters at all"</i>.
      */
     @Test
     @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
-    void aWriteNamingNoAuthorityBehavesAsItDidBefore() throws Exception {
-        Profile profile = profileRepository.save(CompleteOnboardingFixture.completeProfile(accountIdFor(APPLICANT)));
+    void aSaveStoresWhatItNamesAndDoesNotBlankWhatItDoesNot() throws Exception {
+        profileRepository.save(CompleteOnboardingFixture.completeProfile(accountIdFor(APPLICANT)));
 
+        // The create tolerates a body naming nothing, and stores null: unchanged by this decision.
         restMockMvc
-            .perform(post(BASE).contentType(MediaType.APPLICATION_JSON).content("{\"agreed\":true}"))
+            .perform(post(BASE).contentType(MediaType.APPLICATION_JSON).content(CONSENT_WITHOUT_AUTHORITY))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.authority").doesNotExist());
-        assertThat(applicationRepository.findByAccountId(accountIdFor(APPLICANT)).orElseThrow().getAuthority()).isNull();
+        assertThat(storedAuthority()).as("the create stores no authority when the body names none").isNull();
 
-        profileRepository.save(profile.phoneNumber(null));
+        // Declare one. The application has no documents, so every write below stays in
+        // APPLICATION_STARTED and the status cannot mask a change to the authority.
         restMockMvc
-            .perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content("{\"agreed\":true,\"authority\":\"\"}"))
+            .perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(CONSENT))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.status").value("APPLICATION_STARTED"));
+            .andExpect(jsonPath("$.authority").value("ROLE_NURSE"));
+        assertThat(storedAuthority()).isEqualTo("ROLE_NURSE");
+
+        // 1. A Save naming no authority leaves it in place — and still answers 200.
+        restMockMvc
+            .perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(CONSENT_WITHOUT_AUTHORITY))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.authority").value("ROLE_NURSE"));
+        assertThat(storedAuthority()).as("a Save naming no authority does not blank the stored role").isEqualTo("ROLE_NURSE");
+
+        // 2. A blank one is the same thing, by the hasText the submission gate already uses.
+        restMockMvc
+            .perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(CONSENT_WITH_BLANK_AUTHORITY))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.authority").value("ROLE_NURSE"));
+        assertThat(storedAuthority()).as("blank is not named either").isEqualTo("ROLE_NURSE");
+
+        // 3. And a Save that does name a different discipline changes it, which is what makes the two
+        // assertions above assertions rather than a frozen field.
+        restMockMvc
+            .perform(
+                put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content("{\"authority\":\"ROLE_PARAMEDIC\",\"agreed\":true}")
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.authority").value("ROLE_PARAMEDIC"));
+        assertThat(storedAuthority()).as("a named discipline is stored").isEqualTo("ROLE_PARAMEDIC");
+
+        // And the new value is no more blankable than the first.
+        restMockMvc
+            .perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(CONSENT_WITHOUT_AUTHORITY))
+            .andExpect(status().isOk());
+        assertThat(storedAuthority()).isEqualTo("ROLE_PARAMEDIC");
+
+        assertThat(applicationRepository.findByAccountId(accountIdFor(APPLICANT)).orElseThrow().getStatus())
+            .as("and none of the six writes advanced an application with no documents")
+            .isEqualTo(ProfileStatus.APPLICATION_STARTED);
     }
 
     // --- F-F: `source` belongs to the create ------------------------------------------------------
@@ -825,8 +943,32 @@ class ProfessionalApplicationResourceIT {
      * clinician takes.
      */
     private Profile readyToSubmit() throws Exception {
+        return readyToSubmit(CONSENT);
+    }
+
+    /**
+     * The authority as <b>stored</b>, re-read from the repository.
+     *
+     * <p>Read back rather than taken from the response, because the claim the owner's decision makes
+     * is about what is kept: a handler returning the request's view of the application would satisfy
+     * every {@code jsonPath} above while the document held something else.
+     */
+    private String storedAuthority() {
+        return applicationRepository.findByAccountId(accountIdFor(APPLICANT)).orElseThrow().getAuthority();
+    }
+
+    /**
+     * The same walk with the create's body named by the caller.
+     *
+     * <p>Parameterised since the owner's <i>"don't blank it"</i> decision: step 4's requirement is
+     * now evaluated against the authority the application <b>holds</b>, so <em>whether one was ever
+     * declared</em> is the premise of two cases — {@link #aSubmissionNamingNoAuthorityIsRefused}
+     * passes {@code CONSENT_WITHOUT_AUTHORITY} and {@link #aSubmitNamingNoAuthorityUsesTheStoredRole}
+     * passes {@code CONSENT}. The default is unchanged for every other caller.
+     */
+    private Profile readyToSubmit(String consent) throws Exception {
         Profile profile = profileRepository.save(CompleteOnboardingFixture.completeProfile(accountIdFor(APPLICANT)));
-        restMockMvc.perform(post(BASE).contentType(MediaType.APPLICATION_JSON).content(CONSENT)).andExpect(status().isCreated());
+        restMockMvc.perform(post(BASE).contentType(MediaType.APPLICATION_JSON).content(consent)).andExpect(status().isCreated());
         for (PersonalDocument document : CompleteOnboardingFixture.mandatoryDocuments(profile)) {
             personalDocumentRepository.save(document);
         }

@@ -131,8 +131,19 @@ public class ProfessionalApplicationResource {
      *     <b>Validated against the eight professional disciplines on all three writes</b>, in the
      *     service rather than here, because all three go through it and a check per handler is the
      *     shape that acquires a fourth handler without one — see
-     *     {@code OnboardingService.refuseAnAuthorityThatIsNotADiscipline}. A body naming none is
-     *     unchanged: absent is not invalid.
+     *     {@code OnboardingService.refuseAnAuthorityThatIsNotADiscipline}. A body naming none is not
+     *     invalid, and on Save and Submit it <b>leaves the stored authority as it is</b> rather than
+     *     blanking it — the owner's <i>"Save should store what I named — don't blank it"</i>
+     *     (2026-10-09), implemented in {@code OnboardingService.storeThenAdvanceWhenComplete}.
+     *     <p>⚠ <b>The binding limit, recorded here because it is a property of this record.</b> A
+     *     component is simply {@code null} both for a body that omits the key and for one sending
+     *     {@code "authority": null}, so <b>an explicit null is a no-op, not a clear</b> — there is no
+     *     shape in which this endpoint can be asked to remove a declared role. Blank is treated the
+     *     same way, by {@code OnboardingService.hasText}. {@link ProfileResource#partialUpdateProfile}
+     *     solves the same problem by binding the raw {@code ObjectNode} and asking which fields the
+     *     caller <em>named</em>; doing that here was deliberately not done, being a larger change than
+     *     the decision asked for. The same limit is noted on {@code source} below, where it is what
+     *     forces that refusal to key on a value being present.
      * @param source the careers attribution, e.g. {@code web-careers}; read by the review queue and
      *     the WP7 funnel count (careers-handoff-contract.md § 3). <b>Owned by the create, and
      *     refused rather than ignored on the other two (F-F)</b> — see
@@ -201,6 +212,12 @@ public class ProfessionalApplicationResource {
      * {@code CREDENTIAL_REVIEW} only if every requirement is satisfied. An incomplete application
      * answers <b>200 with the application as stored</b> — no transition, no Kafka event, no refusal:
      * an applicant saving their answers mid-wizard is not making a mistake.
+     *
+     * <p>⛔ <b>It stores what the body <em>names</em>, and leaves the rest as it is</b> — the owner's
+     * <i>"Save should store what I named — don't blank it"</i> (2026-10-09). The authority was written
+     * unconditionally, so {@code {"agreed":true}} <b>erased a role the applicant had already
+     * declared</b> and answered 200. See {@link ApplicationConsentRequest} for why an explicit
+     * {@code null} is a no-op rather than a clear.
      *
      * <p>⛔ <b>It served {@link OnboardingService#submitForReview} until this decision</b>, which made
      * the two buttons one operation on the reading that {@code profile.md} step 4 attributes

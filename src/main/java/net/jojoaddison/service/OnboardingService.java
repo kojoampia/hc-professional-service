@@ -383,8 +383,10 @@ public class OnboardingService {
      * @param agreed step 4's consent tick; {@code false} is refused on both paths — a withheld tick
      *     is a different answer from an unfinished form.
      * @param authority the role string being applied for. A value outside the eight professional
-     *     disciplines is refused with 400 on both paths, before anything is stored; <b>no</b> value at
-     *     all still stores and stays put — see {@link #refuseAnAuthorityThatIsNotADiscipline}.
+     *     disciplines is refused with 400 on both paths, before anything is stored — see
+     *     {@link #refuseAnAuthorityThatIsNotADiscipline}. ⭐ <b>A body naming <em>no</em> authority
+     *     leaves the stored one untouched and still answers 200</b> (owner decision 2026-10-09: <i>"Save
+     *     should store what I named — don't blank it"</i>); blank counts as naming none.
      */
     public ProfessionalApplication saveConsent(String accountId, boolean agreed, String authority) {
         return storeThenAdvanceWhenComplete(accountId, agreed, authority, false);
@@ -447,16 +449,34 @@ public class OnboardingService {
         refuseAnAuthorityThatIsNotADiscipline(authority);
         ProfessionalApplication application = getOwnApplication(accountId);
 
-        // --- Store. Unconditional on both paths, and BEFORE any completeness question: the owner's
-        // "Save should be non-advancing — store answers only" makes keeping the answers the one thing
-        // this write always does.
+        // --- Store. On both paths, and BEFORE any completeness question: the owner's "Save should be
+        // non-advancing — store answers only" makes keeping the answers the one thing this write
+        // always does.
         //
-        // The authority is whatever the applicant last declared; the consent DATE is not re-stamped
-        // over an existing one. profile.md renders it — "dated Application.agreedDate" — and a
-        // re-affirmation of a consent already given is not a new consent, so moving the date would
-        // make the page state something untrue about when the subject agreed. That holds across a
-        // Save-then-Submit sequence as much as across two Saves.
-        application.authority(authority);
+        // ⭐ The authority is written ONLY when the body NAMES one — the owner's "Save should store
+        // what I named — don't blank it" (2026-10-09). This write was unconditional, so a body of
+        // {"agreed":true} ERASED a role the applicant had previously declared and answered 200: the
+        // field a reviewer acts on, cleared by a client that merely saved the consent tick. A Save
+        // stores the fields it names and leaves the others as they are.
+        //
+        // ⚠ Blank counts as not-named, by the same hasText the submission gate and
+        // refuseAnAuthorityThatIsNotADiscipline already use — one definition of absence in this file
+        // rather than a second one that would make "" a clear where it is a 400 or a no-op elsewhere.
+        // ⚠ And an explicit "authority": null is a NO-OP rather than a clear, because
+        // ApplicationConsentRequest is a record: after binding, absent and null are the same value
+        // and no code here can tell them apart. ProfileResource's PATCH keeps the raw ObjectNode to
+        // solve exactly that, and restructuring this endpoint the same way is a larger change than
+        // the decision asked for — see ProfessionalApplicationResource.ApplicationConsentRequest,
+        // which records the limit beside the record it is a property of. Nothing clears a declared
+        // authority today, which is the state the owner asked for.
+        //
+        // The consent DATE is not re-stamped over an existing one. profile.md renders it — "dated
+        // Application.agreedDate" — and a re-affirmation of a consent already given is not a new
+        // consent, so moving the date would make the page state something untrue about when the
+        // subject agreed. That holds across a Save-then-Submit sequence as much as across two Saves.
+        if (hasText(authority)) {
+            application.authority(authority);
+        }
         if (!application.isAgreed()) {
             application.agreed(true).agreedDate(Instant.now());
         }
@@ -464,8 +484,11 @@ public class OnboardingService {
             application.profileId(ownProfileId(accountId));
         }
 
-        // --- Evaluate, once, for both paths.
-        List<String> missing = unsatisfiedRequirements(accountId, authority);
+        // --- Evaluate, once, for both paths. ⚠ Against the authority now STORED, not the one the
+        // body named: since a body naming none no longer blanks the field, the two differ, and asking
+        // about the body would refuse a Submit with "authority" missing from an application that
+        // plainly carries one — a refusal naming a requirement the applicant has already met.
+        List<String> missing = unsatisfiedRequirements(accountId, application.getAuthority());
         if (!missing.isEmpty()) {
             if (refuseWhenIncomplete) {
                 // Nothing is saved: the refusal is the whole answer, and a Submit that stored and
@@ -866,9 +889,11 @@ public class OnboardingService {
      *
      * <h2>⚠ Absent is not invalid, and this method is where the two are kept apart</h2>
      *
-     * <p>A write naming <em>no</em> authority behaves exactly as it did: the create stores
-     * {@code null} and answers 201, Save stores and stays put, and Submit refuses through
-     * {@link #unsatisfiedRequirements} with {@code authority} among the missing keys. That matters
+     * <p>A write naming <em>no</em> authority is not refused here: the create stores {@code null} and
+     * answers 201, Save <b>leaves the stored value untouched</b> and answers 200 (owner decision
+     * 2026-10-09 — see {@link #saveConsent}), and Submit by an applicant who has never declared one
+     * refuses through {@link #unsatisfiedRequirements} with {@code authority} among the missing keys.
+     * That matters
      * beyond tidiness — {@code careers-handoff-contract.md} has the client <b>drop</b> an unknown
      * {@code ?track=} rather than raise, <i>"and the page still works with no parameters at all"</i>,
      * so a body that names nothing is the contract working and a body that names {@code "banana"} is
@@ -1026,6 +1051,11 @@ public class OnboardingService {
      * step 4's buttons ask the same question and only one of them turns a non-empty answer into a
      * 400 — so the evaluation cannot live inside the refusal, or Save would have to re-derive it.
      *
+     * @param authority ⚠ the authority <b>as stored on the application after this write</b>, not as
+     *     the body named it. Since the owner's decision of 2026-10-09 a body naming none no longer
+     *     blanks the field, so the two differ — and keying step 4's requirement on the body would name
+     *     {@code authority} missing on an application that carries one. See
+     *     {@code storeThenAdvanceWhenComplete}, the only caller.
      * @return the unsatisfied requirement keys, in the order the profile page shows them; empty when
      *     every requirement this service can see is satisfied.
      */
