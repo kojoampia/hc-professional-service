@@ -2,12 +2,30 @@ package net.jojoaddison.domain;
 
 import java.io.Serializable;
 import java.time.LocalDate;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Objects;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
 /**
  * A Address.
+ *
+ * <h2>Eight fields, because {@code profile.md}'s Address model has eight (F10)</h2>
+ *
+ * <p>This class carried {@code areaCode} and {@code state} as well, and the specification's model
+ * names neither. They were <b>input</b> fields — writable by {@code PUT /api/profile} and by the
+ * admin {@code PATCH} — that no form in the estate has ever filled and nothing would ever populate,
+ * and since {@code EmergencyContact.address} became an embedded {@code Address} they were multiplied
+ * by the length of {@link Profile#getContacts()}. Removed with
+ * {@code AddressFieldRemovalMigration}, which drops the stored keys.
+ *
+ * <p><b>Nothing was discarded.</b> Measured on the quality stack before the deletion: <b>0</b>
+ * documents carried a value in either field — not in {@code profile.address}, not in
+ * {@code profile.contacts[].address}, and the standalone {@code address} collection was empty. The
+ * migration exists for production and for any database restored from an older backup, not because
+ * the quality box had anything to move.
  */
 @Document(collection = "address")
 @SuppressWarnings("common-java:DuplicatedBlocks")
@@ -24,9 +42,6 @@ public class Address implements Serializable {
     @Field("street_address")
     private String streetAddress;
 
-    @Field("area_code")
-    private String areaCode;
-
     @Field("town")
     private String town;
 
@@ -35,9 +50,6 @@ public class Address implements Serializable {
 
     @Field("district")
     private String district;
-
-    @Field("state")
-    private String state;
 
     @Field("region")
     private String region;
@@ -98,19 +110,6 @@ public class Address implements Serializable {
         this.streetAddress = streetAddress;
     }
 
-    public String getAreaCode() {
-        return this.areaCode;
-    }
-
-    public Address areaCode(String areaCode) {
-        this.setAreaCode(areaCode);
-        return this;
-    }
-
-    public void setAreaCode(String areaCode) {
-        this.areaCode = areaCode;
-    }
-
     public String getTown() {
         return this.town;
     }
@@ -148,19 +147,6 @@ public class Address implements Serializable {
 
     public void setDistrict(String district) {
         this.district = district;
-    }
-
-    public String getState() {
-        return this.state;
-    }
-
-    public Address state(String state) {
-        this.setState(state);
-        return this;
-    }
-
-    public void setState(String state) {
-        this.state = state;
     }
 
     public String getRegion() {
@@ -243,6 +229,49 @@ public class Address implements Serializable {
 
     // jhipster-needle-entity-add-getters-setters - JHipster will add getters and setters here
 
+    /**
+     * The eight fields {@code profile.md}'s Address model names, in its order — for a holder that
+     * <b>embeds</b> this address and therefore cannot compare it by identity.
+     *
+     * <h2>Why this exists at all, which is a real defect and not a modelling preference</h2>
+     *
+     * <p>{@link #equals(Object)} below is identity-based, the JHipster convention for a
+     * {@code @Document}: it answers {@code false} whenever {@code id} is null, <b>including for two
+     * addresses that are field-for-field identical</b>. That is correct for a row in the
+     * {@code address} collection and wrong for an embedded one, which has no id and never gets one —
+     * {@code Profile.address} stores null there and so does every {@code EmergencyContact.address}.
+     * The visible consequence was that two identical next-of-kin never compared equal, so
+     * {@code List<EmergencyContact>} did not behave: {@code contains}, {@code indexOf} and
+     * {@code equals} all answered on a property nobody had set. {@code EmergencyContact} uses this
+     * method rather than {@code equals}.
+     *
+     * <p>⛔ <b>{@code equals} is deliberately NOT changed to value semantics.</b> {@code AddressTest}
+     * asserts the generated contract — two addresses sharing an id are equal whatever else differs —
+     * and that contract is the right one for the collection this class is a document of. The fix
+     * belongs where the breakage is: in the holder that embeds it.
+     *
+     * <p><b>The four audit fields are excluded on purpose.</b> {@code createdDate},
+     * {@code modifiedDate}, {@code createdBy} and {@code modifiedBy} are metadata about a write, not
+     * part of what the address <em>is</em>, and nothing stamps them on an embedded one. Including
+     * them would make two identical addresses stop being equal because one of them had been touched.
+     *
+     * <p>{@link Arrays#asList} and not {@code List.of}, which rejects nulls — every field here is
+     * null on an address somebody filled in partially, which is most of them.
+     */
+    public List<Object> values() {
+        return Arrays.asList(id, digitalAddress, streetAddress, town, city, district, region, country);
+    }
+
+    /** Whether {@code other} carries the same eight {@link #values()} — see that method. */
+    public boolean hasSameValuesAs(Address other) {
+        return other != null && values().equals(other.values());
+    }
+
+    /** A hash over {@link #values()}, so a holder's {@code hashCode} can agree with its own equality. */
+    public int valuesHashCode() {
+        return Objects.hash(values().toArray());
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -267,11 +296,9 @@ public class Address implements Serializable {
             "id=" + getId() +
             ", digitalAddress='" + getDigitalAddress() + "'" +
             ", streetAddress='" + getStreetAddress() + "'" +
-            ", areaCode='" + getAreaCode() + "'" +
             ", town='" + getTown() + "'" +
             ", city='" + getCity() + "'" +
             ", district='" + getDistrict() + "'" +
-            ", state='" + getState() + "'" +
             ", region='" + getRegion() + "'" +
             ", country='" + getCountry() + "'" +
             ", createdDate='" + getCreatedDate() + "'" +

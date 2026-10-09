@@ -94,7 +94,7 @@ class TokenOriginValidationDisabledIT {
     @Test
     void withValidationOffASiblingStacksTokenNoLongerReadsTheProfessionalsProfile() throws Exception {
         restMockMvc
-            .perform(get("/api/onboarding/profile").header("Authorization", "Bearer " + siblingToken(COLLIDING_LOGIN, null)))
+            .perform(get("/api/profile").header("Authorization", "Bearer " + siblingToken(COLLIDING_LOGIN, null)))
             .andExpect(status().isUnauthorized());
     }
 
@@ -107,7 +107,7 @@ class TokenOriginValidationDisabledIT {
     @Test
     void aSiblingsOwnUidClaimIsDiscardedRatherThanTrusted() throws Exception {
         restMockMvc
-            .perform(get("/api/onboarding/profile").header("Authorization", "Bearer " + siblingToken(COLLIDING_LOGIN, LOCAL_ACCOUNT_ID)))
+            .perform(get("/api/profile").header("Authorization", "Bearer " + siblingToken(COLLIDING_LOGIN, LOCAL_ACCOUNT_ID)))
             .andExpect(status().isUnauthorized());
     }
 

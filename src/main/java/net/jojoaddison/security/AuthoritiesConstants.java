@@ -1,5 +1,7 @@
 package net.jojoaddison.security;
 
+import java.util.Arrays;
+
 /**
  * Constants for Spring Security authorities.
  */
@@ -84,6 +86,32 @@ public final class AuthoritiesConstants {
         CHEMIST,
         TECHNICIAN,
     };
+
+    /**
+     * The eight professional disciplines — the role strings an applicant may apply for, and the whole
+     * of what {@code ProfessionalApplication.authority} may hold.
+     *
+     * <p><b>Derived from {@link #CLINICAL_AND_ADMIN}, not written out again.</b> That array is "the
+     * administrator and the eight clinical disciplines", so removing {@link #ADMIN} from it leaves
+     * exactly the disciplines — and a ninth discipline is covered on the day somebody adds it to the
+     * read set, with nobody having edited this constant. The authorities are a documented cross-repo
+     * invariant with copies in the gateway, both clients and {@code mobile/}; a hand-written ninth
+     * copy here is how {@code ROLE_ANGEL} came to take four repositories and five files to remove.
+     *
+     * <p>⚠ <b>{@link #ADMIN} and {@link #USER} are not requestable and are refused by this list's
+     * shape rather than by a clause.</b> {@code USER} is what every applicant already holds and names
+     * no discipline; {@code ADMIN} would be a clinician granting themselves the reviewer's authority
+     * through the field the reviewer reads. {@code web}'s {@code careers-handoff.service.ts} draws the
+     * same set the same way — {@code Object.values(Authority)} minus those two.
+     *
+     * <p>⛔ <b>It is a validation allow-list, not a privilege set.</b> Nothing is gated on holding one
+     * of these; {@link #CLINICAL_AND_ADMIN} and {@link #CLINICAL_MUTATION} are the authorization rules
+     * and this is the vocabulary of a <em>request</em> for one. {@code OnboardingService} is its only
+     * reader — see {@code refuseAnAuthorityThatIsNotADiscipline}.
+     */
+    public static final String[] PROFESSIONAL_DISCIPLINES = Arrays.stream(CLINICAL_AND_ADMIN)
+        .filter(authority -> !ADMIN.equals(authority))
+        .toArray(String[]::new);
 
     private AuthoritiesConstants() {}
 }

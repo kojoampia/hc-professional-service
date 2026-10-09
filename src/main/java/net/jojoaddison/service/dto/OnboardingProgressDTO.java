@@ -2,7 +2,7 @@ package net.jojoaddison.service.dto;
 
 import java.io.Serializable;
 import java.util.List;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 
 /**
  * How far an applicant has got, computed by the server.
@@ -25,7 +25,7 @@ import net.jojoaddison.domain.enumeration.OnboardingStatus;
  * @param requirements each requirement and whether it is met, in display order, so the client can
  *                     say <em>what</em> is missing without re-deriving the rules.
  */
-public record OnboardingProgressDTO(int percent, boolean complete, OnboardingStatus status, List<Requirement> requirements)
+public record OnboardingProgressDTO(int percent, boolean complete, ProfileStatus status, List<Requirement> requirements)
     implements Serializable {
     /**
      * @param key  stable identifier; the client maps it to a translated label in four languages, so

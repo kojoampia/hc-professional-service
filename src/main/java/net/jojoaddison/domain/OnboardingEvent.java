@@ -2,7 +2,7 @@ package net.jojoaddison.domain;
 
 import java.io.Serializable;
 import java.time.Instant;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -29,10 +29,10 @@ public class OnboardingEvent implements Serializable {
     private String actor;
 
     @Field("from_status")
-    private OnboardingStatus fromStatus;
+    private ProfileStatus fromStatus;
 
     @Field("to_status")
-    private OnboardingStatus toStatus;
+    private ProfileStatus toStatus;
 
     @Field("reason")
     private String reason;
@@ -79,29 +79,29 @@ public class OnboardingEvent implements Serializable {
         this.actor = actor;
     }
 
-    public OnboardingStatus getFromStatus() {
+    public ProfileStatus getFromStatus() {
         return this.fromStatus;
     }
 
-    public OnboardingEvent fromStatus(OnboardingStatus fromStatus) {
+    public OnboardingEvent fromStatus(ProfileStatus fromStatus) {
         this.fromStatus = fromStatus;
         return this;
     }
 
-    public void setFromStatus(OnboardingStatus fromStatus) {
+    public void setFromStatus(ProfileStatus fromStatus) {
         this.fromStatus = fromStatus;
     }
 
-    public OnboardingStatus getToStatus() {
+    public ProfileStatus getToStatus() {
         return this.toStatus;
     }
 
-    public OnboardingEvent toStatus(OnboardingStatus toStatus) {
+    public OnboardingEvent toStatus(ProfileStatus toStatus) {
         this.toStatus = toStatus;
         return this;
     }
 
-    public void setToStatus(OnboardingStatus toStatus) {
+    public void setToStatus(ProfileStatus toStatus) {
         this.toStatus = toStatus;
     }
 

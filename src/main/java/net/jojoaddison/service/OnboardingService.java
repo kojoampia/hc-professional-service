@@ -11,12 +11,13 @@ import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
 import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.AuthoritiesConstants;
 import net.jojoaddison.service.dto.OnboardingProgressDTO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,6 +58,39 @@ public class OnboardingService {
     /** Refusal prefix when a transition to ACTIVE fails the eight-requirement completion contract; the missing keys follow. */
     public static final String ACTIVATION_REQUIRES_COMPLETE_PROFILE = "Activation requires a complete profile";
 
+    /**
+     * Refusal prefix when step 4's submit is attempted with a requirement unsatisfied; the missing
+     * keys follow (F-B).
+     *
+     * <p>Public and asserted by the integration tests rather than copied into them, for the reason
+     * {@link #REACTIVATION_REQUIRES_LICENSE} gives: a reword must not be able to break a test
+     * silently. It is deliberately a <em>different</em> sentence from
+     * {@link #ACTIVATION_REQUIRES_COMPLETE_PROFILE} — that one refuses an administrator activating
+     * somebody, this one refuses the applicant submitting themselves, and the two gates read
+     * different definitions of complete.
+     */
+    public static final String SUBMISSION_REQUIRES_ALL_REQUIREMENTS = "Submission requires every onboarding requirement to be satisfied";
+
+    /**
+     * Refusal when {@code agreed} is false on any of the three writes that record consent.
+     *
+     * <p>Public and shared by all three rather than reworded per endpoint: there is one fact —
+     * consent was not given — and three places that may discover it, so a second wording would be a
+     * second copy of the same rule with nothing holding them in step. The integration tests assert
+     * this constant rather than a copy of its text.
+     */
+    public static final String CONSENT_REQUIRED = "Consent must be accepted to start an application";
+
+    /**
+     * Refusal prefix when a write names an {@code authority} that is not one of the eight professional
+     * disciplines; the accepted values follow.
+     *
+     * <p>Public and asserted rather than copied, for the reason {@link #CONSENT_REQUIRED} gives. It
+     * names the field because the three writes that can raise it carry two other components and a
+     * caller has to be told which one was refused.
+     */
+    public static final String AUTHORITY_MUST_BE_A_PROFESSIONAL_DISCIPLINE = "authority must be one of the professional disciplines";
+
     private static final Logger log = LoggerFactory.getLogger(OnboardingService.class);
 
     private static final Set<DocumentType> IDENTITY_TYPES = EnumSet.of(
@@ -66,53 +100,35 @@ public class OnboardingService {
         DocumentType.VOTERCARD
     );
 
-    private static final Map<OnboardingStatus, Set<OnboardingStatus>> LEGAL_TRANSITIONS = Map.ofEntries(
-        Map.entry(OnboardingStatus.APPLICATION_STARTED, EnumSet.of(OnboardingStatus.PROFILE_COMPLETED)),
-        Map.entry(OnboardingStatus.PROFILE_COMPLETED, EnumSet.of(OnboardingStatus.CREDENTIAL_REVIEW)),
+    private static final Map<ProfileStatus, Set<ProfileStatus>> LEGAL_TRANSITIONS = Map.ofEntries(
+        Map.entry(ProfileStatus.APPLICATION_STARTED, EnumSet.of(ProfileStatus.PROFILE_COMPLETED)),
+        Map.entry(ProfileStatus.PROFILE_COMPLETED, EnumSet.of(ProfileStatus.CREDENTIAL_REVIEW)),
         Map.entry(
-            OnboardingStatus.CREDENTIAL_REVIEW,
-            EnumSet.of(OnboardingStatus.APPROVED, OnboardingStatus.REJECTED, OnboardingStatus.RETURNED_FOR_CORRECTION)
+            ProfileStatus.CREDENTIAL_REVIEW,
+            EnumSet.of(ProfileStatus.APPROVED, ProfileStatus.REJECTED, ProfileStatus.RETURNED_FOR_CORRECTION)
+        ),
+        Map.entry(ProfileStatus.RETURNED_FOR_CORRECTION, EnumSet.of(ProfileStatus.PROFILE_COMPLETED, ProfileStatus.CREDENTIAL_REVIEW)),
+        Map.entry(
+            ProfileStatus.APPROVED,
+            EnumSet.of(ProfileStatus.ORGANIZATION_ASSIGNED, ProfileStatus.SUSPENDED, ProfileStatus.EXPIRED, ProfileStatus.DEACTIVATED)
         ),
         Map.entry(
-            OnboardingStatus.RETURNED_FOR_CORRECTION,
-            EnumSet.of(OnboardingStatus.PROFILE_COMPLETED, OnboardingStatus.CREDENTIAL_REVIEW)
+            ProfileStatus.ORGANIZATION_ASSIGNED,
+            EnumSet.of(ProfileStatus.AUTHORITY_ASSIGNED, ProfileStatus.SUSPENDED, ProfileStatus.EXPIRED, ProfileStatus.DEACTIVATED)
         ),
         Map.entry(
-            OnboardingStatus.APPROVED,
-            EnumSet.of(
-                OnboardingStatus.ORGANIZATION_ASSIGNED,
-                OnboardingStatus.SUSPENDED,
-                OnboardingStatus.EXPIRED,
-                OnboardingStatus.DEACTIVATED
-            )
+            ProfileStatus.AUTHORITY_ASSIGNED,
+            EnumSet.of(ProfileStatus.ROSTER_CONFIGURED, ProfileStatus.SUSPENDED, ProfileStatus.EXPIRED, ProfileStatus.DEACTIVATED)
         ),
         Map.entry(
-            OnboardingStatus.ORGANIZATION_ASSIGNED,
-            EnumSet.of(
-                OnboardingStatus.AUTHORITY_ASSIGNED,
-                OnboardingStatus.SUSPENDED,
-                OnboardingStatus.EXPIRED,
-                OnboardingStatus.DEACTIVATED
-            )
+            ProfileStatus.ROSTER_CONFIGURED,
+            EnumSet.of(ProfileStatus.ACTIVE, ProfileStatus.SUSPENDED, ProfileStatus.EXPIRED, ProfileStatus.DEACTIVATED)
         ),
-        Map.entry(
-            OnboardingStatus.AUTHORITY_ASSIGNED,
-            EnumSet.of(
-                OnboardingStatus.ROSTER_CONFIGURED,
-                OnboardingStatus.SUSPENDED,
-                OnboardingStatus.EXPIRED,
-                OnboardingStatus.DEACTIVATED
-            )
-        ),
-        Map.entry(
-            OnboardingStatus.ROSTER_CONFIGURED,
-            EnumSet.of(OnboardingStatus.ACTIVE, OnboardingStatus.SUSPENDED, OnboardingStatus.EXPIRED, OnboardingStatus.DEACTIVATED)
-        ),
-        Map.entry(OnboardingStatus.ACTIVE, EnumSet.of(OnboardingStatus.SUSPENDED, OnboardingStatus.EXPIRED, OnboardingStatus.DEACTIVATED)),
-        Map.entry(OnboardingStatus.SUSPENDED, EnumSet.of(OnboardingStatus.ACTIVE, OnboardingStatus.EXPIRED, OnboardingStatus.DEACTIVATED)),
-        Map.entry(OnboardingStatus.EXPIRED, EnumSet.of(OnboardingStatus.CREDENTIAL_REVIEW, OnboardingStatus.DEACTIVATED)),
-        Map.entry(OnboardingStatus.REJECTED, EnumSet.noneOf(OnboardingStatus.class)),
-        Map.entry(OnboardingStatus.DEACTIVATED, EnumSet.noneOf(OnboardingStatus.class))
+        Map.entry(ProfileStatus.ACTIVE, EnumSet.of(ProfileStatus.SUSPENDED, ProfileStatus.EXPIRED, ProfileStatus.DEACTIVATED)),
+        Map.entry(ProfileStatus.SUSPENDED, EnumSet.of(ProfileStatus.ACTIVE, ProfileStatus.EXPIRED, ProfileStatus.DEACTIVATED)),
+        Map.entry(ProfileStatus.EXPIRED, EnumSet.of(ProfileStatus.CREDENTIAL_REVIEW, ProfileStatus.DEACTIVATED)),
+        Map.entry(ProfileStatus.REJECTED, EnumSet.noneOf(ProfileStatus.class)),
+        Map.entry(ProfileStatus.DEACTIVATED, EnumSet.noneOf(ProfileStatus.class))
     );
 
     private final ProfessionalApplicationRepository applicationRepository;
@@ -140,22 +156,33 @@ public class OnboardingService {
     }
 
     /**
+     * Creates the caller's application, recording step 4's consent and requested authority
+     * (profile.md step 4; {@code POST /api/professional-application}).
+     *
      * @param accountId the caller's gateway {@code User.id} — the key this application is found by.
      * @param login the caller's login, stored beside it as the human-readable name. Until item 50
      *     both fields were written from one value, because both <em>were</em> the login; they are
      *     now two identifiers and the caller passes each explicitly.
+     * @param authority the role string being applied for. Named {@code requestedRole} until T3;
+     *     {@code profile.md} § Gap Update renamed it and kept it a {@code String}, because
+     *     {@code Authority} is the gateway's class and this service holds only the role. <b>Refused
+     *     with 400 unless it is one of the eight professional disciplines</b>, or absent — see
+     *     {@link #refuseAnAuthorityThatIsNotADiscipline}, which is also where "absent is not invalid"
+     *     is argued.
+     * @param agreed the consent tick. Named {@code consentAccepted} until T3.
      */
     public ProfessionalApplication startApplication(
         String accountId,
         String login,
-        String requestedRole,
-        boolean consentAccepted,
+        String authority,
+        boolean agreed,
         String invitedBy,
         String source
     ) {
-        if (!consentAccepted) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Consent must be accepted to start an application");
+        if (!agreed) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, CONSENT_REQUIRED);
         }
+        refuseAnAuthorityThatIsNotADiscipline(authority);
         applicationRepository
             .findByAccountId(accountId)
             .ifPresent(existing -> {
@@ -165,13 +192,18 @@ public class OnboardingService {
             new ProfessionalApplication()
                 .accountId(accountId)
                 .login(login)
-                .requestedRole(requestedRole)
-                .status(OnboardingStatus.APPLICATION_STARTED)
-                .consentAcceptedAt(Instant.now())
+                .authority(authority)
+                // profile.md step 4: "profileId | string | Set to Profile.id". Null when the
+                // applicant has no profile yet, which is legal and is what completeProfile fills in;
+                // every reader already answers 409 "Application has no linked profile" for that.
+                .profileId(ownProfileId(accountId))
+                .status(ProfileStatus.APPLICATION_STARTED)
+                .agreed(true)
+                .agreedDate(Instant.now())
                 .invitedBy(invitedBy)
                 .source(normalizeSource(source))
         );
-        appendEvent(application, null, OnboardingStatus.APPLICATION_STARTED, "application started");
+        appendEvent(application, null, ProfileStatus.APPLICATION_STARTED, "application started");
         domainEventPublisher.publishEntityCreated(
             "ProfessionalApplication",
             application.getId(),
@@ -181,52 +213,31 @@ public class OnboardingService {
         return application;
     }
 
-    /**
-     * Applicant profile upsert (WP4 support): applicants hold only ROLE_USER,
-     * which the WP1 mutation matrix blocks from POST /api/profiles — their
-     * profile is written through the onboarding surface instead. accountId is
-     * always forced to the caller; an existing profile keeps its id.
+    /*
+     * upsertOwnProfile is GONE — retired by F8 with GET and PUT /api/onboarding/profile, per
+     * profile.md § Other Elements: "api/onboarding/profile should migrate to api/profile".
      *
-     * <p><b>This is the write that carries the second half of a clinician's arrival</b>
-     * ({@code ProfileStatus}, backlog.md item 47). It no longer announces it: the save does, through
-     * {@link ProfileStatusAnnouncer}, which listens for the persisted document rather than being
-     * called from a table of paths. This method was one of the four entries on that table and item 49
-     * is what the table missed — see the announcer's javadoc.
+     * ProfileService.partialUpdateOwnProfile is the write now, and it is NOT this method made
+     * partial. This one set thirteen fields unconditionally with no `!= null` guard, so a wizard
+     * pane saving its own slice blanked every field the other panes had written; the replacement
+     * applies only what the caller named, creates the row on first write, and stamps
+     * PROFILE_COMPLETED when ProfileCompleteness says every field is provided.
+     *
+     * TWO THINGS THAT WENT WITH IT, both worth knowing before writing a fixture:
+     *
+     *   The entity.created publication. This method published one for a profile it created, and
+     *   partialUpdateOwnProfile deliberately does not — the house decision recorded on
+     *   ProfileStatusAnnouncer, where updatePushPreferences has created profiles silently since
+     *   MOB9: entity.created carries an actor and an accountId that are not derivable from the
+     *   saved document and rides hc.professional.entity, which hc-admin is not subscribed to. The
+     *   profile's arrival is still announced — the save raises AfterSaveEvent and ProfileStatus goes
+     *   out from there, which is the half the estate consumes.
+     *
+     *   A FALSE CLAIM THIS JAVADOC CARRIED (F6). It said middleNames was copied by "no write path
+     *   anywhere" before T1. The admin PATCH /api/profiles/{id} did copy it — see
+     *   ProfileService.applyProvidedFields, where the narrower and true claim is now recorded: no
+     *   APPLICANT-FACING write path copied it.
      */
-    public Profile upsertOwnProfile(String accountId, Profile incoming) {
-        Profile profile = profileRepository.findByAccountId(accountId).orElse(null);
-        boolean created = profile == null;
-        if (created) {
-            profile = new Profile();
-        }
-        // accountUid used to be stamped here, beside a login-valued accountId. Item 50 removed the
-        // field: accountId now holds the very value accountUid held, so keeping both would be the
-        // second join key that item exists to remove, spelled twice in one document.
-        profile
-            .accountId(accountId)
-            .firstName(incoming.getFirstName())
-            .lastName(incoming.getLastName())
-            .birthDate(incoming.getBirthDate())
-            .sex(incoming.getSex())
-            .mobilePhone(incoming.getMobilePhone())
-            .phoneNumber(incoming.getPhoneNumber())
-            .email(incoming.getEmail())
-            .cardType(incoming.getCardType())
-            .cardNumber(incoming.getCardNumber())
-            .title(incoming.getTitle())
-            .address(incoming.getAddress())
-            .emergencyContact(incoming.getEmergencyContact());
-        Profile saved = profileRepository.save(profile);
-        if (created) {
-            domainEventPublisher.publishEntityCreated(
-                "Profile",
-                saved.getId(),
-                saved.getAccountId(),
-                net.jojoaddison.security.SecurityUtils.getCurrentUserLogin().orElse("system")
-            );
-        }
-        return saved;
-    }
 
     /**
      * Composes and publishes {@code ProfileStatus} — the second half of a clinician's arrival, for a
@@ -322,12 +333,6 @@ public class OnboardingService {
         return trimmed.length() > 64 ? trimmed.substring(0, 64) : trimmed;
     }
 
-    public Profile getOwnProfile(String accountId) {
-        return profileRepository
-            .findByAccountId(accountId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No profile for this account yet"));
-    }
-
     public ProfessionalApplication getOwnApplication(String accountId) {
         return applicationRepository
             .findByAccountId(accountId)
@@ -340,45 +345,213 @@ public class OnboardingService {
             .findByAccountId(accountId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "No profile exists for this account yet"));
         application.profileId(profile.getId());
-        return transition(application, OnboardingStatus.PROFILE_COMPLETED, accountId, "profile completed");
+        return transition(application, ProfileStatus.PROFILE_COMPLETED, accountId, "profile completed");
     }
 
-    public ProfessionalApplication submitForReview(String accountId) {
+    /**
+     * <b>Step 4's Save</b> — stores the consent and the requested authority, and advances to
+     * {@code CREDENTIAL_REVIEW} <em>only</em> when every requirement is satisfied (profile.md step 4
+     * and § Gap Update; owner decision 2026-10-09).
+     *
+     * <h2>⭐ Save is non-advancing when the application is incomplete, and that is not an error</h2>
+     *
+     * <p>The owner's words: <i>"Save should be non-advancing — store answers only"</i>, refined by
+     * <i>"Save advances only when complete"</i>. So this path <b>always stores</b>, and an incomplete
+     * application gets <b>200 with the application as stored</b> — no transition, no Kafka event and
+     * <b>no 400</b>. An applicant filling the wizard in several sittings has to be able to keep their
+     * answers, and a refusal is the wrong answer to "I am not finished yet".
+     *
+     * <p>⛔ <b>This replaces the reading T3 shipped, and the argument T3 made for it is left here
+     * because it was half right.</b> That javadoc said {@code profile.md} step 4 — <i>"A <b>Save</b>
+     * and a <b>Submit</b> button store the consent and the requested authority, and set
+     * {@code application.status} to {@code CREDENTIAL_REVIEW}"</i> — is one sentence with a compound
+     * subject attributing identical effects to both buttons, so there was one service method and the
+     * difference was the wizard's. It then refused a Kafka-less Save on the ground that a status
+     * change the estate is never told about is <b>a consumer reading where nobody writes</b>: hc-admin
+     * consumes {@code onboarding.state COMPLETED} to learn an application is waiting on a reviewer.
+     * <b>That half still holds and is honoured here</b> — Save does not reach
+     * {@code CREDENTIAL_REVIEW} quietly; when it advances it publishes, exactly as Submit does. What
+     * was wrong was treating "identical effects" as "identical preconditions".
+     *
+     * <p>⚠ <b>Repeatable, which is the property the one-method shape could not have.</b> Save is
+     * callable any number of times: it checks whether the move is legal from the current status
+     * <em>before</em> transitioning rather than letting {@link #transition} refuse, so a second Save,
+     * and a Save on an application already in {@code CREDENTIAL_REVIEW}, store and return 200. The
+     * 409 belongs to Submit, which is where {@code aSecondWriteIsRefusedByTheStateMachine} now lives.
+     *
+     * @param accountId the caller's gateway {@code User.id}.
+     * @param agreed step 4's consent tick; {@code false} is refused on both paths — a withheld tick
+     *     is a different answer from an unfinished form.
+     * @param authority the role string being applied for. A value outside the eight professional
+     *     disciplines is refused with 400 on both paths, before anything is stored — see
+     *     {@link #refuseAnAuthorityThatIsNotADiscipline}. ⭐ <b>A body naming <em>no</em> authority
+     *     leaves the stored one untouched and still answers 200</b> (owner decision 2026-10-09: <i>"Save
+     *     should store what I named — don't blank it"</i>); blank counts as naming none.
+     */
+    public ProfessionalApplication saveConsent(String accountId, boolean agreed, String authority) {
+        return storeThenAdvanceWhenComplete(accountId, agreed, authority, false);
+    }
+
+    /**
+     * <b>Step 4's Submit</b> — stores the same two answers, then <b>requires</b> every requirement
+     * this service can see and refuses naming the unsatisfied ones (profile.md § Gap Update: <i>"…
+     * when all requirements are satisfied"</i>).
+     *
+     * <h2>⛔ "All requirements" means all of them, not step 3's documents (F-B)</h2>
+     *
+     * <p>This checked {@code requireMandatoryDocuments} and nothing else, and the transition before
+     * it — {@link #completeProfile} — requires only that a {@code Profile} <em>row exist</em>. So an
+     * applicant with all four documents and a blank {@code phoneNumber}, {@code digitalAddress},
+     * {@code town} or {@code district}, or one emergency contact instead of two, got <b>200</b> here,
+     * reached {@code CREDENTIAL_REVIEW}, and had {@code onboarding.state COMPLETED} published to
+     * hc-admin — <b>and then {@link #markStatus}({@code ACTIVE}) refused with
+     * {@link #ACTIVATION_REQUIRES_COMPLETE_PROFILE} after a reviewer had done the work</b>, with
+     * nothing at any point having told the applicant their profile was short.
+     *
+     * <p>⚠ <b>Step 1's four account fields are the gateway's and this service cannot see them.</b>
+     * {@code firstName}, {@code lastName}, {@code langKey} and {@code imageUrl} live on {@code User}
+     * in {@code hcProfessionalGateway}; there is deliberately <b>no cross-service call invented
+     * here</b> to read them, so what this gate enforces is steps 2, 3 and 4. A submission whose
+     * account is incomplete still passes, and the client is what keeps step 1 ahead of step 2. Raised
+     * with the owner rather than guessed at.
+     *
+     * @see #saveConsent the same storing and the same completeness evaluation, without the refusal
+     */
+    public ProfessionalApplication submitForReview(String accountId, boolean agreed, String authority) {
+        return storeThenAdvanceWhenComplete(accountId, agreed, authority, true);
+    }
+
+    /**
+     * The whole of step 4's write, shared by both buttons: store, then advance if complete.
+     *
+     * <p><b>One body rather than two, deliberately.</b> The owner's instruction is explicit that the
+     * storing and the completeness evaluation must not be duplicated between the paths — and this
+     * repository's own notes say why in general terms: two correct-for-now copies is how an estate
+     * arrives at one wrong one, and {@code quality/}'s items 84, 91 and 92 are a fix applied to one of
+     * two copies. So the only thing the two paths disagree about is {@code refuseWhenIncomplete},
+     * which is the single difference the owner's table draws.
+     *
+     * @param refuseWhenIncomplete Submit passes {@code true} and refuses with
+     *     {@link #SUBMISSION_REQUIRES_ALL_REQUIREMENTS} naming the unsatisfied keys; Save passes
+     *     {@code false} and returns the stored application unadvanced.
+     */
+    private ProfessionalApplication storeThenAdvanceWhenComplete(
+        String accountId,
+        boolean agreed,
+        String authority,
+        boolean refuseWhenIncomplete
+    ) {
+        if (!agreed) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, CONSENT_REQUIRED);
+        }
+        // Before the lookup, as the consent check above already is: both are questions about the body,
+        // and a refused body should not depend on whether the caller has an application yet.
+        refuseAnAuthorityThatIsNotADiscipline(authority);
         ProfessionalApplication application = getOwnApplication(accountId);
-        requireMandatoryDocuments(application);
+
+        // --- Store. On both paths, and BEFORE any completeness question: the owner's "Save should be
+        // non-advancing — store answers only" makes keeping the answers the one thing this write
+        // always does.
+        //
+        // ⭐ The authority is written ONLY when the body NAMES one — the owner's "Save should store
+        // what I named — don't blank it" (2026-10-09). This write was unconditional, so a body of
+        // {"agreed":true} ERASED a role the applicant had previously declared and answered 200: the
+        // field a reviewer acts on, cleared by a client that merely saved the consent tick. A Save
+        // stores the fields it names and leaves the others as they are.
+        //
+        // ⚠ Blank counts as not-named, by the same hasText the submission gate and
+        // refuseAnAuthorityThatIsNotADiscipline already use — one definition of absence in this file
+        // rather than a second one that would make "" a clear where it is a 400 or a no-op elsewhere.
+        // ⚠ And an explicit "authority": null is a NO-OP rather than a clear, because
+        // ApplicationConsentRequest is a record: after binding, absent and null are the same value
+        // and no code here can tell them apart. ProfileResource's PATCH keeps the raw ObjectNode to
+        // solve exactly that, and restructuring this endpoint the same way is a larger change than
+        // the decision asked for — see ProfessionalApplicationResource.ApplicationConsentRequest,
+        // which records the limit beside the record it is a property of. Nothing clears a declared
+        // authority today, which is the state the owner asked for.
+        //
+        // The consent DATE is not re-stamped over an existing one. profile.md renders it — "dated
+        // Application.agreedDate" — and a re-affirmation of a consent already given is not a new
+        // consent, so moving the date would make the page state something untrue about when the
+        // subject agreed. That holds across a Save-then-Submit sequence as much as across two Saves.
+        if (hasText(authority)) {
+            application.authority(authority);
+        }
+        if (!application.isAgreed()) {
+            application.agreed(true).agreedDate(Instant.now());
+        }
+        if (application.getProfileId() == null) {
+            application.profileId(ownProfileId(accountId));
+        }
+
+        // --- Evaluate, once, for both paths. ⚠ Against the authority now STORED, not the one the
+        // body named: since a body naming none no longer blanks the field, the two differ, and asking
+        // about the body would refuse a Submit with "authority" missing from an application that
+        // plainly carries one — a refusal naming a requirement the applicant has already met.
+        List<String> missing = unsatisfiedRequirements(accountId, application.getAuthority());
+        if (!missing.isEmpty()) {
+            if (refuseWhenIncomplete) {
+                // Nothing is saved: the refusal is the whole answer, and a Submit that stored and
+                // then 400ed would leave the caller unable to tell which of the two happened.
+                throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    SUBMISSION_REQUIRES_ALL_REQUIREMENTS + "; still missing: " + String.join(", ", missing)
+                );
+            }
+            return applicationRepository.save(application);
+        }
+
+        // --- Advance. Save asks whether the move is legal first so that it can be called twice;
+        // Submit lets the state machine answer, which is where the 409 belongs.
+        boolean legal = LEGAL_TRANSITIONS.getOrDefault(application.getStatus(), Set.of()).contains(ProfileStatus.CREDENTIAL_REVIEW);
+        if (!legal && !refuseWhenIncomplete) {
+            // A complete application that is already in CREDENTIAL_REVIEW, or past it — the answers
+            // are stored and there is nothing to announce a second time. Publishing again would send
+            // hc-admin a COMPLETED for an application it has already queued.
+            return applicationRepository.save(application);
+        }
+
         application.submittedAt(Instant.now());
         ProfessionalApplication saved = transition(
             application,
-            OnboardingStatus.CREDENTIAL_REVIEW,
+            ProfileStatus.CREDENTIAL_REVIEW,
             accountId,
             "submitted for credential review"
         );
         // COMPLETED means the applicant is done, not that they are cleared to work — the ACTIVE
-        // event below says that. Keeping them apart is what lets the admin portal tell an
-        // application stalled on us from one stalled on the clinician.
-        domainEventPublisher.publishOnboardingState("COMPLETED", accountId, saved.getId(), saved.getRequestedRole(), accountId);
+        // event says that. Keeping them apart is what lets the admin portal tell an application
+        // stalled on us from one stalled on the clinician.
+        domainEventPublisher.publishOnboardingState("COMPLETED", accountId, saved.getId(), saved.getAuthority(), accountId);
         return saved;
+    }
+
+    /**
+     * The caller's own {@code Profile.id}, or null when they have none yet.
+     *
+     * <p>Resolved here rather than taken from a request body, for the reason
+     * {@code ProfileFieldOwnership} gives about every other linking field: a client-supplied
+     * {@code profileId} would let an applicant attach their application to a colleague's profile,
+     * and the reviewer's document list is keyed on exactly that value.
+     */
+    private String ownProfileId(String accountId) {
+        return profileRepository.findByAccountId(accountId).map(Profile::getId).orElse(null);
     }
 
     public ProfessionalApplication decide(
         String applicationId,
-        OnboardingStatus decision,
+        ProfileStatus decision,
         String reason,
         String correctionNotes,
         String actor
     ) {
-        if (
-            decision != OnboardingStatus.APPROVED &&
-            decision != OnboardingStatus.REJECTED &&
-            decision != OnboardingStatus.RETURNED_FOR_CORRECTION
-        ) {
+        if (decision != ProfileStatus.APPROVED && decision != ProfileStatus.REJECTED && decision != ProfileStatus.RETURNED_FOR_CORRECTION) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Decision must be APPROVED, REJECTED or RETURNED_FOR_CORRECTION");
         }
-        if (decision != OnboardingStatus.APPROVED && (reason == null || reason.isBlank())) {
+        if (decision != ProfileStatus.APPROVED && (reason == null || reason.isBlank())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Rejection or correction requires a reviewer reason");
         }
         ProfessionalApplication application = getById(applicationId);
-        if (decision == OnboardingStatus.APPROVED) {
+        if (decision == ProfileStatus.APPROVED) {
             requireAllMandatoryDocumentsVerified(application);
         }
         application.decidedBy(actor).decidedAt(Instant.now()).decisionReason(reason).correctionNotes(correctionNotes);
@@ -407,25 +580,25 @@ public class OnboardingService {
         }
         profileRepository.save(profile);
         log.debug("Organization context assigned to profile {} (supervisor {})", profile.getId(), supervisorProfileId);
-        return transition(application, OnboardingStatus.ORGANIZATION_ASSIGNED, actor, "organization context assigned");
+        return transition(application, ProfileStatus.ORGANIZATION_ASSIGNED, actor, "organization context assigned");
     }
 
-    public ProfessionalApplication markStatus(String applicationId, OnboardingStatus target, String reason, String actor) {
+    public ProfessionalApplication markStatus(String applicationId, ProfileStatus target, String reason, String actor) {
         ProfessionalApplication application = getById(applicationId);
-        if (target == OnboardingStatus.ACTIVE) {
+        if (target == ProfileStatus.ACTIVE) {
             // A profile goes ACTIVE only when it is complete AND vetted. The vetting half is the
             // APPROVED -> ... -> ACTIVE chain, which only an admin can drive; this is the other
             // half, and it is checked here rather than in the client because an admin activating an
             // incomplete application is a bug, not a shortcut.
             requireCompleteProfile(application);
             // WP7 reactivation guard: leaving SUSPENDED additionally requires a current license.
-            if (application.getStatus() == OnboardingStatus.SUSPENDED) {
+            if (application.getStatus() == ProfileStatus.SUSPENDED) {
                 requireCurrentVerifiedLicense(application);
             }
         }
         ProfessionalApplication saved = transition(application, target, actor, reason);
-        if (target == OnboardingStatus.ACTIVE) {
-            domainEventPublisher.publishOnboardingState("ACTIVE", saved.getAccountId(), saved.getId(), saved.getRequestedRole(), actor);
+        if (target == ProfileStatus.ACTIVE) {
+            domainEventPublisher.publishOnboardingState("ACTIVE", saved.getAccountId(), saved.getId(), saved.getAuthority(), actor);
         }
         return saved;
     }
@@ -488,7 +661,7 @@ public class OnboardingService {
         );
     }
 
-    public List<ProfessionalApplication> listApplications(OnboardingStatus status) {
+    public List<ProfessionalApplication> listApplications(ProfileStatus status) {
         if (status == null) {
             return applicationRepository.findAll(
                 org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "submittedAt")
@@ -587,8 +760,8 @@ public class OnboardingService {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Application not found"));
     }
 
-    private ProfessionalApplication transition(ProfessionalApplication application, OnboardingStatus to, String actor, String reason) {
-        OnboardingStatus from = application.getStatus();
+    private ProfessionalApplication transition(ProfessionalApplication application, ProfileStatus to, String actor, String reason) {
+        ProfileStatus from = application.getStatus();
         if (from == null || !LEGAL_TRANSITIONS.getOrDefault(from, Set.of()).contains(to)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Illegal onboarding transition " + from + " -> " + to);
         }
@@ -598,7 +771,7 @@ public class OnboardingService {
         return saved;
     }
 
-    private void appendEvent(ProfessionalApplication application, OnboardingStatus from, OnboardingStatus to, String reason) {
+    private void appendEvent(ProfessionalApplication application, ProfileStatus from, ProfileStatus to, String reason) {
         eventRepository.save(
             new OnboardingEvent()
                 .applicationId(application.getId())
@@ -618,13 +791,33 @@ public class OnboardingService {
      * itself, mid-screen, with nothing thrown and nothing logged.
      */
     private static final String REQ_CONSENT = "consent";
-    private static final String REQ_PROFILE = "profile";
-    private static final String REQ_ADDRESS = "address";
-    private static final String REQ_NEXT_OF_KIN = "nextOfKin";
+
+    /**
+     * The three step-2 keys, <b>taken from {@link ProfileCompleteness} rather than spelled again</b>
+     * (F-B). They were private literals here until the submit gate started naming the same keys; one
+     * declaration is what stops the meter and the refusal disagreeing about a translated label.
+     */
+    private static final String REQ_PROFILE = ProfileCompleteness.REQ_PROFILE;
+
+    private static final String REQ_ADDRESS = ProfileCompleteness.REQ_ADDRESS;
+
+    private static final String REQ_NEXT_OF_KIN = ProfileCompleteness.REQ_NEXT_OF_KIN;
+
     private static final String REQ_CERTIFICATE = "certificate";
     private static final String REQ_LICENSE = "license";
     private static final String REQ_IDENTITY = "identity";
     private static final String REQ_PHOTO = "photo";
+
+    /**
+     * Step 4's other half: the role the applicant declares they are applying for.
+     *
+     * <p>Not one of the eight progress-meter requirements, and deliberately so — the meter measures
+     * what the <em>profile</em> holds, and the authority is a property of the application. It is a
+     * submission requirement all the same: {@code profile.md} step 4 is <i>"The professional declares
+     * the role they are applying for <b>and</b> consents"</i>, so a submission naming no role has not
+     * satisfied it. Nothing refused one before F-B.
+     */
+    private static final String REQ_AUTHORITY = "authority";
 
     /**
      * How far this account has got, for its own eyes.
@@ -647,7 +840,7 @@ public class OnboardingService {
             : personalDocumentRepository.findByProfileId(profile.getId()).stream().filter(PersonalDocumentService::isLive).toList();
 
         List<OnboardingProgressDTO.Requirement> requirements = List.of(
-            new OnboardingProgressDTO.Requirement(REQ_CONSENT, application != null && application.getConsentAcceptedAt() != null),
+            new OnboardingProgressDTO.Requirement(REQ_CONSENT, application != null && application.isAgreed()),
             new OnboardingProgressDTO.Requirement(REQ_PROFILE, personalDetailsComplete(profile)),
             new OnboardingProgressDTO.Requirement(REQ_ADDRESS, addressComplete(profile)),
             new OnboardingProgressDTO.Requirement(REQ_NEXT_OF_KIN, nextOfKinComplete(profile)),
@@ -677,15 +870,75 @@ public class OnboardingService {
         return value != null && !value.isBlank();
     }
 
+    /**
+     * ⛔ <b>An {@code authority} that is not one of the eight professional disciplines is refused with
+     * 400, on every path that writes one</b> — the create, Save and Submit.
+     *
+     * <p>Nothing validated it before: {@code {"agreed":true,"authority":"banana"}} stored and answered
+     * 201, after which the review queue rendered {@code healthConnect.roles.banana} — the raw
+     * translation key, mid-screen, in all four locales — and the review-detail page handed the value
+     * to the gateway's {@code grantAuthority}. ⚠ The field a reviewer acts on is the one an applicant
+     * writes, which is why this is a write gate and not a rendering fix.
+     *
+     * <h2>⭐ The valid set is derived, not listed here</h2>
+     *
+     * <p>{@link AuthoritiesConstants#PROFESSIONAL_DISCIPLINES} is {@code CLINICAL_AND_ADMIN} minus the
+     * administrator, so a ninth discipline is accepted the day it is added to this service's own copy
+     * of the authorities and nobody edits this method. {@code ROLE_ADMIN} and {@code ROLE_USER} are
+     * outside it by that construction rather than by a clause — see that constant.
+     *
+     * <h2>⚠ Absent is not invalid, and this method is where the two are kept apart</h2>
+     *
+     * <p>A write naming <em>no</em> authority is not refused here: the create stores {@code null} and
+     * answers 201, Save <b>leaves the stored value untouched</b> and answers 200 (owner decision
+     * 2026-10-09 — see {@link #saveConsent}), and Submit by an applicant who has never declared one
+     * refuses through {@link #unsatisfiedRequirements} with {@code authority} among the missing keys.
+     * That matters
+     * beyond tidiness — {@code careers-handoff-contract.md} has the client <b>drop</b> an unknown
+     * {@code ?track=} rather than raise, <i>"and the page still works with no parameters at all"</i>,
+     * so a body that names nothing is the contract working and a body that names {@code "banana"} is
+     * the backstop firing. <b>Blank counts as absent</b>, by {@link #hasText} — the same definition of
+     * absence the submission gate already uses, rather than a second one that would make {@code ""} a
+     * 400 on Save where it is currently a 200.
+     *
+     * <h2>⭐ Reads are deliberately not validated</h2>
+     *
+     * <p>A filter is not a write. The two places an authority arrives as a <em>query</em> are
+     * {@code MessagingResource}'s recipient picker ({@code ?role=}) and its role broadcast, both
+     * reaching {@code ProfessionalApplicationRepository.findByAuthorityAndStatus}; a non-member there
+     * matches nothing and <b>answers empty</b>, which is the truthful answer — no active professional
+     * holds it — and the broadcast separately refuses an empty match with its own 400. Refusing the
+     * read instead would make a filter able to fail on data the server itself stored before this gate
+     * existed, and the quality database holds exactly such a row. ⚠ <b>The review queue does not
+     * filter by authority at all</b> — {@code GET /api/professional-application} takes
+     * {@code ?status=} and nothing else — so there is no admin read to decide about.
+     */
+    private static void refuseAnAuthorityThatIsNotADiscipline(String authority) {
+        if (!hasText(authority)) {
+            return;
+        }
+        if (!List.of(AuthoritiesConstants.PROFESSIONAL_DISCIPLINES).contains(authority)) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                AUTHORITY_MUST_BE_A_PROFESSIONAL_DISCIPLINE + ": " + String.join(", ", AuthoritiesConstants.PROFESSIONAL_DISCIPLINES)
+            );
+        }
+    }
+
     private static boolean personalDetailsComplete(Profile profile) {
         return (
             profile != null &&
             hasText(profile.getFirstName()) &&
             hasText(profile.getLastName()) &&
             profile.getBirthDate() != null &&
-            hasText(profile.getSex()) &&
+            // `sex` and `cardType` are enums since F9 — a null check is the whole of "provided"
+                // now, where hasText used to be the only thing a free-text field admitted. A value
+                // outside the enumeration can no longer reach storage, so this predicate no longer
+                // counts "banana" as a sex.
+                profile.getSex() !=
+                null &&
             hasText(profile.getMobilePhone()) &&
-            hasText(profile.getCardType()) &&
+            profile.getCardType() != null &&
             hasText(profile.getCardNumber())
         );
     }
@@ -702,28 +955,135 @@ public class OnboardingService {
         );
     }
 
+    /**
+     * What "next of kin provided" means: <b>at least {@link ProfileCompleteness#REQUIRED_CONTACTS}
+     * contacts</b>, each carrying name, relationship and phone (F2).
+     *
+     * <p>{@code profile.md} step 2: <i>"At least <b>two</b> emergency contacts are required."</i>
+     * This was an {@code anyMatch}, so one contact satisfied it, and <b>nothing anywhere in
+     * {@code src/main} or {@code src/test} expressed the requirement</b> — the only mention of it in
+     * the repository was a comment in {@code ProfilePatchFieldCoverageIT}.
+     *
+     * <p>⛔ <b>The javadoc that stood here argued for one and deferred two to T5. It was overruled
+     * and is deleted rather than reworded.</b> Its argument was that raising the predicate would
+     * make profiles already saved through the shipped one-contact wizard retroactively incomplete.
+     * That is true, it is the accepted consequence, and <i>"this would make existing rows
+     * retroactively incomplete"</i> is not a reason to deviate from the specification. The three
+     * things it named as blast radius are the right things to look at and none of them is a reason
+     * either.
+     *
+     * <p><b>Counting the complete ones rather than requiring every contact complete</b>, which is
+     * the one clause of the old reasoning that survives on its own merits: a clinician with two good
+     * contacts who starts typing a third would otherwise see this requirement go from satisfied to
+     * unsatisfied, and the {@code ACTIVE} gate close, for having done what the form invites. ⚠ That
+     * makes this predicate deliberately <em>weaker</em> than {@link ProfileCompleteness}, which
+     * requires every contact complete because it decides a status rather than a meter — see that
+     * class on which definition is authoritative for what.
+     *
+     * <p><b>Advisory and server-side, as it was.</b> {@code Profile} carries no
+     * {@code jakarta.validation} annotations and gains none here: what the server owns is whether a
+     * <em>requirement</em> is satisfied, which is this.
+     */
     private static boolean nextOfKinComplete(Profile profile) {
         return (
             profile != null &&
-            profile.getEmergencyContact() != null &&
-            hasText(profile.getEmergencyContact().getName()) &&
-            hasText(profile.getEmergencyContact().getRelationship()) &&
-            hasText(profile.getEmergencyContact().getPhone())
+            profile.getContacts() != null &&
+            profile
+                    .getContacts()
+                    .stream()
+                    .filter(
+                        contact ->
+                            contact != null &&
+                            hasText(contact.getName()) &&
+                            hasText(contact.getRelationship()) &&
+                            hasText(contact.getPhone())
+                    )
+                    .count() >=
+                ProfileCompleteness.REQUIRED_CONTACTS
         );
     }
 
-    private void requireMandatoryDocuments(ProfessionalApplication application) {
-        List<PersonalDocument> documents = liveDocumentsFor(application);
-        boolean hasCertificate = documents.stream().anyMatch(d -> d.getType() == DocumentType.CERTIFICATE);
-        boolean hasLicenseWithExpiry = documents.stream().anyMatch(d -> d.getType() == DocumentType.LICENSE && d.getExpiryDate() != null);
-        boolean hasIdentity = documents.stream().anyMatch(d -> IDENTITY_TYPES.contains(d.getType()));
-        boolean hasPhoto = documents.stream().anyMatch(d -> d.getType() == DocumentType.PASSPHOTO);
-        if (!hasCertificate || !hasLicenseWithExpiry || !hasIdentity || !hasPhoto) {
-            throw new ResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                "Mandatory documents missing: certificate, license (with expiry), government identity, and passport photo are required"
-            );
+    /**
+     * ⛔ <b>Every requirement this service can see, named when it is not satisfied</b> —
+     * {@code profile.md} § Gap Update: <i>"Submitting sets {@code Application.status} to
+     * {@code CREDENTIAL_REVIEW} and triggers the Kafka event, <b>when all requirements are
+     * satisfied</b>."</i> (F-B)
+     *
+     * <table>
+     *   <caption>What is gated, and by which definition</caption>
+     *   <tr><th>step</th><th>requirement</th><th>read from</th></tr>
+     *   <tr><td>1</td><td>the four account fields</td>
+     *       <td><b>not gated</b> — they are {@code User}'s, in the gateway; see
+     *           {@link #submitForReview}</td></tr>
+     *   <tr><td>2</td><td>{@code profile}, {@code address}, {@code nextOfKin}</td>
+     *       <td>{@link ProfileCompleteness#missingRequirements} — the predicate built for
+     *           {@code profile.md}'s <i>"Every field in the Profile model is required"</i></td></tr>
+     *   <tr><td>3</td><td>{@code certificate}, {@code license}, {@code identity}, {@code photo}</td>
+     *       <td>the live documents on the caller's profile, as before</td></tr>
+     *   <tr><td>4</td><td>{@code authority}</td>
+     *       <td>the role on the submitted body; consent is refused earlier and separately, with
+     *           {@link #CONSENT_REQUIRED}, because a withheld tick is a different answer from an
+     *           incomplete one</td></tr>
+     * </table>
+     *
+     * <p>⭐ <b>Step 2's definition is {@link ProfileCompleteness}, not the progress meter's three
+     * predicates.</b> Those are deliberately weaker — {@code addressComplete} leaves
+     * {@code digitalAddress}, {@code town} and {@code district} optional, and
+     * {@code nextOfKinComplete} counts complete contacts rather than requiring every contact
+     * complete, so that a meter does not go <em>down</em> when a clinician starts typing a third
+     * contact. A <em>gate</em> has no such problem and {@code profile.md} says every field, so the
+     * gate reads the stricter one. That also closes the gap {@code ProfileCompleteness}'s own javadoc
+     * records: a profile could read 100% on the meter and carry no {@code status}.
+     *
+     * <p><b>400 on Submit, not 409.</b> Every one of these is something the applicant can fix and
+     * then retry, which is what distinguishes it from {@link #markStatus}'s {@code ACTIVE} gate —
+     * that one refuses an <em>administrator</em> acting on a state only the clinician can change, and
+     * answers {@code CONFLICT}. On Save a non-empty answer is not an error at all; see
+     * {@link #saveConsent}.
+     *
+     * <p>⚠ <b>Documents are resolved from the profile, not via {@code documentsFor(application)}</b>,
+     * which raises 409 <i>"Application has no linked profile"</i> for an application with no
+     * {@code profileId} — precisely one of the incomplete states this is asked about. That is the
+     * same reasoning {@link #progressFor} records for the same choice; before F-B an applicant with
+     * no profile at all met that 409 instead of being told what was missing.
+     *
+     * <p>⭐ <b>It returns the keys and refuses nothing</b> (owner decision 2026-10-09). Both of
+     * step 4's buttons ask the same question and only one of them turns a non-empty answer into a
+     * 400 — so the evaluation cannot live inside the refusal, or Save would have to re-derive it.
+     *
+     * @param authority ⚠ the authority <b>as stored on the application after this write</b>, not as
+     *     the body named it. Since the owner's decision of 2026-10-09 a body naming none no longer
+     *     blanks the field, so the two differ — and keying step 4's requirement on the body would name
+     *     {@code authority} missing on an application that carries one. See
+     *     {@code storeThenAdvanceWhenComplete}, the only caller.
+     * @return the unsatisfied requirement keys, in the order the profile page shows them; empty when
+     *     every requirement this service can see is satisfied.
+     */
+    private List<String> unsatisfiedRequirements(String accountId, String authority) {
+        Profile profile = profileRepository.findByAccountId(accountId).orElse(null);
+        List<String> missing = new java.util.ArrayList<>(ProfileCompleteness.missingRequirements(profile));
+
+        List<PersonalDocument> documents = profile == null || profile.getId() == null
+            ? List.<PersonalDocument>of()
+            : personalDocumentRepository.findByProfileId(profile.getId()).stream().filter(PersonalDocumentService::isLive).toList();
+        if (documents.stream().noneMatch(d -> d.getType() == DocumentType.CERTIFICATE)) {
+            missing.add(REQ_CERTIFICATE);
         }
+        if (documents.stream().noneMatch(d -> d.getType() == DocumentType.LICENSE && d.getExpiryDate() != null)) {
+            missing.add(REQ_LICENSE);
+        }
+        if (documents.stream().noneMatch(d -> IDENTITY_TYPES.contains(d.getType()))) {
+            missing.add(REQ_IDENTITY);
+        }
+        if (documents.stream().noneMatch(d -> d.getType() == DocumentType.PASSPHOTO)) {
+            missing.add(REQ_PHOTO);
+        }
+
+        if (!hasText(authority)) {
+            missing.add(REQ_AUTHORITY);
+        }
+
+        return List.copyOf(missing);
     }
 
     /**
@@ -753,9 +1113,12 @@ public class OnboardingService {
         }
         return personalDocumentRepository.findByProfileId(profileId);
     }
-
-    /** What the professional holds now — the form every gate reads. See {@link PersonalDocumentService#isLive}. */
-    private List<PersonalDocument> liveDocumentsFor(ProfessionalApplication application) {
-        return documentsFor(application).stream().filter(PersonalDocumentService::isLive).toList();
-    }
+    /*
+     * liveDocumentsFor(ProfessionalApplication) is GONE — its one caller was requireMandatoryDocuments,
+     * which F-B folded into requireEverySubmissionRequirement. That gate resolves documents from the
+     * PROFILE rather than from the application, deliberately: documentsFor() raises 409 "Application has
+     * no linked profile" for an application with no profileId, which is one of the very states the gate
+     * exists to report on. Deleted rather than left behind, because a private helper with no caller is
+     * the next reader's evidence that this path still goes through the application.
+     */
 }

@@ -11,7 +11,7 @@ import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
@@ -158,14 +158,14 @@ class OnboardingProgressIT {
     @Test
     @WithMockGatewayUser(login = ADMIN, authorities = { "ROLE_ADMIN" })
     void refusesToActivateAnIncompleteProfile() throws Exception {
-        ProfessionalApplication application = applicationRepository.save(applicationIn(OnboardingStatus.ROSTER_CONFIGURED));
+        ProfessionalApplication application = applicationRepository.save(applicationIn(ProfileStatus.ROSTER_CONFIGURED));
 
         // The body is asserted, not just the status. A bare 409 outlives the reason it was written for:
         // any of the other refusals on this path — an illegal transition, a missing profile — returns
         // the same code, so a status-only assertion would keep passing while this test stopped being
         // about completeness at all. That is how backlog item 14 started.
         restMockMvc
-            .perform(put("/api/onboarding/applications/" + application.getId() + "/activate"))
+            .perform(put("/api/professional-application/" + application.getId() + "/activate"))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.detail").value(containsString(OnboardingService.ACTIVATION_REQUIRES_COMPLETE_PROFILE)));
     }
@@ -173,17 +173,17 @@ class OnboardingProgressIT {
     @Test
     @WithMockGatewayUser(login = ADMIN, authorities = { "ROLE_ADMIN" })
     void activatesOnceEveryRequirementIsSatisfied() throws Exception {
-        ProfessionalApplication application = applicationRepository.save(applicationIn(OnboardingStatus.ROSTER_CONFIGURED));
+        ProfessionalApplication application = applicationRepository.save(applicationIn(ProfileStatus.ROSTER_CONFIGURED));
         uploadAllMandatoryDocuments(profileRepository.save(completeProfile()));
 
         restMockMvc
-            .perform(put("/api/onboarding/applications/" + application.getId() + "/activate"))
+            .perform(put("/api/professional-application/" + application.getId() + "/activate"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.status").value(OnboardingStatus.ACTIVE.name()));
+            .andExpect(jsonPath("$.status").value(ProfileStatus.ACTIVE.name()));
     }
 
     private ProfessionalApplication startedApplication() {
-        return applicationRepository.save(applicationIn(OnboardingStatus.APPLICATION_STARTED));
+        return applicationRepository.save(applicationIn(ProfileStatus.APPLICATION_STARTED));
     }
 
     /**
@@ -191,8 +191,8 @@ class OnboardingProgressIT {
      * happens to carry. Nothing else is applied here: which of the remaining requirements a test
      * satisfies is the test's own business, and several deliberately satisfy none of them.
      */
-    private ProfessionalApplication applicationIn(OnboardingStatus status) {
-        return CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), status).login(APPLICANT).requestedRole("ROLE_NURSE");
+    private ProfessionalApplication applicationIn(ProfileStatus status) {
+        return CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), status).login(APPLICANT).authority("ROLE_NURSE");
     }
 
     private Profile completeProfile() {

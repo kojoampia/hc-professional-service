@@ -49,6 +49,15 @@ class AccountIdIsTheUserIdUnitTest {
     private DomainEventPublisher events;
     private OnboardingService service;
 
+    /**
+     * The own-profile write, which is {@code ProfileService}'s since F8 retired
+     * {@code OnboardingService.upsertOwnProfile} along with {@code PUT /api/onboarding/profile}. The
+     * property these cases assert is unchanged and is the point of re-pointing rather than deleting
+     * them: whichever class holds the write, <b>it stores and resolves the {@code uid} claim and
+     * never the login</b>.
+     */
+    private ProfileService profileService;
+
     @BeforeEach
     void setUp() {
         profileRepository = mock(ProfileRepository.class);
@@ -63,6 +72,8 @@ class AccountIdIsTheUserIdUnitTest {
             events,
             mock(OrganizationReferenceValidator.class)
         );
+
+        profileService = new ProfileService(profileRepository, mock(OrganizationReferenceValidator.class));
 
         when(applicationRepository.findByAccountId(anyString())).thenReturn(Optional.empty());
         when(personalDocumentRepository.findByProfileId(anyString())).thenReturn(List.of());
@@ -88,7 +99,10 @@ class AccountIdIsTheUserIdUnitTest {
         authenticateWith(SecurityUtils.MINTING_ISSUER, ACCOUNT_ID);
         when(profileRepository.findByAccountId(ACCOUNT_ID)).thenReturn(Optional.empty());
 
-        Profile saved = service.upsertOwnProfile(SecurityUtils.getCurrentAccountId().orElseThrow(), new Profile().firstName("Ama"));
+        Profile saved = profileService.partialUpdateOwnProfile(
+            SecurityUtils.getCurrentAccountId().orElseThrow(),
+            new Profile().firstName("Ama")
+        );
 
         assertThat(saved.getAccountId()).isEqualTo(ACCOUNT_ID);
         assertThat(saved.getAccountId()).isNotEqualTo(LOGIN);
@@ -107,7 +121,10 @@ class AccountIdIsTheUserIdUnitTest {
         when(profileRepository.findByAccountId(ACCOUNT_ID)).thenReturn(Optional.of(stored));
         when(profileRepository.findByAccountId(LOGIN)).thenReturn(Optional.empty());
 
-        Profile saved = service.upsertOwnProfile(SecurityUtils.getCurrentAccountId().orElseThrow(), new Profile().firstName("Ama"));
+        Profile saved = profileService.partialUpdateOwnProfile(
+            SecurityUtils.getCurrentAccountId().orElseThrow(),
+            new Profile().firstName("Ama")
+        );
 
         assertThat(saved.getId()).isEqualTo("profile-7");
         assertThat(saved.getFirstName()).isEqualTo("Ama");
@@ -172,7 +189,7 @@ class AccountIdIsTheUserIdUnitTest {
         authenticateWith(SecurityUtils.MINTING_ISSUER, ACCOUNT_ID);
         when(profileRepository.findByAccountId(ACCOUNT_ID)).thenReturn(Optional.empty());
 
-        service.publishProfileStatus(service.upsertOwnProfile(ACCOUNT_ID, new Profile().firstName("Ama")));
+        service.publishProfileStatus(profileService.partialUpdateOwnProfile(ACCOUNT_ID, new Profile().firstName("Ama")));
 
         ArgumentCaptor<String> accountId = ArgumentCaptor.forClass(String.class);
         org.mockito.Mockito.verify(events).publishProfileStatus(

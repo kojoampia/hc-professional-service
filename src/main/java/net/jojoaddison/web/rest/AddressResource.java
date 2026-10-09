@@ -131,9 +131,6 @@ public class AddressResource {
                 if (address.getStreetAddress() != null) {
                     existingAddress.setStreetAddress(address.getStreetAddress());
                 }
-                if (address.getAreaCode() != null) {
-                    existingAddress.setAreaCode(address.getAreaCode());
-                }
                 if (address.getTown() != null) {
                     existingAddress.setTown(address.getTown());
                 }
@@ -142,9 +139,6 @@ public class AddressResource {
                 }
                 if (address.getDistrict() != null) {
                     existingAddress.setDistrict(address.getDistrict());
-                }
-                if (address.getState() != null) {
-                    existingAddress.setState(address.getState());
                 }
                 if (address.getRegion() != null) {
                     existingAddress.setRegion(address.getRegion());

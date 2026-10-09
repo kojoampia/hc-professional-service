@@ -13,7 +13,7 @@ import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
@@ -61,8 +61,8 @@ class ReviewerFlowIT {
                 .accountId(accountIdFor("candidate"))
                 .login("candidate")
                 .profileId(profile.getId())
-                .requestedRole("ROLE_NURSE")
-                .status(OnboardingStatus.CREDENTIAL_REVIEW)
+                .authority("ROLE_NURSE")
+                .status(ProfileStatus.CREDENTIAL_REVIEW)
                 .submittedAt(Instant.parse("2026-07-29T08:00:00Z"))
                 .source("web-careers")
         );
@@ -85,27 +85,27 @@ class ReviewerFlowIT {
     @Test
     @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void adminListsApplicationsWithAttributionAndFilters() throws Exception {
-        applicationRepository.save(new ProfessionalApplication().accountId("other").status(OnboardingStatus.APPLICATION_STARTED));
-        restMockMvc.perform(get("/api/onboarding/applications")).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
+        applicationRepository.save(new ProfessionalApplication().accountId("other").status(ProfileStatus.APPLICATION_STARTED));
+        restMockMvc.perform(get("/api/professional-application")).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
         restMockMvc
-            .perform(get("/api/onboarding/applications").param("status", "CREDENTIAL_REVIEW"))
+            .perform(get("/api/professional-application").param("status", "CREDENTIAL_REVIEW"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(1))
             .andExpect(jsonPath("$[0].source").value("web-careers"))
-            .andExpect(jsonPath("$[0].requestedRole").value("ROLE_NURSE"));
+            .andExpect(jsonPath("$[0].authority").value("ROLE_NURSE"));
     }
 
     @Test
     @WithMockGatewayUser(login = "nurse", authorities = { "ROLE_NURSE" })
     void listingIsAdminOnly() throws Exception {
-        restMockMvc.perform(get("/api/onboarding/applications")).andExpect(status().isForbidden());
+        restMockMvc.perform(get("/api/professional-application")).andExpect(status().isForbidden());
     }
 
     @Test
     @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void adminReadsApplicantDocumentsWithoutBytes() throws Exception {
         restMockMvc
-            .perform(get("/api/onboarding/applications/" + application.getId() + "/documents"))
+            .perform(get("/api/professional-application/" + application.getId() + "/documents"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].type").value("LICENSE"))
             .andExpect(jsonPath("$[0].data").isEmpty());
@@ -114,26 +114,26 @@ class ReviewerFlowIT {
     @Test
     @WithMockGatewayUser(login = "stranger", authorities = { "ROLE_USER" })
     void strangersCannotReadAnotherApplicantsDocuments() throws Exception {
-        restMockMvc.perform(get("/api/onboarding/applications/" + application.getId() + "/documents")).andExpect(status().isForbidden());
+        restMockMvc.perform(get("/api/professional-application/" + application.getId() + "/documents")).andExpect(status().isForbidden());
     }
 
     @Test
     @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void adminVerifiesAndRejectsDocumentsWithAudit() throws Exception {
         restMockMvc
-            .perform(put("/api/onboarding/documents/" + document.getId() + "/verify"))
+            .perform(put("/api/personal-document/" + document.getId() + "/verify"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.verificationStatus").value("VERIFIED"))
             .andExpect(jsonPath("$.verifiedBy").value("admin"));
 
         // rejection requires a reason
         restMockMvc
-            .perform(put("/api/onboarding/documents/" + document.getId() + "/reject").contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .perform(put("/api/personal-document/" + document.getId() + "/reject").contentType(MediaType.APPLICATION_JSON).content("{}"))
             .andExpect(status().isBadRequest());
 
         restMockMvc
             .perform(
-                put("/api/onboarding/documents/" + document.getId() + "/reject")
+                put("/api/personal-document/" + document.getId() + "/reject")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"reason\":\"Expired license\"}")
             )
@@ -146,6 +146,6 @@ class ReviewerFlowIT {
     @Test
     @WithMockGatewayUser(login = "candidate", authorities = { "ROLE_USER" })
     void applicantsCannotVerifyTheirOwnDocuments() throws Exception {
-        restMockMvc.perform(put("/api/onboarding/documents/" + document.getId() + "/verify")).andExpect(status().isForbidden());
+        restMockMvc.perform(put("/api/personal-document/" + document.getId() + "/verify")).andExpect(status().isForbidden());
     }
 }

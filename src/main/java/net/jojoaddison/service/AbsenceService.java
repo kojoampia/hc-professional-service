@@ -150,7 +150,7 @@ public class AbsenceService {
      *
      * <p>The submitted status and professional are both ignored for a non-administrator: the absence
      * is forced onto the caller's own profile and to {@code REQUESTED}, the same way
-     * {@code OnboardingService.upsertOwnProfile} force-sets {@code accountId}. A client cannot decide
+     * {@code ProfileService.partialUpdateOwnProfile} force-sets {@code accountId}. A client cannot decide
      * whose absence it is or that it is already approved.
      */
     public Absence request(Absence submitted) {

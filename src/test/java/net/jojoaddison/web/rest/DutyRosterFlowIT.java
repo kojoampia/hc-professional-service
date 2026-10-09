@@ -14,7 +14,7 @@ import net.jojoaddison.domain.DutyRoster;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DutyRole;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.ShiftType;
 import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.repository.OnboardingEventRepository;
@@ -175,7 +175,7 @@ class DutyRosterFlowIT {
     @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void firstLoginAcknowledgementIsRecordedOnceAsAnEvent() throws Exception {
         ProfessionalApplication application = applicationRepository.save(
-            new ProfessionalApplication().accountId(accountIdFor(PRO)).status(OnboardingStatus.ACTIVE)
+            new ProfessionalApplication().accountId(accountIdFor(PRO)).status(ProfileStatus.ACTIVE)
         );
 
         restMockMvc

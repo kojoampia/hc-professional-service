@@ -17,7 +17,7 @@ import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
 import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
@@ -99,10 +99,10 @@ class ComplianceFlowIT {
         cleanup();
         profile = profileRepository.save(CompleteOnboardingFixture.completeProfile(accountIdFor(PRO)));
         application = applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(accountIdFor(PRO), OnboardingStatus.ACTIVE)
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(PRO), ProfileStatus.ACTIVE)
                 .login(PRO)
                 .profileId(profile.getId())
-                .requestedRole("ROLE_NURSE")
+                .authority("ROLE_NURSE")
                 .source("web-careers")
         );
         // The lapsed licence satisfies the `license` requirement like any other — that one only asks
@@ -131,25 +131,25 @@ class ComplianceFlowIT {
     void expiredLicenseSweepRestrictsAndReactivationNeedsANewLicense() throws Exception {
         // the lapsed license shows up on the watchlist before the sweep
         restMockMvc
-            .perform(get("/api/onboarding/compliance/expiring?days=30"))
+            .perform(get("/api/professional-application/compliance/expiring?days=30"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].documentId").value(expiredLicense.getId()))
             .andExpect(jsonPath("$[0].login").value(PRO));
 
         // sweep suspends the ACTIVE application
         restMockMvc
-            .perform(post("/api/onboarding/compliance/sweep"))
+            .perform(post("/api/professional-application/compliance/sweep"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.expiredLicenses").value(1))
             .andExpect(jsonPath("$.applicationsSuspended").value(1));
-        assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(OnboardingStatus.SUSPENDED);
+        assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(ProfileStatus.SUSPENDED);
         assertThat(eventRepository.findByApplicationIdOrderByAtAsc(application.getId()))
             .extracting(OnboardingEvent::getReason)
             .anyMatch(reason -> reason != null && reason.startsWith(ComplianceService.LICENSE_EXPIRED_REASON));
 
         // re-running is idempotent: nothing left to suspend
         restMockMvc
-            .perform(post("/api/onboarding/compliance/sweep"))
+            .perform(post("/api/professional-application/compliance/sweep"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.applicationsSuspended").value(0));
 
@@ -158,7 +158,7 @@ class ComplianceFlowIT {
         // it reached requireCurrentVerifiedLicense, so it would have passed with a perfectly current
         // licence too. It is the expired licence that has to be refusing it, so the body is asserted.
         restMockMvc
-            .perform(put("/api/onboarding/applications/" + application.getId() + "/activate"))
+            .perform(put("/api/professional-application/" + application.getId() + "/activate"))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.detail").value(containsString(OnboardingService.REACTIVATION_REQUIRES_LICENSE)));
 
@@ -166,7 +166,7 @@ class ComplianceFlowIT {
         // 2026-08-20 — see setUp(): 409 was the right answer to an incomplete profile, not a defect
         // in the reactivation path.
         //
-        // Saved straight to the repository rather than posted to /api/onboarding/documents, and that
+        // Saved straight to the repository rather than posted to /api/personal-document, and that
         // choice is now load-bearing (backlog.md item 20). The upload path marks the row a renewal
         // replaces, and the sweep skips marked rows — so renewing through it here would make every
         // assertion below pass because the lapsed row had vanished from the query, while the sweep
@@ -181,7 +181,7 @@ class ComplianceFlowIT {
             ).name("nursing-license-renewed.pdf")
         );
         restMockMvc
-            .perform(put("/api/onboarding/applications/" + application.getId() + "/activate"))
+            .perform(put("/api/professional-application/" + application.getId() + "/activate"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("ACTIVE"));
 
@@ -201,11 +201,11 @@ class ComplianceFlowIT {
             .as("the lapsed row must stay un-superseded, or this test stops exercising the item 17 guard")
             .isNull();
         restMockMvc
-            .perform(post("/api/onboarding/compliance/sweep"))
+            .perform(post("/api/professional-application/compliance/sweep"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.expiredLicenses").value(1))
             .andExpect(jsonPath("$.applicationsSuspended").value(0));
-        assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(OnboardingStatus.ACTIVE);
+        assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(ProfileStatus.ACTIVE);
         // Skipped, not merely un-suspended: no second audit event, and by the same `continue` no
         // second `compliance.alert` on the broker either.
         assertThat(eventRepository.findByApplicationIdOrderByAtAsc(application.getId()))
@@ -216,15 +216,15 @@ class ComplianceFlowIT {
         // full audit chain: suspension and reactivation are both events
         assertThat(eventRepository.findByApplicationIdOrderByAtAsc(application.getId()))
             .extracting(OnboardingEvent::getToStatus)
-            .containsSubsequence(OnboardingStatus.SUSPENDED, OnboardingStatus.ACTIVE);
+            .containsSubsequence(ProfileStatus.SUSPENDED, ProfileStatus.ACTIVE);
     }
 
     @Test
     @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void metricsCountFunnelByStatusAndSource() throws Exception {
-        applicationRepository.save(new ProfessionalApplication().accountId("direct-1").status(OnboardingStatus.CREDENTIAL_REVIEW));
+        applicationRepository.save(new ProfessionalApplication().accountId("direct-1").status(ProfileStatus.CREDENTIAL_REVIEW));
         restMockMvc
-            .perform(get("/api/onboarding/compliance/metrics"))
+            .perform(get("/api/professional-application/compliance/metrics"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.byStatus.ACTIVE").value(1))
             .andExpect(jsonPath("$.byStatus.CREDENTIAL_REVIEW").value(1))
@@ -236,9 +236,9 @@ class ComplianceFlowIT {
     @Test
     @WithMockGatewayUser(login = "admin", authorities = { "ROLE_ADMIN" })
     void recentEventsFeedIsNewestFirstAcrossApplications() throws Exception {
-        restMockMvc.perform(post("/api/onboarding/compliance/sweep")).andExpect(status().isOk());
+        restMockMvc.perform(post("/api/professional-application/compliance/sweep")).andExpect(status().isOk());
         restMockMvc
-            .perform(get("/api/onboarding/compliance/events"))
+            .perform(get("/api/professional-application/compliance/events"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].applicationId").value(application.getId()))
             .andExpect(jsonPath("$[*].toStatus").value(hasItem("SUSPENDED")));
@@ -247,9 +247,9 @@ class ComplianceFlowIT {
     @Test
     @WithMockGatewayUser(login = PRO, authorities = { "ROLE_NURSE" })
     void complianceSurfaceIsAdminOnly() throws Exception {
-        restMockMvc.perform(post("/api/onboarding/compliance/sweep")).andExpect(status().isForbidden());
-        restMockMvc.perform(get("/api/onboarding/compliance/expiring")).andExpect(status().isForbidden());
-        restMockMvc.perform(get("/api/onboarding/compliance/metrics")).andExpect(status().isForbidden());
-        restMockMvc.perform(get("/api/onboarding/compliance/events")).andExpect(status().isForbidden());
+        restMockMvc.perform(post("/api/professional-application/compliance/sweep")).andExpect(status().isForbidden());
+        restMockMvc.perform(get("/api/professional-application/compliance/expiring")).andExpect(status().isForbidden());
+        restMockMvc.perform(get("/api/professional-application/compliance/metrics")).andExpect(status().isForbidden());
+        restMockMvc.perform(get("/api/professional-application/compliance/events")).andExpect(status().isForbidden());
     }
 }

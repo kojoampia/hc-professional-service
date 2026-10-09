@@ -20,7 +20,7 @@ import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
 import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
@@ -158,8 +158,9 @@ class ProfileStatusPublicationUnitTest {
             // "ama.serwaa" survives below as lastModifiedBy, which is an audit value and stays a login.
             .accountId("user-42")
             .profileId("profile-7")
-            .status(OnboardingStatus.APPLICATION_STARTED)
-            .consentAcceptedAt(Instant.now());
+            .status(ProfileStatus.APPLICATION_STARTED)
+            .agreed(true)
+            .agreedDate(Instant.now());
 
         inOneRequest(() -> announcer.onAfterSave(saved(application)));
 

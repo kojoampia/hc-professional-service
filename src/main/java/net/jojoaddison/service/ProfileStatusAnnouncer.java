@@ -22,8 +22,9 @@ import org.springframework.stereotype.Component;
  * The one place {@code ProfileStatus} is announced from (backlog.md item 49).
  *
  * <p><b>Why this is a listener and not four more calls.</b> Item 47 § 2b hung the announcement off a
- * table of four call sites, and item 49 is the bill for it: {@code POST /api/onboarding/documents} —
- * the path a clinician renews their own licence by — was not on the table, and neither was any of
+ * table of four call sites, and item 49 is the bill for it: the document upload — {@code POST
+ * /api/onboarding/documents} then, {@code POST /api/personal-document} since T2 — the path a
+ * clinician renews their own licence by, was not on the table, and neither was any of
  * the {@code PersonalDocumentResource} CRUD surface. An upload adds a {@code PENDING} row, so
  * {@code isVerified} went true → false on the server while hc-admin's directory went on rendering
  * "verified". <b>A list of call sites cannot fail when a fifth one is written</b>, which is the whole
@@ -151,7 +152,8 @@ public class ProfileStatusAnnouncer extends AbstractMongoEventListener<Object> {
      *
      * <p>{@code ProfessionalApplication} is here for a reason that is easy to miss: {@code isComplete}
      * counts eight requirements and the first of them, consent, is
-     * {@code ProfessionalApplication.consentAcceptedAt}. So starting an application moves a published
+     * {@code ProfessionalApplication.agreed} ({@code consentAcceptedAt} until T3). So starting an
+     * application moves a published
      * field without touching either of the other two collections.
      */
     private String profileIdOf(Object entity) {

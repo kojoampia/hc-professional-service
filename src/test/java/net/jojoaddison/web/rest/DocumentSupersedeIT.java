@@ -7,7 +7,6 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -15,13 +14,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.util.Base64;
 import java.util.List;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
 import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
@@ -34,11 +34,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
-import org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 /**
@@ -137,7 +135,7 @@ class DocumentSupersedeIT {
         // The credential history stays readable from the clinician's own screen too — hiding the
         // archived row would make a renewal look like a deletion.
         restMockMvc
-            .perform(get("/api/onboarding/documents"))
+            .perform(get("/api/personal-document"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(2))
             // On the wire, not merely in the collection: the marker is what lets a client label an
@@ -198,7 +196,7 @@ class DocumentSupersedeIT {
     @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void theWatchlistTheMetricAndTheSweepAllForgetAnArchivedLicence() throws Exception {
         ProfessionalApplication application = applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), OnboardingStatus.ACTIVE)
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), ProfileStatus.ACTIVE)
                 .login(APPLICANT)
                 .profileId(profile.getId())
         );
@@ -208,11 +206,11 @@ class DocumentSupersedeIT {
         // The lapsed licence is on the watchlist and counted, which is correct while it is the only
         // one this professional holds.
         restMockMvc
-            .perform(get("/api/onboarding/compliance/expiring?days=30").with(admin()))
+            .perform(get("/api/professional-application/compliance/expiring?days=30").with(admin()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(1));
         restMockMvc
-            .perform(get("/api/onboarding/compliance/metrics").with(admin()))
+            .perform(get("/api/professional-application/compliance/metrics").with(admin()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.expiringLicenses30d").value(1));
 
@@ -222,11 +220,11 @@ class DocumentSupersedeIT {
         // Renewing is now an action that clears the entry, which is the whole complaint item 20 was
         // opened about: before this, nothing a clinician or an operator could do ever would.
         restMockMvc
-            .perform(get("/api/onboarding/compliance/expiring?days=30").with(admin()))
+            .perform(get("/api/professional-application/compliance/expiring?days=30").with(admin()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(0));
         restMockMvc
-            .perform(get("/api/onboarding/compliance/metrics").with(admin()))
+            .perform(get("/api/professional-application/compliance/metrics").with(admin()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.expiringLicenses30d").value(0));
 
@@ -235,11 +233,11 @@ class DocumentSupersedeIT {
         // = 0 for the same professional-is-safe outcome reached the other way, through the item 17
         // guard. Neither test can pass for the other's reason.
         restMockMvc
-            .perform(post("/api/onboarding/compliance/sweep").with(admin()))
+            .perform(post("/api/professional-application/compliance/sweep").with(admin()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.expiredLicenses").value(0))
             .andExpect(jsonPath("$.applicationsSuspended").value(0));
-        assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(OnboardingStatus.ACTIVE);
+        assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(ProfileStatus.ACTIVE);
 
         // Still two rows: the compliance surfaces stopped counting the old licence, they did not lose it.
         assertThat(personalDocumentRepository.findByProfileId(profile.getId())).hasSize(2);
@@ -249,7 +247,7 @@ class DocumentSupersedeIT {
     @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void aRejectedDocumentThatHasBeenReplacedCannotBlockApprovalForEver() throws Exception {
         ProfessionalApplication application = applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), OnboardingStatus.CREDENTIAL_REVIEW)
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), ProfileStatus.CREDENTIAL_REVIEW)
                 .login(APPLICANT)
                 .profileId(profile.getId())
         );
@@ -260,7 +258,7 @@ class DocumentSupersedeIT {
 
         restMockMvc
             .perform(
-                put("/api/onboarding/documents/" + byName("certificate-blurred.pdf").getId() + "/reject")
+                put("/api/personal-document/" + byName("certificate-blurred.pdf").getId() + "/reject")
                     .with(admin())
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"reason\":\"unreadable scan\"}")
@@ -294,7 +292,7 @@ class DocumentSupersedeIT {
         // The reviewer surface still shows all five, so the refused scan and its reason remain part of
         // the credential history. That is the point of not deleting it.
         restMockMvc
-            .perform(get("/api/onboarding/applications/" + application.getId() + "/documents").with(admin()))
+            .perform(get("/api/professional-application/" + application.getId() + "/documents").with(admin()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(5));
     }
@@ -324,7 +322,7 @@ class DocumentSupersedeIT {
     @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
     void aBackdatedUploadDoesNotRetireAValidLicenceNorSuspendTheClinician() throws Exception {
         ProfessionalApplication application = applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), OnboardingStatus.ACTIVE)
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(APPLICANT), ProfileStatus.ACTIVE)
                 .login(APPLICANT)
                 .profileId(profile.getId())
         );
@@ -339,11 +337,11 @@ class DocumentSupersedeIT {
         // backdated row (expiredLicenses = 1, unlike the renewal walk-through above), and the item 17
         // guard is what spares the professional — which it can only do because the valid row is live.
         restMockMvc
-            .perform(post("/api/onboarding/compliance/sweep").with(admin()))
+            .perform(post("/api/professional-application/compliance/sweep").with(admin()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.expiredLicenses").value(1))
             .andExpect(jsonPath("$.applicationsSuspended").value(0));
-        assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(OnboardingStatus.ACTIVE);
+        assertThat(applicationRepository.findById(application.getId()).orElseThrow().getStatus()).isEqualTo(ProfileStatus.ACTIVE);
 
         // The same typo made on the renewal path is refused outright, rather than archiving the row it
         // names. The clinician is told both dates, which is what they need to correct it.
@@ -392,19 +390,30 @@ class DocumentSupersedeIT {
         String otherLabel,
         String supersedesDocumentId
     ) throws Exception {
-        MockMultipartHttpServletRequestBuilder builder = multipart("/api/onboarding/documents")
-            .file(new MockMultipartFile("file", filename, MediaType.APPLICATION_PDF_VALUE, PDF_BYTES))
-            .param("type", type.name());
+        // profile.md's specified body (T2): one JSON document with `data` as the uploaded file,
+        // base64 on the wire. This built a multipart request with four form parts until then;
+        // `supersedesDocumentId` was one of them and now rides in the body, which is why this helper
+        // takes it as a plain argument either way.
+        StringBuilder body = new StringBuilder("{\"name\":\"")
+            .append(filename)
+            .append("\",\"type\":\"")
+            .append(type.name())
+            .append("\",\"dataContentType\":\"")
+            .append(MediaType.APPLICATION_PDF_VALUE)
+            .append("\",\"data\":\"")
+            .append(Base64.getEncoder().encodeToString(PDF_BYTES))
+            .append("\"");
         if (expiryDate != null) {
-            builder.param("expiryDate", expiryDate.toString());
+            body.append(",\"expiryDate\":\"").append(expiryDate).append("\"");
         }
         if (otherLabel != null) {
-            builder.param("otherLabel", otherLabel);
+            body.append(",\"otherLabel\":\"").append(otherLabel).append("\"");
         }
         if (supersedesDocumentId != null) {
-            builder.param("supersedesDocumentId", supersedesDocumentId);
+            body.append(",\"supersedesDocumentId\":\"").append(supersedesDocumentId).append("\"");
         }
-        return restMockMvc.perform(builder);
+        body.append("}");
+        return restMockMvc.perform(post("/api/personal-document").contentType(MediaType.APPLICATION_JSON).content(body.toString()));
     }
 
     /** The reviewer clearing the queue — live rows only, since an archived one is not theirs to judge. */
@@ -420,7 +429,7 @@ class DocumentSupersedeIT {
 
     private org.springframework.test.web.servlet.ResultActions decideApproved(ProfessionalApplication application) throws Exception {
         return restMockMvc.perform(
-            put("/api/onboarding/applications/" + application.getId() + "/decide")
+            put("/api/professional-application/" + application.getId() + "/decide")
                 .with(admin())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"decision\":\"APPROVED\"}")

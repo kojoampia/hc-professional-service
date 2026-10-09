@@ -12,7 +12,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -20,6 +19,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.util.Base64;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.Category;
@@ -27,7 +27,7 @@ import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
 import net.jojoaddison.repository.CategoryRepository;
 import net.jojoaddison.repository.OnboardingEventRepository;
@@ -42,19 +42,18 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 /**
  * <b>Every write that can move a published field announces it</b> — backlog.md item 49.
  *
  * <p>Item 47 § 2b hung {@code ProfileStatus} off a table of four call sites and the table read as
- * though it were exhaustive. It was not. {@code POST /api/onboarding/documents} — the path a
- * clinician renews their own licence by — was missing, and so was the whole
+ * though it were exhaustive. It was not. The document upload — {@code POST
+ * /api/personal-document} then, {@code POST /api/personal-document} since T2 — the path a
+ * clinician renews their own licence by, was missing, and so was the whole
  * {@code PersonalDocumentResource} CRUD surface. An upload adds a {@code PENDING} row, so
  * {@code isVerified} went <em>true to false on the server</em> while hc-admin's directory went on
  * rendering "verified" until an administrator happened to touch something else on that profile.
@@ -284,14 +283,14 @@ class ProfileStatusOnEveryWriteIT {
     @Test
     void assigningAnOrganisationAnnouncesOnce() throws Exception {
         ProfessionalApplication application = applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(accountIdFor(CLINICIAN), OnboardingStatus.APPROVED).profileId(profile.getId())
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(CLINICIAN), ProfileStatus.APPROVED).profileId(profile.getId())
         );
         categoryRepository.save(new Category().id("cardiology").name("Cardiology"));
         clearInvocations(events);
 
         restMockMvc
             .perform(
-                put("/api/onboarding/applications/" + application.getId() + "/organization")
+                put("/api/professional-application/" + application.getId() + "/organization")
                     .with(admin())
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"specialtyCategoryId\":\"cardiology\"}")
@@ -329,7 +328,7 @@ class ProfileStatusOnEveryWriteIT {
         // requirements and it lives on the application, not on the profile or on any document.
         clearInvocations(events);
         applicationRepository.save(
-            CompleteOnboardingFixture.consentedApplication(accountIdFor(CLINICIAN), OnboardingStatus.APPLICATION_STARTED).profileId(
+            CompleteOnboardingFixture.consentedApplication(accountIdFor(CLINICIAN), ProfileStatus.APPLICATION_STARTED).profileId(
                 profile.getId()
             )
         );
@@ -399,18 +398,28 @@ class ProfileStatusOnEveryWriteIT {
         String otherLabel,
         String supersedesDocumentId
     ) throws Exception {
-        MockMultipartHttpServletRequestBuilder builder = multipart("/api/onboarding/documents")
-            .file(new MockMultipartFile("file", filename, MediaType.APPLICATION_PDF_VALUE, PDF_BYTES))
-            .param("type", type.name());
+        // profile.md's specified body (T2): one JSON document, `data` as the uploaded file in base64.
+        // This posted four multipart form parts until then. What the class asserts is unchanged — the
+        // announcement hangs off the SAVE, not off the handler, which is the whole of item 49.
+        StringBuilder body = new StringBuilder("{\"name\":\"")
+            .append(filename)
+            .append("\",\"type\":\"")
+            .append(type.name())
+            .append("\",\"dataContentType\":\"")
+            .append(MediaType.APPLICATION_PDF_VALUE)
+            .append("\",\"data\":\"")
+            .append(Base64.getEncoder().encodeToString(PDF_BYTES))
+            .append("\"");
         if (expiryDate != null) {
-            builder.param("expiryDate", expiryDate.toString());
+            body.append(",\"expiryDate\":\"").append(expiryDate).append("\"");
         }
         if (otherLabel != null) {
-            builder.param("otherLabel", otherLabel);
+            body.append(",\"otherLabel\":\"").append(otherLabel).append("\"");
         }
         if (supersedesDocumentId != null) {
-            builder.param("supersedesDocumentId", supersedesDocumentId);
+            body.append(",\"supersedesDocumentId\":\"").append(supersedesDocumentId).append("\"");
         }
-        return restMockMvc.perform(builder);
+        body.append("}");
+        return restMockMvc.perform(post("/api/personal-document").contentType(MediaType.APPLICATION_JSON).content(body.toString()));
     }
 }

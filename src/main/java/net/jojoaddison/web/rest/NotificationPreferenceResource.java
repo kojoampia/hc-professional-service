@@ -16,10 +16,15 @@ import org.springframework.web.server.ResponseStatusException;
  *
  * <p><b>Why this is not part of the profile endpoint.</b> The preferences live on {@code Profile},
  * as the plan requires — they follow the clinician across devices rather than sitting on a
- * {@code DeviceToken} — but {@code PUT /api/onboarding/profile} sets every field it knows from the
- * body it is given. Sending three toggles through it would blank the clinician's address and
- * identity card; sending the whole profile back to change one toggle makes a settings switch depend
- * on a successful profile read. A small endpoint that writes only these three fields avoids both.
+ * {@code DeviceToken} — but the profile endpoint is for the profile. ⚠ <b>The original reason was
+ * stronger and is now historical:</b> {@code PUT /api/onboarding/profile} set every field it knew
+ * from the body it was given, so sending three toggles through it would have blanked the clinician's
+ * address and identity card. That endpoint is retired (F8) and its replacement,
+ * {@code PUT /api/profile}, is a partial write that would no longer do that — so what remains is the
+ * weaker half, which still holds: sending a whole profile back to change one toggle makes a settings
+ * switch depend on a successful profile read, and the three preferences are refused by
+ * {@code ProfileFieldOwnership} on both profile write paths precisely so that this endpoint is the
+ * only writer of them.
  *
  * <p><b>It sits under {@code /api/notifications/**} for the security rule.</b> That prefix is
  * declared {@code authenticated()} in {@link net.jojoaddison.config.SecurityConfiguration}

@@ -10,7 +10,7 @@ import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.Message;
 import net.jojoaddison.domain.MessageRecipient;
 import net.jojoaddison.domain.ProfessionalApplication;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.repository.ConversationRepository;
 import net.jojoaddison.repository.MessageRecipientRepository;
 import net.jojoaddison.repository.MessageRepository;
@@ -89,8 +89,8 @@ class MessagingFlowIT {
         ProfessionalApplication application = new ProfessionalApplication();
         application.setAccountId(accountId);
         application.setLogin(accountId);
-        application.setRequestedRole("ROLE_NURSE");
-        application.setStatus(OnboardingStatus.ACTIVE);
+        application.setAuthority("ROLE_NURSE");
+        application.setStatus(ProfileStatus.ACTIVE);
         return professionalApplicationRepository.save(application);
     }
 

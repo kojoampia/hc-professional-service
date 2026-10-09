@@ -20,7 +20,7 @@ import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
 import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
@@ -114,7 +114,7 @@ class OnboardingContractsIT {
                 .title("RN")
                 .specialtyCategoryId("cat-midwifery")
                 .teamIds(List.of("team-1", "team-2"))
-                .emergencyContact(new EmergencyContact().name("Kojo A").relationship("spouse").phone("0242000000"))
+                .contacts(List.of(new EmergencyContact().name("Kojo A").relationship("spouse").phone("0242000000")))
         );
 
         restMockMvc
@@ -134,12 +134,25 @@ class OnboardingContractsIT {
             .andExpectAll(theFourWP2Fields());
     }
 
-    /** {@code title}, {@code specialtyCategoryId}, {@code teamIds} and {@code emergencyContact}. */
+    /**
+     * {@code title}, {@code specialtyCategoryId}, {@code teamIds} and the next of kin.
+     *
+     * <p><b>The next of kin is asserted under BOTH names, which is the contract since profile.md's
+     * T1.</b> {@code contacts} is the stored field and the one the specification names;
+     * {@code emergencyContact} is a wire alias projecting its first element, kept because two
+     * shipped clients still speak it on {@code PUT /api/profile} — dropping it is T6's. Asserting only
+     * the new name would let the alias be deleted with every test green and the mobile Me tab
+     * silently unable to save a next of kin; asserting only the old one would let the field it
+     * projects be lost under it.
+     */
     private static ResultMatcher[] theFourWP2Fields() {
         return new ResultMatcher[] {
             jsonPath("$.title").value("RN"),
             jsonPath("$.specialtyCategoryId").value("cat-midwifery"),
             jsonPath("$.teamIds", org.hamcrest.Matchers.contains("team-1", "team-2")),
+            jsonPath("$.contacts[0].name").value("Kojo A"),
+            jsonPath("$.contacts[0].relationship").value("spouse"),
+            jsonPath("$.contacts[0].phone").value("0242000000"),
             jsonPath("$.emergencyContact.name").value("Kojo A"),
             jsonPath("$.emergencyContact.relationship").value("spouse"),
             jsonPath("$.emergencyContact.phone").value("0242000000"),
@@ -186,9 +199,10 @@ class OnboardingContractsIT {
             new ProfessionalApplication()
                 .accountId("account-2")
                 .login("ama.serwaa")
-                .requestedRole("ROLE_NURSE")
-                .status(OnboardingStatus.APPLICATION_STARTED)
-                .consentAcceptedAt(Instant.parse("2026-07-28T07:00:00Z"))
+                .authority("ROLE_NURSE")
+                .status(ProfileStatus.APPLICATION_STARTED)
+                .agreed(true)
+                .agreedDate(Instant.parse("2026-07-28T07:00:00Z"))
         );
 
         assertThat(professionalApplicationRepository.findByAccountId("account-2")).contains(application);
@@ -204,18 +218,18 @@ class OnboardingContractsIT {
             new OnboardingEvent()
                 .applicationId("app-1")
                 .actor("ama.serwaa")
-                .fromStatus(OnboardingStatus.APPLICATION_STARTED)
-                .toStatus(OnboardingStatus.PROFILE_COMPLETED)
+                .fromStatus(ProfileStatus.APPLICATION_STARTED)
+                .toStatus(ProfileStatus.PROFILE_COMPLETED)
                 .at(base.plus(1, ChronoUnit.HOURS))
         );
         onboardingEventRepository.save(
-            new OnboardingEvent().applicationId("app-1").actor("system").toStatus(OnboardingStatus.APPLICATION_STARTED).at(base)
+            new OnboardingEvent().applicationId("app-1").actor("system").toStatus(ProfileStatus.APPLICATION_STARTED).at(base)
         );
         onboardingEventRepository.save(new OnboardingEvent().applicationId("app-other").actor("x").at(base));
 
         List<OnboardingEvent> trail = onboardingEventRepository.findByApplicationIdOrderByAtAsc("app-1");
         assertThat(trail).hasSize(2);
-        assertThat(trail.get(0).getToStatus()).isEqualTo(OnboardingStatus.APPLICATION_STARTED);
-        assertThat(trail.get(1).getToStatus()).isEqualTo(OnboardingStatus.PROFILE_COMPLETED);
+        assertThat(trail.get(0).getToStatus()).isEqualTo(ProfileStatus.APPLICATION_STARTED);
+        assertThat(trail.get(1).getToStatus()).isEqualTo(ProfileStatus.PROFILE_COMPLETED);
     }
 }

@@ -36,9 +36,6 @@ class AddressResourceIT {
     private static final String DEFAULT_STREET_ADDRESS = "AAAAAAAAAA";
     private static final String UPDATED_STREET_ADDRESS = "BBBBBBBBBB";
 
-    private static final String DEFAULT_AREA_CODE = "AAAAAAAAAA";
-    private static final String UPDATED_AREA_CODE = "BBBBBBBBBB";
-
     private static final String DEFAULT_TOWN = "AAAAAAAAAA";
     private static final String UPDATED_TOWN = "BBBBBBBBBB";
 
@@ -47,9 +44,6 @@ class AddressResourceIT {
 
     private static final String DEFAULT_DISTRICT = "AAAAAAAAAA";
     private static final String UPDATED_DISTRICT = "BBBBBBBBBB";
-
-    private static final String DEFAULT_STATE = "AAAAAAAAAA";
-    private static final String UPDATED_STATE = "BBBBBBBBBB";
 
     private static final String DEFAULT_REGION = "AAAAAAAAAA";
     private static final String UPDATED_REGION = "BBBBBBBBBB";
@@ -93,11 +87,9 @@ class AddressResourceIT {
         Address address = new Address()
             .digitalAddress(DEFAULT_DIGITAL_ADDRESS)
             .streetAddress(DEFAULT_STREET_ADDRESS)
-            .areaCode(DEFAULT_AREA_CODE)
             .town(DEFAULT_TOWN)
             .city(DEFAULT_CITY)
             .district(DEFAULT_DISTRICT)
-            .state(DEFAULT_STATE)
             .region(DEFAULT_REGION)
             .country(DEFAULT_COUNTRY)
             .createdDate(DEFAULT_CREATED_DATE)
@@ -117,11 +109,9 @@ class AddressResourceIT {
         Address address = new Address()
             .digitalAddress(UPDATED_DIGITAL_ADDRESS)
             .streetAddress(UPDATED_STREET_ADDRESS)
-            .areaCode(UPDATED_AREA_CODE)
             .town(UPDATED_TOWN)
             .city(UPDATED_CITY)
             .district(UPDATED_DISTRICT)
-            .state(UPDATED_STATE)
             .region(UPDATED_REGION)
             .country(UPDATED_COUNTRY)
             .createdDate(UPDATED_CREATED_DATE)
@@ -185,11 +175,9 @@ class AddressResourceIT {
             .andExpect(jsonPath("$.[*].id").value(hasItem(address.getId())))
             .andExpect(jsonPath("$.[*].digitalAddress").value(hasItem(DEFAULT_DIGITAL_ADDRESS)))
             .andExpect(jsonPath("$.[*].streetAddress").value(hasItem(DEFAULT_STREET_ADDRESS)))
-            .andExpect(jsonPath("$.[*].areaCode").value(hasItem(DEFAULT_AREA_CODE)))
             .andExpect(jsonPath("$.[*].town").value(hasItem(DEFAULT_TOWN)))
             .andExpect(jsonPath("$.[*].city").value(hasItem(DEFAULT_CITY)))
             .andExpect(jsonPath("$.[*].district").value(hasItem(DEFAULT_DISTRICT)))
-            .andExpect(jsonPath("$.[*].state").value(hasItem(DEFAULT_STATE)))
             .andExpect(jsonPath("$.[*].region").value(hasItem(DEFAULT_REGION)))
             .andExpect(jsonPath("$.[*].country").value(hasItem(DEFAULT_COUNTRY)))
             .andExpect(jsonPath("$.[*].createdDate").value(hasItem(DEFAULT_CREATED_DATE.toString())))
@@ -211,11 +199,9 @@ class AddressResourceIT {
             .andExpect(jsonPath("$.id").value(address.getId()))
             .andExpect(jsonPath("$.digitalAddress").value(DEFAULT_DIGITAL_ADDRESS))
             .andExpect(jsonPath("$.streetAddress").value(DEFAULT_STREET_ADDRESS))
-            .andExpect(jsonPath("$.areaCode").value(DEFAULT_AREA_CODE))
             .andExpect(jsonPath("$.town").value(DEFAULT_TOWN))
             .andExpect(jsonPath("$.city").value(DEFAULT_CITY))
             .andExpect(jsonPath("$.district").value(DEFAULT_DISTRICT))
-            .andExpect(jsonPath("$.state").value(DEFAULT_STATE))
             .andExpect(jsonPath("$.region").value(DEFAULT_REGION))
             .andExpect(jsonPath("$.country").value(DEFAULT_COUNTRY))
             .andExpect(jsonPath("$.createdDate").value(DEFAULT_CREATED_DATE.toString()))
@@ -242,11 +228,9 @@ class AddressResourceIT {
         updatedAddress
             .digitalAddress(UPDATED_DIGITAL_ADDRESS)
             .streetAddress(UPDATED_STREET_ADDRESS)
-            .areaCode(UPDATED_AREA_CODE)
             .town(UPDATED_TOWN)
             .city(UPDATED_CITY)
             .district(UPDATED_DISTRICT)
-            .state(UPDATED_STATE)
             .region(UPDATED_REGION)
             .country(UPDATED_COUNTRY)
             .createdDate(UPDATED_CREATED_DATE)
@@ -354,11 +338,9 @@ class AddressResourceIT {
         partialUpdatedAddress
             .digitalAddress(UPDATED_DIGITAL_ADDRESS)
             .streetAddress(UPDATED_STREET_ADDRESS)
-            .areaCode(UPDATED_AREA_CODE)
             .town(UPDATED_TOWN)
             .city(UPDATED_CITY)
             .district(UPDATED_DISTRICT)
-            .state(UPDATED_STATE)
             .region(UPDATED_REGION)
             .country(UPDATED_COUNTRY)
             .createdDate(UPDATED_CREATED_DATE)

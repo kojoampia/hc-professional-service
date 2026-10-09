@@ -1,15 +1,21 @@
 package net.jojoaddison.domain;
 
+import com.fasterxml.jackson.annotation.JsonGetter;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonSetter;
 import java.io.Serializable;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import net.jojoaddison.domain.enumeration.DocumentType;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
+import net.jojoaddison.domain.enumeration.Sex;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedBy;
 import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.annotation.Transient;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -59,6 +65,98 @@ public class Profile implements Serializable {
     @Field("account_id")
     private String accountId;
 
+    @Field("title")
+    private String title;
+
+    @Field("first_name")
+    private String firstName;
+
+    @Field("middle_names")
+    private String middleNames;
+
+    @Field("last_name")
+    private String lastName;
+
+    @Field("birth_date")
+    private LocalDate birthDate;
+
+    /**
+     * {@code FEMALE} or {@code MALE}, and nothing else — typed since F9 (profile.md's Profile model
+     * types this field {@code enum} and names {@code sex.enum.ts - &#123;'FEMALE','MALE'&#125;}).
+     *
+     * <p><b>It was a free-text {@code String}</b>, so {@code &#123;"sex":"banana"&#125;} stored and
+     * answered 200 — and {@code OnboardingService.personalDetailsComplete} counted it as provided,
+     * because the only thing it could check was that there was text. An invalid value is now refused
+     * with a 400 by the binding rather than persisted; {@code ProfileEnumValueMigration} deals with
+     * what was already stored.
+     */
+    @Field("sex")
+    private Sex sex;
+
+    @Field("mobile_phone")
+    private String mobilePhone;
+
+    @Field("phone_number")
+    private String phoneNumber;
+
+    @Field("email")
+    private String email;
+
+    @Field("address")
+    private Address address;
+
+    /**
+     * Which identity document {@link #cardNumber} is the number of — typed since F9.
+     *
+     * <p>{@code profile.md} types this field {@code enum} and names its vocabulary explicitly:
+     * <b>{@code PersonalDocumentType: types.enum.ts}</b>. That is {@link DocumentType} on this side
+     * — the same nine members {@code PersonalDocument.type} already uses, which is the point: a card
+     * type and a document type are the same vocabulary and were two different ones (one of them
+     * free text) until this change. {@code &#123;"cardType":"loyalty card"&#125;} stored and
+     * answered 200.
+     *
+     * <p>⚠ It is deliberately <b>not</b> narrowed to {@code IDENTITY_TYPES}, the four
+     * {@code OnboardingService} accepts as government identity. The specification names the whole
+     * enumeration, and a narrower type here would make a value the specification admits unstorable.
+     */
+    @Field("card_type")
+    private DocumentType cardType;
+
+    @Field("card_number")
+    private String cardNumber;
+
+    /**
+     * The clinician's next of kin — <b>a list since profile.md's T1</b>, where it was a single
+     * embedded {@code emergencyContact}.
+     *
+     * <p>{@code profile.md} specifies {@code contacts: EmergencyContact[]} and requires <b>at least
+     * two</b> of them, which a single embedded object cannot express at all.
+     * {@code EmergencyContactListMigration} remaps every document written in the old shape into a
+     * one-element list; {@code OnboardingService.nextOfKinComplete} is the server's own predicate
+     * over it and says there what "complete" means for a list.
+     *
+     * <p><b>Deliberately NOT initialised to an empty list, unlike {@link #teamIds} beside it.</b>
+     * That is the single most expensive line to get wrong here, and the argument is already written
+     * out in {@code ProfilePatchFieldCoverageIT.anAbsentTeamIdsIsNotAChange}: an initialised
+     * collection is <em>never null</em> on a bound {@code Profile}, so the {@code != null} guard
+     * {@code ProfileService.applyProvidedFields} uses would fire on every partial write and
+     * <b>empty a clinician's next of kin whenever they changed a phone number</b>. Left null,
+     * "the caller sent no contacts" and "the caller sent an empty list" stay distinguishable on the
+     * only path that matters. A getter that answered an empty list instead of null would reintroduce
+     * exactly the same defect one layer up.
+     */
+    @Field("contacts")
+    private List<EmergencyContact> contacts;
+
+    @Field("status")
+    private ProfileStatus status;
+
+    @Field("specialty_category_id")
+    private String specialtyCategoryId;
+
+    @Field("team_ids")
+    private List<String> teamIds = new ArrayList<>();
+
     /**
      * Push notification preferences (MOB9).
      *
@@ -80,51 +178,6 @@ public class Profile implements Serializable {
     @Field("push_show_sender_name")
     private Boolean pushShowSenderName;
 
-    @Field("first_name")
-    private String firstName;
-
-    @Field("middle_names")
-    private String middleNames;
-
-    @Field("last_name")
-    private String lastName;
-
-    @Field("birth_date")
-    private LocalDate birthDate;
-
-    @Field("sex")
-    private String sex;
-
-    @Field("mobile_phone")
-    private String mobilePhone;
-
-    @Field("phone_number")
-    private String phoneNumber;
-
-    @Field("email")
-    private String email;
-
-    @Field("card_type")
-    private String cardType;
-
-    @Field("card_number")
-    private String cardNumber;
-
-    @Field("address")
-    private Address address;
-
-    @Field("title")
-    private String title;
-
-    @Field("emergency_contact")
-    private EmergencyContact emergencyContact;
-
-    @Field("specialty_category_id")
-    private String specialtyCategoryId;
-
-    @Field("team_ids")
-    private List<String> teamIds = new ArrayList<>();
-
     /**
      * When this profile first existed, and when it last changed, and who changed it.
      *
@@ -136,8 +189,8 @@ public class Profile implements Serializable {
      * {@code lastModifiedBy} straight onto its dashboard (backlog.md item 47 § 2b), so a write path
      * that forgot to stamp them would not fail anything here and would show a stale date over there.
      * {@code @EnableMongoAuditing} is already on in {@code DatabaseConfiguration}, so every path that
-     * saves a {@code Profile} — {@code ProfileService}, {@code OnboardingService.upsertOwnProfile},
-     * the repository directly — stamps them without knowing it has to.
+     * saves a {@code Profile} — {@code ProfileService}, the repository directly — stamps them
+     * without knowing it has to.
      *
      * <p><b>Null on every profile written before this field existed</b>, and that is left alone
      * rather than backfilled: Mongo has no migration framework here, and inventing a creation date
@@ -266,16 +319,16 @@ public class Profile implements Serializable {
         this.birthDate = birthDate;
     }
 
-    public String getSex() {
+    public Sex getSex() {
         return this.sex;
     }
 
-    public Profile sex(String sex) {
+    public Profile sex(Sex sex) {
         this.setSex(sex);
         return this;
     }
 
-    public void setSex(String sex) {
+    public void setSex(Sex sex) {
         this.sex = sex;
     }
 
@@ -318,16 +371,16 @@ public class Profile implements Serializable {
         this.email = email;
     }
 
-    public String getCardType() {
+    public DocumentType getCardType() {
         return this.cardType;
     }
 
-    public Profile cardType(String cardType) {
+    public Profile cardType(DocumentType cardType) {
         this.setCardType(cardType);
         return this;
     }
 
-    public void setCardType(String cardType) {
+    public void setCardType(DocumentType cardType) {
         this.cardType = cardType;
     }
 
@@ -370,17 +423,94 @@ public class Profile implements Serializable {
         this.title = title;
     }
 
-    public EmergencyContact getEmergencyContact() {
-        return this.emergencyContact;
+    public List<EmergencyContact> getContacts() {
+        return this.contacts;
     }
 
-    public Profile emergencyContact(EmergencyContact emergencyContact) {
-        this.setEmergencyContact(emergencyContact);
+    public Profile contacts(List<EmergencyContact> contacts) {
+        this.setContacts(contacts);
         return this;
     }
 
+    public void setContacts(List<EmergencyContact> contacts) {
+        this.contacts = contacts;
+    }
+
+    /**
+     * The singular {@code emergencyContact} this document carried until profile.md's T1, kept
+     * <b>on the wire only</b> so the clients that have not migrated yet keep working.
+     *
+     * <h2>Why a compatibility shim rather than a clean break — the reason, corrected (F-E)</h2>
+     *
+     * <p>⛔ <b>The justification that stood here had outlived its subject.</b> It read:
+     *
+     * <blockquote><i>"{@code PUT /api/onboarding/profile} is still live and still the path two
+     * shipped clients write a profile through."</i></blockquote>
+     *
+     * <p><b>That path is gone.</b> F8 retired {@code GET} and {@code PUT /api/onboarding/profile} per
+     * {@code profile.md} § Other Elements (<i>"{@code api/onboarding/profile} should migrate to
+     * {@code api/profile}"</i>); {@code OnboardingResource} now carries only {@code /progress} and the
+     * two {@code /acknowledgement} verbs, and {@code OnboardingService} four files away says so in as
+     * many words. Keeping a deprecated alias on the strength of a retired endpoint is the same shape
+     * as the false cross-product claim F-C deleted from {@code DomainEventPublisher}: a reason that
+     * reads as current because nobody re-checked its subject.
+     *
+     * <p>⭐ <b>The alias is still needed, and the mechanism is different: the clients name it on the
+     * NEW path.</b> Measured 2026-10-09 in both frontends — each builds its URL through
+     * {@code getEndpointFor('api/profile', 'professionalservice')} and each still speaks
+     * {@code emergencyContact}:
+     *
+     * <table>
+     *   <caption>The two live consumers of this alias</caption>
+     *   <tr><th>client</th><th>file</th><th>what it does</th></tr>
+     *   <tr><td>{@code mobile/}</td><td>{@code src/app/features/me/me.page.ts}</td>
+     *       <td>reads {@code profile?.emergencyContact?.name} / {@code .relationship} /
+     *           {@code .phone} and PUTs {@code emergencyContact: {…}} back</td></tr>
+     *   <tr><td>{@code web/}</td><td>{@code app/account/profile/clinical-profile.component.ts}</td>
+     *       <td>the same read and the same write, through
+     *           {@code OnboardingApiService}'s {@code profileUrl}</td></tr>
+     * </table>
+     *
+     * <p>⚠ <b>Two clients, not one</b> — F-E named only {@code mobile/}, and {@code web/}'s
+     * {@code ClinicalProfileComponent} is a second. {@code OnboardingApiService} records the pending
+     * move in its own comment. Dropping the name from the wire today would leave <em>both</em>
+     * next-of-kin forms silently unable to save: a 200 with the field quietly gone, which is
+     * precisely the "answered wrongly" failure this repository keeps closing.
+     *
+     * <p><b>It is a projection of {@link #contacts}, never a second stored field.</b> There is one
+     * {@code contacts} array in Mongo and no {@code emergency_contact} key after
+     * {@code EmergencyContactListMigration} runs. The read answers the first contact; the write puts
+     * one contact into the list.
+     *
+     * <p><b>{@code contacts} wins when a body carries both</b>, whichever order Jackson binds them
+     * in — the setter below only fills a list that is still empty. Without that guard a client
+     * round-tripping a document it had just read would have the outcome depend on field order in the
+     * JSON, which is not a contract anybody could rely on.
+     *
+     * <p>⛔ <b>Not reflected by {@code ProfilePatchFieldCoverageIT}</b>, which enumerates declared
+     * fields and sees no such field. The alias has its own named cases there instead. Retire this
+     * pair with T6, and only once <b>both</b> clients in the table above have been moved — the
+     * retirement is gated on the clients, which is a thing to measure, and no longer on an endpoint,
+     * which was a thing that had already happened.
+     *
+     * @deprecated use {@link #getContacts()}; retires with the last client that names it (T6).
+     */
+    @Deprecated(since = "profile.md T1")
+    @Transient
+    @JsonGetter("emergencyContact")
+    public EmergencyContact getEmergencyContact() {
+        return this.contacts == null || this.contacts.isEmpty() ? null : this.contacts.get(0);
+    }
+
+    /** @deprecated see {@link #getEmergencyContact()}. */
+    @Deprecated(since = "profile.md T1")
+    @JsonSetter("emergencyContact")
     public void setEmergencyContact(EmergencyContact emergencyContact) {
-        this.emergencyContact = emergencyContact;
+        if (this.contacts != null && !this.contacts.isEmpty()) {
+            // `contacts` was bound first and is the newer name; it wins. See the note above.
+            return;
+        }
+        this.contacts = emergencyContact == null ? null : new ArrayList<>(List.of(emergencyContact));
     }
 
     public String getSpecialtyCategoryId() {
@@ -407,6 +537,19 @@ public class Profile implements Serializable {
 
     public void setTeamIds(List<String> teamIds) {
         this.teamIds = teamIds;
+    }
+
+    public ProfileStatus getStatus() {
+        return this.status;
+    }
+
+    public Profile status(ProfileStatus status) {
+        this.setStatus(status);
+        return this;
+    }
+
+    public void setStatus(ProfileStatus status) {
+        this.status = status;
     }
 
     // jhipster-needle-entity-add-getters-setters - JHipster will add getters and
@@ -447,9 +590,10 @@ public class Profile implements Serializable {
                 ", cardNumber='" + getCardNumber() + "'" +
                 ", address='" + getAddress() + "'" +
                 ", title='" + getTitle() + "'" +
-                ", emergencyContact='" + getEmergencyContact() + "'" +
+                ", contacts='" + getContacts() + "'" +
                 ", specialtyCategoryId='" + getSpecialtyCategoryId() + "'" +
                 ", teamIds='" + getTeamIds() + "'" +
+                ", status='" + getStatus() + "'" +
                 "}";
     }
 

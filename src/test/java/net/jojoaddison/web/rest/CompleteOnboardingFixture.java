@@ -10,7 +10,8 @@ import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
+import net.jojoaddison.domain.enumeration.Sex;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
 
 /**
@@ -56,28 +57,88 @@ final class CompleteOnboardingFixture {
     /**
      * Satisfies the {@code consent} requirement: an application in {@code status} whose consent is
      * stamped. Callers chain whatever else their own subject needs — {@code login},
-     * {@code requestedRole}, {@code profileId}, {@code source} — none of which the contract reads.
+     * {@code authority}, {@code profileId}, {@code source} — none of which the contract reads.
      */
-    static ProfessionalApplication consentedApplication(String accountId, OnboardingStatus status) {
-        return new ProfessionalApplication().accountId(accountId).status(status).consentAcceptedAt(Instant.now());
+    static ProfessionalApplication consentedApplication(String accountId, ProfileStatus status) {
+        return new ProfessionalApplication().accountId(accountId).status(status).agreed(true).agreedDate(Instant.now());
     }
 
     /**
-     * Satisfies the {@code profile}, {@code address} and {@code nextOfKin} requirements: every field
-     * {@code personalDetailsComplete}, {@code addressComplete} and {@code nextOfKinComplete} read.
+     * Satisfies the {@code profile}, {@code address} and {@code nextOfKin} requirements <b>by the
+     * stricter of the two definitions</b> — {@link net.jojoaddison.service.ProfileCompleteness}, all
+     * 39 values — and therefore by the progress meter's three predicates as well.
+     *
+     * <h2>⭐ All 39 values since F-B, where it used to carry the meter's 14</h2>
+     *
+     * <p>It built {@code firstName}, {@code lastName}, {@code birthDate}, {@code sex},
+     * {@code mobilePhone}, {@code cardType}, {@code cardNumber}, a four-field address and two
+     * three-field contacts — exactly what {@code OnboardingService}'s advisory predicates read, and
+     * no more. <b>F-B made step 4's submit gate read {@code ProfileCompleteness} instead</b>, because
+     * {@code profile.md} conditions the move on <i>"all requirements are satisfied"</i> and the only
+     * check on that path was step 3's documents. So this fixture now also carries
+     * {@code middleNames}, {@code phoneNumber}, {@code email}, the address's
+     * {@code digitalAddress}/{@code town}/{@code district}, and a full address plus an email on each
+     * contact.
+     *
+     * <p>⚠ <b>The previous javadoc's warning no longer applies and is worth reading before it is
+     * reinstated.</b> It said adding anything beyond the meter's reading would <i>"make the fixture
+     * pass a stricter predicate than the service has, which is the direction that hides a
+     * regression"</i>. That was right while the strictest gate in the service was the meter; the
+     * service now <em>has</em> the stricter predicate and a gate that reads it, so a fixture stopping
+     * at 14 values would make every submit walk 400 and the class's own subject unreachable. The
+     * rule the warning was really about still holds: <b>this fixture must say exactly what "complete"
+     * means to the server, and no more</b> — which is why it is one file, and why
+     * {@code OnboardingProgressIT.gradesEachRequirementAsItIsSatisfied} feeds these very objects to
+     * {@code GET /api/onboarding/progress} and demands 100%.
+     *
+     * <p><b>Two contacts, each complete</b> — {@code profile.md} step 2 requires at least two, and
+     * {@code ProfileCompleteness.contactsProvided} requires <em>every</em> contact complete rather
+     * than two complete ones among however many.
      */
     static Profile completeProfile(String accountId) {
         return new Profile()
             .accountId(accountId)
             .firstName("Appli")
+            .middleNames("Nana Yaa")
             .lastName("Cant")
             .birthDate(LocalDate.of(1990, 1, 1))
-            .sex("female")
+            .sex(Sex.FEMALE)
             .mobilePhone("+233200000000")
-            .cardType("GHANACARD")
+            .phoneNumber("+233300000000")
+            .email("appli.cant@example.com")
+            .cardType(DocumentType.GHANACARD)
             .cardNumber("GHA-1")
-            .address(new Address().streetAddress("1 Road").city("Accra").region("Greater Accra").country("Ghana"))
-            .emergencyContact(new EmergencyContact().name("Ama").relationship("Sister").phone("+233200000001"));
+            .address(completeAddress())
+            // TWO contacts since F2, because profile.md step 2 requires at least two and
+            // OnboardingService.nextOfKinComplete now counts them. One satisfied the old anyMatch,
+            // so this fixture's whole point — "a profile the ACTIVE gate accepts" — stopped being
+            // true the moment that predicate changed, and nothing but this file says so.
+            //
+            // Each one COMPLETE since F-B, address and email included: the submit gate reads
+            // ProfileCompleteness, which requires every contact complete, not two complete ones.
+            .contacts(List.of(completeContact("Ama", "Sister"), completeContact("Kofi", "Brother")));
+    }
+
+    /** All seven input fields of an {@link Address} — what {@code ProfileCompleteness} requires (F-B). */
+    static Address completeAddress() {
+        return new Address()
+            .digitalAddress("GA-123-4567")
+            .streetAddress("1 Road")
+            .town("Osu")
+            .city("Accra")
+            .district("Ayawaso East")
+            .region("Greater Accra")
+            .country("Ghana");
+    }
+
+    /** One contact's eleven values: its four fields plus a full nested address (F-B). */
+    static EmergencyContact completeContact(String name, String relationship) {
+        return new EmergencyContact()
+            .name(name)
+            .relationship(relationship)
+            .email(name.toLowerCase(Locale.ROOT) + "@example.com")
+            .phone("+233200000001")
+            .address(completeAddress());
     }
 
     /**

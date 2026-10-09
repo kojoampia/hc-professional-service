@@ -12,7 +12,7 @@ import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.Conversation;
 import net.jojoaddison.domain.Message;
 import net.jojoaddison.domain.MessageRecipient;
-import net.jojoaddison.domain.enumeration.OnboardingStatus;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.repository.ConversationRepository;
 import net.jojoaddison.repository.MessageRecipientRepository;
 import net.jojoaddison.repository.MessageRepository;
@@ -170,13 +170,13 @@ public class MessagingService {
 
     /**
      * Who currently holds a clinical authority, per this service's own records. See
-     * {@code ProfessionalApplicationRepository.findByRequestedRoleAndStatus} for why that is an
+     * {@code ProfessionalApplicationRepository.findByAuthorityAndStatus} for why that is an
      * approximation of the gateway's grant.
      */
     private Set<String> resolveRole(String role) {
         Set<String> accounts = new LinkedHashSet<>();
         professionalApplicationRepository
-            .findByRequestedRoleAndStatus(role, OnboardingStatus.ACTIVE)
+            .findByAuthorityAndStatus(role, ProfileStatus.ACTIVE)
             .forEach(application -> {
                 if (application.getAccountId() != null) {
                     accounts.add(application.getAccountId());
@@ -289,11 +289,11 @@ public class MessagingService {
     public List<Recipient> recipients(String query, String role) {
         String needle = query == null ? null : query.trim().toLowerCase(java.util.Locale.ROOT);
         return professionalApplicationRepository
-            .findByStatusOrderBySubmittedAtDesc(OnboardingStatus.ACTIVE)
+            .findByStatusOrderBySubmittedAtDesc(ProfileStatus.ACTIVE)
             .stream()
             .filter(application -> application.getAccountId() != null)
-            .filter(application -> role == null || role.isBlank() || role.equalsIgnoreCase(application.getRequestedRole()))
-            .map(application -> new Recipient(application.getAccountId(), application.getLogin(), application.getRequestedRole()))
+            .filter(application -> role == null || role.isBlank() || role.equalsIgnoreCase(application.getAuthority()))
+            .map(application -> new Recipient(application.getAccountId(), application.getLogin(), application.getAuthority()))
             .filter(recipient -> needle == null || needle.isBlank() || matches(recipient, needle))
             .sorted(Comparator.comparing(Recipient::displayName, Comparator.nullsLast(Comparator.naturalOrder())))
             .toList();

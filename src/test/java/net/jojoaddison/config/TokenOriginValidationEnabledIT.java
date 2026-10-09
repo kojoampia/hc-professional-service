@@ -41,7 +41,7 @@ import org.springframework.test.web.servlet.MockMvc;
  * holds — so such a token passes the {@code .authenticated()} onboarding island. Every own-scoped read in this
  * service then resolves the caller by matching {@code Profile.accountId} against {@code sub}, which is a login:
  * human-chosen, published by the recipient directory until item 19, and self-service to register on the sibling
- * stack. {@code /api/onboarding/profile} is the narrowest reachable surface and the one used here.</p>
+ * stack. {@code /api/profile} is the narrowest reachable surface and the one used here.</p>
  *
  * <p>{@code TokenOriginValidatorUnitTest} proves the decision table. This proves the wiring: that the validator is
  * actually attached to the decoder when the property is set, and — critically — that it is layered on top of the
@@ -104,9 +104,7 @@ class TokenOriginValidationEnabledIT {
     void aTokenFromThisGatewayResolvesToTheProfessionalsProfile() throws Exception {
         // The control. Without it, the assertion below would pass just as well against a broken endpoint.
         restMockMvc
-            .perform(
-                get("/api/onboarding/profile").header("Authorization", "Bearer " + token(OUR_ISSUER, OUR_AUDIENCE, COLLIDING_LOGIN, 3600))
-            )
+            .perform(get("/api/profile").header("Authorization", "Bearer " + token(OUR_ISSUER, OUR_AUDIENCE, COLLIDING_LOGIN, 3600)))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.accountId").value(LOCAL_ACCOUNT_ID));
     }
@@ -117,10 +115,7 @@ class TokenOriginValidationEnabledIT {
         // authorities a hc-patient account really holds. Before the iss claim there was nothing to tell it apart.
         restMockMvc
             .perform(
-                get("/api/onboarding/profile").header(
-                    "Authorization",
-                    "Bearer " + token("hc-patient-gateway", "hc-patient", COLLIDING_LOGIN, 3600)
-                )
+                get("/api/profile").header("Authorization", "Bearer " + token("hc-patient-gateway", "hc-patient", COLLIDING_LOGIN, 3600))
             )
             .andExpect(status().isUnauthorized());
     }
@@ -135,10 +130,7 @@ class TokenOriginValidationEnabledIT {
 
         restMockMvc
             .perform(
-                get("/api/onboarding/profile").header(
-                    "Authorization",
-                    "Bearer " + token("hc-patient-gateway", "hc-patient", COLLIDING_LOGIN, 3600)
-                )
+                get("/api/profile").header("Authorization", "Bearer " + token("hc-patient-gateway", "hc-patient", COLLIDING_LOGIN, 3600))
             )
             .andExpect(status().isUnauthorized());
 
@@ -157,7 +149,7 @@ class TokenOriginValidationEnabledIT {
     void aTokenWithoutTheClaimsIsRejected() throws Exception {
         // Every token this stack minted before 2026-09-06. Exactly why the flag defaults to off.
         restMockMvc
-            .perform(get("/api/onboarding/profile").header("Authorization", "Bearer " + token(null, null, COLLIDING_LOGIN, 3600)))
+            .perform(get("/api/profile").header("Authorization", "Bearer " + token(null, null, COLLIDING_LOGIN, 3600)))
             .andExpect(status().isUnauthorized());
     }
 
@@ -167,7 +159,7 @@ class TokenOriginValidationEnabledIT {
         // check without delegating to JwtValidators.createDefault() would stop expiry being enforced at all.
         restMockMvc
             .perform(
-                get("/api/onboarding/profile").header(
+                get("/api/profile").header(
                     "Authorization",
                     // An hour past, not a minute: JwtTimestampValidator allows 60 seconds of clock skew by default,
                     // so a token expiring 60 seconds ago sits exactly on the boundary this test depends on.
