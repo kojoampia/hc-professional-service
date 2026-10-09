@@ -128,6 +128,11 @@ public class ProfessionalApplicationResource {
      *     {@link OnboardingService#CONSENT_REQUIRED}.
      * @param authority the role string applied for. A {@code String} because {@code Authority} is
      *     the gateway's class and this service holds only the role (profile.md § Gap Update).
+     *     <b>Validated against the eight professional disciplines on all three writes</b>, in the
+     *     service rather than here, because all three go through it and a check per handler is the
+     *     shape that acquires a fourth handler without one — see
+     *     {@code OnboardingService.refuseAnAuthorityThatIsNotADiscipline}. A body naming none is
+     *     unchanged: absent is not invalid.
      * @param source the careers attribution, e.g. {@code web-careers}; read by the review queue and
      *     the WP7 funnel count (careers-handoff-contract.md § 3). <b>Owned by the create, and
      *     refused rather than ignored on the other two (F-F)</b> — see

@@ -10,13 +10,20 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * What the two authority arrays name, asserted rather than read.
+ * What the authority arrays name, asserted rather than read.
  *
  * <p>{@link AuthoritiesConstants#CLINICAL_MUTATION} and {@link AuthoritiesConstants#CLINICAL_AND_ADMIN}
  * are the whole of this service's own authorization rules, and {@code ClinicalAuthorityMatrixIT}
  * exercises them through real requests. What that test cannot do is notice a <em>removal</em>: it
  * names a role per case, so an authority taken out of an array leaves the cases that covered it
  * passing for the wrong reason, or leaves no case at all. This class writes the memberships down.
+ *
+ * <p>⚠ <b>{@link AuthoritiesConstants#PROFESSIONAL_DISCIPLINES} is a third array and is not one of
+ * those rules.</b> Nothing is gated on holding one of its members — it is the vocabulary of a
+ * <em>request</em> for an authority, which {@code OnboardingService} validates step 4's write
+ * against. It is asserted here all the same, and for the stronger version of the reason above: it is
+ * derived from {@code CLINICAL_AND_ADMIN}, so only a literal expectation can notice the derivation
+ * going wrong.
  *
  * <p>Its sibling is {@code hc-patient}'s {@code AuthoritiesConstantsUnitTest}, and the pair is the
  * only thing holding the two repositories' spelling of "any clinician" together — they share no
@@ -59,6 +66,40 @@ class AuthoritiesConstantsUnitTest {
             "ROLE_PARAMEDIC",
             "ROLE_PHARMACIST",
             "ROLE_THERAPIST"
+        );
+    }
+
+    /**
+     * The requestable set is the eight disciplines — the administrator is not one of them.
+     *
+     * <p>⭐ <b>Literal strings for the same reason the two arrays above use them</b>, and it matters
+     * more here: {@link AuthoritiesConstants#PROFESSIONAL_DISCIPLINES} is <em>derived</em> from
+     * {@link AuthoritiesConstants#CLINICAL_AND_ADMIN}, so asserting it against that array would
+     * restate the derivation and pass however wrong the result was. These are the values
+     * {@code ProfessionalApplication.authority} may hold, and {@code ProfessionalApplicationResourceIT}
+     * proves the gate admits each of them by iterating this constant rather than listing them again.
+     *
+     * <p>⚠ <b>{@code ROLE_ADMIN} and {@code ROLE_USER} are asserted absent separately</b>, below and
+     * here: a clinician may not request the reviewer's own authority through the field the reviewer
+     * acts on, and {@code ROLE_USER} is what every applicant already holds and names no discipline.
+     */
+    @Test
+    void theRequestableAuthoritiesAreTheEightDisciplinesWithoutTheAdministrator() {
+        assertThat(AuthoritiesConstants.PROFESSIONAL_DISCIPLINES).containsExactlyInAnyOrder(
+            "ROLE_DOCTOR",
+            "ROLE_NURSE",
+            "ROLE_PARAMEDIC",
+            "ROLE_PHARMACIST",
+            "ROLE_THERAPIST",
+            "ROLE_CARER",
+            "ROLE_CHEMIST",
+            "ROLE_TECHNICIAN"
+        );
+        assertThat(AuthoritiesConstants.PROFESSIONAL_DISCIPLINES).doesNotContain(
+            AuthoritiesConstants.ADMIN,
+            AuthoritiesConstants.USER,
+            AuthoritiesConstants.PATIENT,
+            AuthoritiesConstants.ANONYMOUS
         );
     }
 

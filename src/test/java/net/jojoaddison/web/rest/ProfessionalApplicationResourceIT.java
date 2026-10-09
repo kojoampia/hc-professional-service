@@ -19,6 +19,7 @@ import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.AuthoritiesConstants;
 import net.jojoaddison.security.WithMockGatewayUser;
 import net.jojoaddison.service.OnboardingService;
 import org.junit.jupiter.api.AfterEach;
@@ -461,6 +462,149 @@ class ProfessionalApplicationResourceIT {
             .perform(put(BASE + "/me/submit").contentType(MediaType.APPLICATION_JSON).content("{\"agreed\":true}"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.detail").value(containsString("authority")));
+    }
+
+    // --- The authority is validated against the eight professional disciplines --------------------
+
+    /**
+     * ⛔ <b>{@code {"agreed":true,"authority":"banana"}} is a 400 on every path that writes one</b> —
+     * the create, Save and Submit.
+     *
+     * <p>All three stored it and answered 2xx before, after which the review queue rendered
+     * {@code healthConnect.roles.banana} — the raw translation key, mid-screen, in all four locales —
+     * and the review-detail page handed the value to the gateway's {@code grantAuthority}. ⚠ Each path
+     * is asserted separately even though the gate is on one service method, because the three reach it
+     * through different handlers and one of them is a different service method: a check wired into two
+     * of the three would leave the third storing the value with every test here green.
+     *
+     * <p><b>The storage assertions are the point, not the status.</b> The create must leave no
+     * application at all, and Save must leave the authority the application already held — a 400 that
+     * stored first would put a non-member in the field the reviewer acts on and merely tell the caller
+     * about it.
+     */
+    @Test
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
+    void anAuthorityOutsideTheEightIsRefusedOnEveryWritePath() throws Exception {
+        String banana = "{\"authority\":\"banana\",\"agreed\":true}";
+
+        restMockMvc
+            .perform(post(BASE).contentType(MediaType.APPLICATION_JSON).content(banana))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value(containsString("authority")));
+        assertThat(applicationRepository.findByAccountId(accountIdFor(APPLICANT))).as("a refused create stores nothing").isEmpty();
+
+        readyToSubmit();
+
+        restMockMvc
+            .perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content(banana))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value(containsString("authority")));
+        restMockMvc
+            .perform(put(BASE + "/me/submit").contentType(MediaType.APPLICATION_JSON).content(banana))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value(containsString("authority")));
+
+        ProfessionalApplication stored = applicationRepository.findByAccountId(accountIdFor(APPLICANT)).orElseThrow();
+        assertThat(stored.getAuthority()).as("neither refusal reached the field the reviewer acts on").isEqualTo("ROLE_NURSE");
+        assertThat(stored.getStatus()).as("and nothing advanced").isEqualTo(ProfileStatus.PROFILE_COMPLETED);
+    }
+
+    /**
+     * ⭐ <b>Every one of the eight is accepted, read from
+     * {@link AuthoritiesConstants#PROFESSIONAL_DISCIPLINES} rather than listed here.</b>
+     *
+     * <p>So a ninth discipline is covered on the day it is added to this service's own copy of the
+     * authorities, with nobody having edited this file — the reason
+     * {@code JhipsterEnumFieldValuesTest} derives its expectations too. The literal eight are written
+     * down in {@code AuthoritiesConstantsUnitTest}, which is where a <em>removal</em> has to be
+     * noticed; a derived loop cannot see one, and a derived loop is what proves the gate admits
+     * whatever that constant says.
+     *
+     * <p>Through Save rather than the create, because Save is the repeatable write and can therefore
+     * carry all eight in one application's lifetime. It stays in {@code PROFILE_COMPLETED} throughout:
+     * {@code readyToSubmit} leaves the profile short of nothing, so the last discipline would advance
+     * it — hence the blanked {@code phoneNumber}, which keeps every iteration identical.
+     */
+    @Test
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
+    void everyProfessionalDisciplineIsAccepted() throws Exception {
+        Profile profile = readyToSubmit();
+        profileRepository.save(profile.phoneNumber(null));
+
+        assertThat(AuthoritiesConstants.PROFESSIONAL_DISCIPLINES).as("the derived set is not empty, or this asserts nothing").isNotEmpty();
+
+        for (String discipline : AuthoritiesConstants.PROFESSIONAL_DISCIPLINES) {
+            restMockMvc
+                .perform(
+                    put(BASE + "/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"authority\":\"" + discipline + "\",\"agreed\":true}")
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.authority").value(discipline));
+        }
+    }
+
+    /**
+     * ⛔ <b>{@code ROLE_ADMIN} and {@code ROLE_USER} are refused by name.</b>
+     *
+     * <p>Neither is a requestable role and the two fail differently if the gate is written as "any
+     * authority this service knows about": {@code ROLE_USER} is what every applicant already holds, so
+     * accepting it would put a non-discipline in the reviewer's field through a value the token
+     * already carries — and <b>{@code ROLE_ADMIN} is an applicant asking to be granted the reviewer's
+     * own authority</b>, in the field {@code review-detail-page.component.ts} passes to the gateway's
+     * {@code grantAuthority}. {@code web}'s {@code careers-handoff.service.ts} excludes exactly these
+     * two from its {@code KNOWN_TRACKS} for the same reason.
+     *
+     * <p>Spelled as literals, deliberately: these are the values that must <em>not</em> be accepted,
+     * and deriving them from the same constant the gate derives its allow-list from would assert
+     * nothing.
+     */
+    @Test
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
+    void theAdministratorAndBaseUserAuthoritiesAreNotRequestable() throws Exception {
+        for (String refused : java.util.List.of("ROLE_ADMIN", "ROLE_USER")) {
+            restMockMvc
+                .perform(post(BASE).contentType(MediaType.APPLICATION_JSON).content("{\"authority\":\"" + refused + "\",\"agreed\":true}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(containsString("authority")));
+            assertThat(applicationRepository.findByAccountId(accountIdFor(APPLICANT))).isEmpty();
+        }
+    }
+
+    /**
+     * ⚠ <b>Naming no authority at all is unchanged by the gate — absent is not invalid.</b>
+     *
+     * <p>{@code careers-handoff-contract.md} has the client <b>drop</b> an unknown {@code ?track=}
+     * rather than raise, <i>"and the page still works with no parameters at all"</i>, so a body naming
+     * nothing is the contract working rather than an error to discover on the server. Both of the
+     * paths that tolerate one are asserted — the create answers <b>201 with {@code authority} null</b>
+     * and Save answers <b>200, stored and unadvanced</b> — because turning either into a 400 would be
+     * invisible here otherwise. Submit's refusal is the third case and is
+     * {@link #aSubmissionNamingNoAuthorityIsRefused}, which predates this gate and is left where it
+     * is.
+     *
+     * <p>⭐ <b>A blank string counts as absent</b>, by the same {@code hasText} the submission gate
+     * uses. One definition of absence in the file rather than two: a second one would make
+     * {@code "authority":""} a 400 on Save where it is a 200 today, which is the <em>create</em> half
+     * of the behaviour this case exists to pin.
+     */
+    @Test
+    @WithMockGatewayUser(login = APPLICANT, authorities = { "ROLE_USER" })
+    void aWriteNamingNoAuthorityBehavesAsItDidBefore() throws Exception {
+        Profile profile = profileRepository.save(CompleteOnboardingFixture.completeProfile(accountIdFor(APPLICANT)));
+
+        restMockMvc
+            .perform(post(BASE).contentType(MediaType.APPLICATION_JSON).content("{\"agreed\":true}"))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.authority").doesNotExist());
+        assertThat(applicationRepository.findByAccountId(accountIdFor(APPLICANT)).orElseThrow().getAuthority()).isNull();
+
+        profileRepository.save(profile.phoneNumber(null));
+        restMockMvc
+            .perform(put(BASE + "/me").contentType(MediaType.APPLICATION_JSON).content("{\"agreed\":true,\"authority\":\"\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("APPLICATION_STARTED"));
     }
 
     // --- F-F: `source` belongs to the create ------------------------------------------------------

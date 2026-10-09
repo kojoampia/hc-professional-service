@@ -75,16 +75,27 @@ class ProfileStatusEventTest {
     }
 
     /**
-     * {@code accountId} is the gateway's identifier; {@code subject.login} is this database's.
+     * {@code accountId} is the gateway's identifier, and it is the <b>only</b> identifier the frame
+     * carries.
      *
-     * <p>This is the assertion that stops the two being collapsed into one. The specified contract
-     * names {@code accountId} and means {@code User.id}; every identifier stored in this service is
-     * a login. If a later change ever publishes the login under {@code accountId} again — which is
-     * what this code did until 2026-09-08 — the field silently changes meaning for a consumer that
-     * keys its directory on {@code User.id}, and it looks correct from here.
+     * <p>This is the assertion that stops the login being published under a name that means
+     * {@code User.id}. The specified contract names {@code accountId} and means the gateway's
+     * identifier; this service stored a login under that name until backlog.md item 50 migrated the
+     * rows. If a later change ever publishes the login there again — which is what this code did
+     * until 2026-09-08 — the field silently changes meaning for a consumer that keys its directory
+     * on {@code User.id}, and it looks correct from here.
      *
-     * <p>The login is still published, in {@code subject.login}, and is still the join that works
-     * until the {@code uid} claim has outlived a remember-me token.
+     * <p>⛔ <b>There is no second identifier to fall back to, and this javadoc said there was.</b> It
+     * read <i>"the login is still published, in {@code subject.login}, and is still the join that
+     * works"</i>. Measured against the code the test exercises: {@code ProfessionalEvent.Subject} is
+     * {@code (email, accountId)} — <b>it has no {@code login} component at all</b>, item 50 having
+     * removed it — and {@code publishProfileStatus} builds
+     * {@code new ProfessionalEvent.Subject(null, accountId)}, so the only other component is null from
+     * this service by the identifiers-only payload rule. <b>The test body was already right</b>; it
+     * asserts the two {@code accountId} readings and that neither is the login, which is the whole of
+     * what a consumer can correlate on. Removing the login from both event halves is what forced the
+     * migration — with it gone there was no second key left, which is the opposite of what the
+     * sentence offered as reassurance.
      */
     @Test
     void theAccountIdIsTheGatewaysIdentifierAndNotTheLogin() {

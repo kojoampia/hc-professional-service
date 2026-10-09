@@ -56,22 +56,22 @@ public record ProfessionalEvent(
     public static final int VERSION = 1;
 
     /**
-     * Who the event is about.
+     * Who the event is about, named by <b>one</b> identifier.
+     *
+     * <p>⛔ <b>A superseded copy of this javadoc sat above it until 2026-10-09 and asserted the
+     * opposite.</b> It read <i>"the two producers do not fill it with the same thing, and that is a
+     * live defect … the gateway publishes {@code User.id} and this service publishes the login,
+     * because the JWT carries no uid claim"</i> — refuted by backlog.md item 50, which added the
+     * {@code uid} claim and migrated the stored rows, so both producers key on {@code User.id}. Only
+     * the last javadoc block on a declaration binds, so it compiled, rendered nowhere, and read as
+     * current to anyone scrolling the file. It is deleted rather than corrected, because the
+     * paragraphs below already say what is true — and its one surviving sentence, the correlation-key
+     * paragraph that follows, is folded in here rather than lost with it.
      *
      * <p>{@code accountId} is the correlation key on this topic and has been since WP3 — the gateway
-     * keys {@code registration.created} on it and hc-admin's {@code DirectoryLink.external_key}
-     * holds it for every clinician it knows. Moving the correlation onto the email to match
-     * hc-patient's key would give one clinician two links.
-     *
-     * <p><b>The two producers do not fill it with the same thing</b>, and that is a live defect
-     * rather than a nuance: the gateway publishes {@code User.id} and this service publishes the
-     * login, because the JWT carries no uid claim. See
-     * {@link DomainEventPublisher#publishProfileStatus} and backlog.md item 47 § 2b.
-     *
-     * @param email always null from this service; see the class comment.
-     */
-    /**
-     * Who the event is about, named by <b>one</b> identifier.
+     * keys {@code registration.created} on it and hc-admin's {@code DirectoryLink.external_key} holds
+     * it for every clinician it knows. Moving the correlation onto the email to match hc-patient's key
+     * would give one clinician two links.
      *
      * <p><b>{@code accountId} is the gateway's {@code User.id}, and it is the only join.</b> This
      * record carried a {@code login} beside it until 2026-09-08, and a consumer could correlate on

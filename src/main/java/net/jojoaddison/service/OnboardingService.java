@@ -17,6 +17,7 @@ import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.security.AuthoritiesConstants;
 import net.jojoaddison.service.dto.OnboardingProgressDTO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -79,6 +80,16 @@ public class OnboardingService {
      * this constant rather than a copy of its text.
      */
     public static final String CONSENT_REQUIRED = "Consent must be accepted to start an application";
+
+    /**
+     * Refusal prefix when a write names an {@code authority} that is not one of the eight professional
+     * disciplines; the accepted values follow.
+     *
+     * <p>Public and asserted rather than copied, for the reason {@link #CONSENT_REQUIRED} gives. It
+     * names the field because the three writes that can raise it carry two other components and a
+     * caller has to be told which one was refused.
+     */
+    public static final String AUTHORITY_MUST_BE_A_PROFESSIONAL_DISCIPLINE = "authority must be one of the professional disciplines";
 
     private static final Logger log = LoggerFactory.getLogger(OnboardingService.class);
 
@@ -154,7 +165,10 @@ public class OnboardingService {
      *     now two identifiers and the caller passes each explicitly.
      * @param authority the role string being applied for. Named {@code requestedRole} until T3;
      *     {@code profile.md} § Gap Update renamed it and kept it a {@code String}, because
-     *     {@code Authority} is the gateway's class and this service holds only the role.
+     *     {@code Authority} is the gateway's class and this service holds only the role. <b>Refused
+     *     with 400 unless it is one of the eight professional disciplines</b>, or absent — see
+     *     {@link #refuseAnAuthorityThatIsNotADiscipline}, which is also where "absent is not invalid"
+     *     is argued.
      * @param agreed the consent tick. Named {@code consentAccepted} until T3.
      */
     public ProfessionalApplication startApplication(
@@ -168,6 +182,7 @@ public class OnboardingService {
         if (!agreed) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, CONSENT_REQUIRED);
         }
+        refuseAnAuthorityThatIsNotADiscipline(authority);
         applicationRepository
             .findByAccountId(accountId)
             .ifPresent(existing -> {
@@ -367,7 +382,9 @@ public class OnboardingService {
      * @param accountId the caller's gateway {@code User.id}.
      * @param agreed step 4's consent tick; {@code false} is refused on both paths — a withheld tick
      *     is a different answer from an unfinished form.
-     * @param authority the role string being applied for.
+     * @param authority the role string being applied for. A value outside the eight professional
+     *     disciplines is refused with 400 on both paths, before anything is stored; <b>no</b> value at
+     *     all still stores and stays put — see {@link #refuseAnAuthorityThatIsNotADiscipline}.
      */
     public ProfessionalApplication saveConsent(String accountId, boolean agreed, String authority) {
         return storeThenAdvanceWhenComplete(accountId, agreed, authority, false);
@@ -425,6 +442,9 @@ public class OnboardingService {
         if (!agreed) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, CONSENT_REQUIRED);
         }
+        // Before the lookup, as the consent check above already is: both are questions about the body,
+        // and a refused body should not depend on whether the caller has an application yet.
+        refuseAnAuthorityThatIsNotADiscipline(authority);
         ProfessionalApplication application = getOwnApplication(accountId);
 
         // --- Store. Unconditional on both paths, and BEFORE any completeness question: the owner's
@@ -825,6 +845,59 @@ public class OnboardingService {
 
     private static boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    /**
+     * ⛔ <b>An {@code authority} that is not one of the eight professional disciplines is refused with
+     * 400, on every path that writes one</b> — the create, Save and Submit.
+     *
+     * <p>Nothing validated it before: {@code {"agreed":true,"authority":"banana"}} stored and answered
+     * 201, after which the review queue rendered {@code healthConnect.roles.banana} — the raw
+     * translation key, mid-screen, in all four locales — and the review-detail page handed the value
+     * to the gateway's {@code grantAuthority}. ⚠ The field a reviewer acts on is the one an applicant
+     * writes, which is why this is a write gate and not a rendering fix.
+     *
+     * <h2>⭐ The valid set is derived, not listed here</h2>
+     *
+     * <p>{@link AuthoritiesConstants#PROFESSIONAL_DISCIPLINES} is {@code CLINICAL_AND_ADMIN} minus the
+     * administrator, so a ninth discipline is accepted the day it is added to this service's own copy
+     * of the authorities and nobody edits this method. {@code ROLE_ADMIN} and {@code ROLE_USER} are
+     * outside it by that construction rather than by a clause — see that constant.
+     *
+     * <h2>⚠ Absent is not invalid, and this method is where the two are kept apart</h2>
+     *
+     * <p>A write naming <em>no</em> authority behaves exactly as it did: the create stores
+     * {@code null} and answers 201, Save stores and stays put, and Submit refuses through
+     * {@link #unsatisfiedRequirements} with {@code authority} among the missing keys. That matters
+     * beyond tidiness — {@code careers-handoff-contract.md} has the client <b>drop</b> an unknown
+     * {@code ?track=} rather than raise, <i>"and the page still works with no parameters at all"</i>,
+     * so a body that names nothing is the contract working and a body that names {@code "banana"} is
+     * the backstop firing. <b>Blank counts as absent</b>, by {@link #hasText} — the same definition of
+     * absence the submission gate already uses, rather than a second one that would make {@code ""} a
+     * 400 on Save where it is currently a 200.
+     *
+     * <h2>⭐ Reads are deliberately not validated</h2>
+     *
+     * <p>A filter is not a write. The two places an authority arrives as a <em>query</em> are
+     * {@code MessagingResource}'s recipient picker ({@code ?role=}) and its role broadcast, both
+     * reaching {@code ProfessionalApplicationRepository.findByAuthorityAndStatus}; a non-member there
+     * matches nothing and <b>answers empty</b>, which is the truthful answer — no active professional
+     * holds it — and the broadcast separately refuses an empty match with its own 400. Refusing the
+     * read instead would make a filter able to fail on data the server itself stored before this gate
+     * existed, and the quality database holds exactly such a row. ⚠ <b>The review queue does not
+     * filter by authority at all</b> — {@code GET /api/professional-application} takes
+     * {@code ?status=} and nothing else — so there is no admin read to decide about.
+     */
+    private static void refuseAnAuthorityThatIsNotADiscipline(String authority) {
+        if (!hasText(authority)) {
+            return;
+        }
+        if (!List.of(AuthoritiesConstants.PROFESSIONAL_DISCIPLINES).contains(authority)) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                AUTHORITY_MUST_BE_A_PROFESSIONAL_DISCIPLINE + ": " + String.join(", ", AuthoritiesConstants.PROFESSIONAL_DISCIPLINES)
+            );
+        }
     }
 
     private static boolean personalDetailsComplete(Profile profile) {
