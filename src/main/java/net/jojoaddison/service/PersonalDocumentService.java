@@ -2,7 +2,6 @@ package net.jojoaddison.service;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.List;
 import java.util.Optional;
 import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
@@ -242,26 +241,28 @@ public class PersonalDocumentService {
             .map(personalDocumentRepository::save);
     }
 
-    /**
-     * Get all the personalDocuments.
-     *
-     * @return the list of entities.
-     */
-    public List<PersonalDocument> findAll() {
-        log.debug("Request to get all PersonalDocuments");
-        return personalDocumentRepository.findAll();
-    }
-
-    /**
-     * Get one personalDocument by id.
-     *
-     * @param id the id of the entity.
-     * @return the entity.
-     */
-    public Optional<PersonalDocument> findOne(String id) {
-        log.debug("Request to get PersonalDocument : {}", id);
-        return personalDocumentRepository.findById(id);
-    }
+    // ⛔ THIS SERVICE HAS NO FIND METHODS, and S1 is what took them (backlog.md row 226,
+    // profile-addendum.md § 4 S1). `findAll()`, `findOne(String)` and `findAllByProfileId(String)`
+    // stood here; each had exactly one caller — the matching unowned GET on PersonalDocumentResource,
+    // which returned `data` inline to any authenticated caller with no owner check. The reads a product
+    // surface actually makes are subject-scoped: OwnPersonalDocumentResource's own list and byte
+    // stream, and ProfessionalApplicationResource.applicationDocuments for a reviewer's list — all of
+    // them reaching PersonalDocumentRepository.findByProfileId or findById directly, behind an
+    // ownership check. `PersonalDocumentRepository.findAllByProfileId` went with them: it was a
+    // duplicate of findByProfileId with no remaining caller, and a dead finder of exactly the shape
+    // just removed is how an unowned read gets rebuilt by somebody who never read this comment.
+    //
+    // ⚠ "NO FIND METHODS" IS NOT "NOTHING HERE RETURNS A DOCUMENT", and the difference is a residue
+    // rather than a quibble: `partialUpdate` above merges the body onto the stored row and RETURNS THAT
+    // ROW, which PersonalDocumentResource's PATCH handler serialises in full — `data` included — so a
+    // merge-patch carrying only `id` is a read of one document by any of the six CLINICAL_MUTATION
+    // authorities, with no ownership check anywhere on the path. Measured on this branch as ROLE_NURSE
+    // against a foreign profileId: 200 with the base64 bytes. Row 227 decides it; do not add a check
+    // here on the strength of this comment, and do not conflate it with item 46's PUT, which blanks the
+    // bytes instead of echoing them.
+    //
+    // A reader asking "what does this professional hold now" wants `isLive` above and one of the
+    // repository's two surviving finders, not a general find-everything on the collection.
 
     /**
      * Delete the personalDocument by id.
@@ -271,10 +272,5 @@ public class PersonalDocumentService {
     public void delete(String id) {
         log.debug("Request to delete PersonalDocument : {}", id);
         personalDocumentRepository.deleteById(id);
-    }
-
-    public List<PersonalDocument> findAllByProfileId(String profileId) {
-        log.debug("Request to get all PersonalDocuments by profileId : {}", profileId);
-        return personalDocumentRepository.findAllByProfileId(profileId);
     }
 }

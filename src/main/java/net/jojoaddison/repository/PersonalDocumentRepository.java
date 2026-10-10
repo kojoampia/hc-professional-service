@@ -1,6 +1,5 @@
 package net.jojoaddison.repository;
 
-import java.util.List;
 import net.jojoaddison.domain.PersonalDocument;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
@@ -33,6 +32,8 @@ public interface PersonalDocumentRepository extends MongoRepository<PersonalDocu
         net.jojoaddison.domain.enumeration.DocumentType type,
         java.time.LocalDate date
     );
-
-    List<PersonalDocument> findAllByProfileId(String profileId);
+    // `findAllByProfileId` stood here and is gone with S1 (backlog.md row 226). It was a second
+    // spelling of findByProfileId above, and its only caller was PersonalDocumentService's read of the
+    // same name, which backed the unowned GET /api/personal-documents/profile/{profileId}. Two finders
+    // for one query is how the next unowned read gets written without anyone noticing it is one.
 }

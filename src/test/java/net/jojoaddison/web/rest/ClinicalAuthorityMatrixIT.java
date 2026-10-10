@@ -1,5 +1,6 @@
 package net.jojoaddison.web.rest;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
@@ -7,6 +8,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.Arrays;
+import java.util.Set;
+import java.util.stream.Collectors;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.security.WithMockGatewayUser;
@@ -14,8 +18,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 /**
  * WP1 gate (professional-onboarding-workflow.md §Authorities): the server —
@@ -38,6 +44,15 @@ import org.springframework.test.web.servlet.MockMvc;
  * {@code ProfileResourceIT} and {@code OwnProfilePathIT} hold the endpoints' own cases;
  * what this class holds is the <i>matrix</i> view — that the refusal applies to a clinician and to a
  * role-less applicant alike.
+ *
+ * <p><b>⚠ And one surface has no {@code GET} mapping left, which is not an exception to the read rule
+ * but is held here.</b> The three unowned {@code GET}s on {@code /api/personal-documents} are
+ * <b>deleted</b> — S1, backlog.md row 226 — so the cases for them assert 405 and 404 rather than 403:
+ * a refusal would mean a handler that still exists. <b>Deleted and gated are different claims</b>, and
+ * this class is where the difference is visible, with a positive control beside them so an application
+ * that answers nothing cannot read as a successful deletion. ⛔ <b>"No {@code GET} mapping" is not "no
+ * read"</b>: that resource's {@code PATCH} still answers with a whole document and is backlog.md row
+ * 227, named in the section comment and deliberately asserted nowhere.
  *
  * <p><b>And the matrix has exceptions, which are part of it.</b> Four prefixes sit above the
  * {@code POST /api/**} rule in {@code SecurityConfiguration} — onboarding, messaging, notifications
@@ -399,8 +414,10 @@ class ClinicalAuthorityMatrixIT {
     // THE RULE HERE IS A PREFIX AND /api/profile's IS NOT, which is the one real difference: this
     // path has a sub-resource, /{id}/content, the only route by which document bytes leave the
     // service. A prefix is a widening, so the cases below assert where it STOPS as carefully as they
-    // assert what it admits — above all that it does not reach /api/personal-documents, PLURAL, whose
-    // three GETs return `data` inline with no ownership check at all (profile-addendum.md S1).
+    // assert what it admits — above all that it does not reach /api/personal-documents, PLURAL, which
+    // since S1 closed (backlog.md row 226) is the write-only admin data-maintenance surface for any
+    // clinician's documents. Its three unowned GETs are DELETED, not gated, and the cases at the end of
+    // this section are what holds them deleted.
 
     /**
      * An applicant lists their own documents. <b>Not a 403</b> is the assertion; the 400 is
@@ -456,12 +473,15 @@ class ClinicalAuthorityMatrixIT {
      * {@code /api/profile}, because {@code PersonalDocumentResource}'s writes are the only thing
      * keeping a role-less account off a surface that edits and deletes any clinician's documents.
      *
-     * <p>⚠ <b>Asserted on the WRITES, not on the reads, and that is deliberate.</b> The plural
-     * {@code GET}s already answer a role-less caller today — they carry no {@code @PreAuthorize} and
-     * fall to {@code /api/** -> .authenticated()}, which is standing defect S1 and is not this task's
-     * to close. So a {@code GET} here could not tell a widened matcher from the existing hole. The
-     * mutation matrix is the discriminator: if the new rule reached the plural path these would be
-     * admitted to the handler instead of refused.
+     * <p>⚠ <b>Asserted on the WRITES, and until S1 closed that was the only place it could be
+     * asserted.</b> The plural {@code GET}s used to answer a role-less caller — no
+     * {@code @PreAuthorize}, falling to {@code /api/** -> .authenticated()} — so a {@code GET} here
+     * could not tell a widened matcher from the existing hole, and this javadoc said so and named S1 as
+     * open. <b>It is closed</b> (backlog.md row 226): the three reads are deleted, and
+     * {@link #thePluralDocumentReadsDoNotExistForARoleLessApplicant} and its two siblings below are the
+     * read cases this paragraph said could not be written. The writes remain the discriminator for
+     * <em>this</em> case, because they are the only verbs the plural path still answers at all: if the
+     * singular rule reached it, these three would be admitted to the handler instead of refused.
      */
     @Test
     @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
@@ -485,6 +505,187 @@ class ClinicalAuthorityMatrixIT {
         restMockMvc
             .perform(post("/api/personal-documents").contentType(MediaType.APPLICATION_JSON).content("{}"))
             .andExpect(status().isForbidden());
+    }
+
+    // --- The plural GET MAPPINGS are gone, and these are the cases that could not be written before -
+    //
+    // S1, closed by backlog.md row 226. `PersonalDocumentResource` carried GET "", GET /{id} and
+    // GET /profile/{profileId}, none of them annotated, all three returning `data` INLINE — and
+    // `PersonalDocument.data` is a bare byte[] with no @JsonProperty restriction, so the document
+    // itself was on the wire. Measured on the quality stack as the seeded `carer`, an account with no
+    // Profile at all: GET /api/personal-documents answered 200 with 2,401,251 bytes — five documents
+    // under one profile that was not the caller's, CERTIFICATE/LICENSE/PASSPORT/GHANACARD/PASSPHOTO —
+    // and GET /api/personal-documents/{id} answered 200 with 281,395 bytes. The three gateways share
+    // one signing key and validate-origin is false, so the caller could as easily have been an
+    // hc-admin or hc-patient account.
+    //
+    // WHAT THESE CASES ASSERT IS THAT NO `GET` MAPPING ANSWERS ANYBODY, which is why there is a case
+    // per authority band and no 403 anywhere in them: a 403 would mean a rule refusing a handler that
+    // still exists. ⚠ IT IS NOT THE CLAIM THAT THIS RESOURCE CANNOT BE READ. PATCH /{id} returns the
+    // merged row through `wrapOrNotFound`, so a merge-patch body carrying only `id` answers 200 with
+    // the whole document, `data` included — measured as ROLE_NURSE against a foreign profileId — which
+    // is a read reachable by the six CLINICAL_MUTATION authorities for an id they already hold. That
+    // residue is backlog.md row 227's and is deliberately NOT asserted here: a test pinning it in place
+    // would be worse than the row naming it.
+    //
+    // These statuses are DISPATCH answers reached THROUGH `/api/** -> .authenticated()`, and the two
+    // values differ for a reason worth keeping:
+    //
+    //   405 on "" and /{id}      — the path pattern still matches, because POST is mapped on one and
+    //                              PUT/PATCH/DELETE on the other, so Spring rejects the METHOD, and the
+    //                              `Allow` header carries the inventory of what is left. Asserted below
+    //                              as a SET: three observations of /{id} gave three different orders
+    //                              ("PUT, PATCH, DELETE", "PATCH, DELETE, PUT", "DELETE, PUT, PATCH"),
+    //                              so the order is not a property of the response and must not be
+    //                              quoted. An earlier version of this comment quoted one of them.
+    //   404 on /profile/{id}     — nothing is mapped at two segments below the base at all, so there
+    //                              is no route. (/{id} does not match it; it is one segment.)
+    //
+    // ⚠ MEASURED, NOT REASONED. The first version of these cases expected 404 throughout and failed
+    // with `Status expected:<404> but was:<405>` on the first two — which is the only reason the
+    // distinction above is written down rather than guessed. If a verb is ever added or removed on the
+    // plural resource these values move, and that is correct: they describe what the surface answers,
+    // not a constant somebody chose.
+    //
+    // ⛔ AND THE TWO HALVES ARE NOT EQUALLY STRONG GUARDS. A 405 is typo-proof: misspell the path and
+    // the answer is 404, so the assertion fails. THE 404 IS NOT — /api/personal-doccuments/profile/zz,
+    // /api/personal-documents/nonsense/zz and /profile/zz/extra all answer 404 too, so that one line
+    // would pass against a path this service never had. It is still a working guard (restoring
+    // GET /profile/{profileId} turns it red) but it holds the route's absence, not the route's
+    // identity. Do not copy it as a pattern for asserting that some other endpoint is gone.
+
+    /**
+     * A role-less applicant — which is also what a sibling stack's patient and a token still bearing
+     * {@code ROLE_ANGEL} amount to here.
+     *
+     * <p>{@code HEAD} beside {@code GET} on both plural paths, because Spring MVC dispatches a
+     * {@code HEAD} to a {@code @GetMapping} handler and a body-less read of a document list is still a
+     * read — the near-miss item 143 records. There is no {@code @GetMapping} left for it to reach, and
+     * these are what fail if one comes back. ⚠ The 405 is a <em>dispatcher</em> answer and therefore
+     * authority-independent, which is why the two sibling cases below do not repeat the {@code HEAD}
+     * probes: this case covers them for every band at once.
+     *
+     * <p><b>The {@code Allow} header is asserted as a set, and that is the point of asserting it.</b>
+     * It is the inventory of verbs this path has left, so it fails if one is added — and the set, not
+     * the string: three observations of {@code /{id}} produced three different orders, so an assertion
+     * on the value would be a flake and a quoted value in a comment is how this drifted.
+     *
+     * <p>The last line is the weak one and is marked as such in the section comment: a misspelled path
+     * answers 404 as readily as a deleted one, so the assertion beside it — <b>a path this service has
+     * never had answers the same 404</b> — is there to stop a reader mistaking that line for proof that
+     * {@code /profile/{profileId}} in particular is gone.
+     */
+    @Test
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
+    void thePluralDocumentReadsDoNotExistForARoleLessApplicant() throws Exception {
+        MvcResult collection = restMockMvc.perform(get("/api/personal-documents")).andExpect(status().isMethodNotAllowed()).andReturn();
+        assertThat(allowedMethods(collection)).as("what the collection path has left").containsExactlyInAnyOrder("POST");
+        restMockMvc.perform(head("/api/personal-documents")).andExpect(status().isMethodNotAllowed());
+
+        MvcResult byId = restMockMvc
+            .perform(get("/api/personal-documents/{id}", "matrix-any-document"))
+            .andExpect(status().isMethodNotAllowed())
+            .andReturn();
+        assertThat(allowedMethods(byId)).as("what the /{id} path has left").containsExactlyInAnyOrder("PUT", "PATCH", "DELETE");
+        restMockMvc.perform(head("/api/personal-documents/{id}", "matrix-any-document")).andExpect(status().isMethodNotAllowed());
+
+        restMockMvc.perform(get("/api/personal-documents/profile/{profileId}", "matrix-any-profile")).andExpect(status().isNotFound());
+        restMockMvc.perform(get("/api/personal-doccuments/profile/{profileId}", "matrix-any-profile")).andExpect(status().isNotFound());
+    }
+
+    /**
+     * The {@code Allow} header as a set of verbs.
+     *
+     * <p>Spring builds it from the mapping's allowed methods and <b>guarantees no order</b>: measured
+     * {@code "PUT, PATCH, DELETE"}, {@code "PATCH, DELETE, PUT"} and {@code "DELETE, PUT, PATCH"} on
+     * three runs of the same request. So the only assertable thing is membership, and a test that
+     * compared the string would pass or fail by luck.
+     */
+    private static Set<String> allowedMethods(MvcResult result) {
+        String allow = result.getResponse().getHeader(HttpHeaders.ALLOW);
+        assertThat(allow).as("a 405 must say what is allowed").isNotBlank();
+        return Arrays.stream(allow.split(",")).map(String::trim).collect(Collectors.toSet());
+    }
+
+    /**
+     * The role that was measured reading a colleague's passport. A carer is read-only in v1, so before
+     * row 226 every one of these answered 200 and the write cases above were the only thing this class
+     * could say about the plural path.
+     */
+    @Test
+    @WithMockGatewayUser(login = "matrix-carer", authorities = { "ROLE_CARER" })
+    void thePluralDocumentReadsDoNotExistForAReadOnlyDiscipline() throws Exception {
+        restMockMvc.perform(get("/api/personal-documents")).andExpect(status().isMethodNotAllowed());
+        restMockMvc.perform(get("/api/personal-documents/{id}", "matrix-any-document")).andExpect(status().isMethodNotAllowed());
+        restMockMvc.perform(get("/api/personal-documents/profile/{profileId}", "matrix-any-profile")).andExpect(status().isNotFound());
+    }
+
+    /**
+     * ⛔ <b>Nor for an administrator, and that is the deliberate part.</b>
+     *
+     * <p>An admin may write every one of the verbs this resource still answers, so "the mappings were
+     * removed for lack of authority" would predict a 200 here. <b>The mappings are gone, not gated</b>
+     * — there is no privileged read of the <em>whole collection</em> in this service. A reviewer is
+     * already served twice over without one: the document list is
+     * {@code GET /api/professional-application/{id}/documents}, behind {@code assertAdminOrOwner} with
+     * {@code data} nulled on every row, and the scan itself is
+     * {@code GET /api/personal-document/{id}/content}, behind {@code assertOwnerOrReviewer}, one
+     * document the reviewer named.
+     *
+     * <p>This is the case that fails if somebody answers a future "but admin needs to list documents"
+     * by putting a {@code @PreAuthorize}'d {@code GET} back on the plural path. That request is a third
+     * answer to "who may read a document" and both existing answers are subject-scoped.
+     */
+    @Test
+    @WithMockGatewayUser(login = "matrix-admin", authorities = { "ROLE_ADMIN" })
+    void thePluralDocumentReadsDoNotExistForAnAdministratorEither() throws Exception {
+        restMockMvc.perform(get("/api/personal-documents")).andExpect(status().isMethodNotAllowed());
+        restMockMvc.perform(get("/api/personal-documents/{id}", "matrix-any-document")).andExpect(status().isMethodNotAllowed());
+        restMockMvc.perform(get("/api/personal-documents/profile/{profileId}", "matrix-any-profile")).andExpect(status().isNotFound());
+    }
+
+    /**
+     * ⭐ <b>The positive control for the three cases above, and it is not optional.</b>
+     *
+     * <p>If every probe 404s after a deletion then so does a dead application — and a 405 is barely
+     * better evidence, since an empty dispatcher would answer much the same for anything. So the same
+     * run has to show that something which must still answer does answer, and the two things chosen
+     * are the two the deletion could plausibly have taken with it:
+     *
+     * <ol>
+     *   <li><b>the singular own-document list reaches its own handler</b> — the 400 is
+     *       {@code ownProfile}'s "create your professional profile first", which only a handler that
+     *       ran can produce. <b>This is the leg the dead-application discriminator rests on</b>, and it
+     *       is load-bearing: moving that {@code @GetMapping} away turns it red
+     *       {@code expected:<400> but was:<405>}; and
+     *   <li><b>the filter chain is installed and its mutation rule covers this path pattern</b> — the
+     *       403s on {@code POST} and {@code DELETE}.
+     * </ol>
+     *
+     * <p>⚠ <b>What leg 2 does NOT establish, corrected after review — and it is the item-143 shape
+     * again.</b> This javadoc used to say the 403 "cannot be produced by an unmapped path". It can:
+     * {@code POST /api/** -> CLINICAL_MUTATION} refuses a {@code ROLE_USER} caller in the chain,
+     * <em>before</em> dispatch, handler or no handler. Moving {@code @PostMapping("")} and
+     * {@code @DeleteMapping("/{id}")} to another path leaves this case <b>green</b>. So leg 2 is
+     * evidence about the rule, not about the mapping. <b>The write surface's existence is held by the
+     * three 405 assertions instead</b> — unmap every verb on the collection and they go
+     * {@code 405 -> 404}. That distinction is worth spelling out precisely because the layer this
+     * comment advertised as operative was not the operative one: deleting the 405 cases on the strength
+     * of the old sentence would have lost the guard with every test still green.
+     *
+     * <p><b>Its failure is distinguishable from the deletion cases' success by being its own test.</b>
+     * Three deletion cases green and this one red says "the reads are gone and so is everything else";
+     * three red and this one green says the reads came back. Folding the control into those cases would
+     * have made both readings one failure.
+     */
+    @Test
+    @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
+    void theSurfaceAroundTheDeletedReadsStillAnswers() throws Exception {
+        restMockMvc.perform(get("/api/personal-document")).andExpect(status().isBadRequest());
+        restMockMvc
+            .perform(post("/api/personal-documents").contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isForbidden());
+        restMockMvc.perform(delete("/api/personal-documents/{id}", "matrix-any-document")).andExpect(status().isForbidden());
     }
 
     // --- /api/professional-application: one base path, three gates, T3's T0 rules ----------------

@@ -40,15 +40,18 @@ import org.springframework.web.server.ResponseStatusException;
  * {@code @RequestMapping("/api/personal-documents")} — <b>plural</b> — and a class-level prefix cannot
  * be opted out of per handler, so the singular path cannot live there. The half that matters is that
  * the two resources answer <em>different</em> questions about who may call them and what they return:
- * that one is the generated CRUD surface, admin-shaped, with {@code data} inline on three reads that
- * check no ownership at all (profile-addendum.md S1); this one is an applicant's own upload, and it
- * <b>never echoes the bytes back</b>.
+ * that one is the generated CRUD surface, admin-shaped, and has <b>no {@code GET} mapping left</b>
+ * since S1 closed (backlog.md row 226) — it carried three that returned {@code data} inline and checked
+ * no ownership whatever; this one is an applicant's own upload, and it <b>never echoes the bytes
+ * back</b>. ⚠ That resource's {@code PATCH} does still answer with a whole document, which is
+ * backlog.md row 227 and not a read surface anybody should be pointed at.
  *
  * <p>⚠ <b>The singular path is not a tidier spelling of the plural one.</b>
- * {@code /api/personal-document} does not match {@code /api/personal-documents} and must not come to
- * — a rule written here must not widen those unowned reads.
- * {@code ClinicalAuthorityMatrixIT} asserts that in both directions, because it is a claim about
- * Spring's pattern matching rather than about this comment.
+ * {@code /api/personal-document} does not match {@code /api/personal-documents} and must not come to,
+ * because a rule written here would widen the plural resource's remaining
+ * {@code POST}/{@code PUT}/{@code PATCH}/{@code DELETE} — the admin data-maintenance surface for any
+ * clinician's documents. {@code ClinicalAuthorityMatrixIT} asserts that in both directions, because it
+ * is a claim about Spring's pattern matching rather than about this comment.
  *
  * <h2>{@code profileId} is server-derived and the client never sends it</h2>
  *
@@ -276,8 +279,11 @@ public class OwnPersonalDocumentResource {
      * <p>⛔ <b>{@code data} is nulled on every row.</b> A thumbnail is a second request to
      * {@link #streamContent}, which is the one place the bytes leave this service and the one place
      * ownership is checked. The list would otherwise publish every identity document this account
-     * holds to anything that could read the list at all — which is precisely the shape the plural
-     * CRUD surface still has (profile-addendum.md S1).
+     * holds to anything that could read the list at all — which is precisely the shape the plural CRUD
+     * surface's {@code GET}s had until S1 deleted them (backlog.md row 226), on the whole collection
+     * rather than on one account's rows. ⚠ The nearest thing left there is a {@code PATCH} that echoes
+     * <em>one</em> document to one of six authorities (row 227), and neither that nor its eventual fix
+     * is a reason to stop nulling {@code data} here.
      *
      * @return the caller's documents, without bytes.
      */
