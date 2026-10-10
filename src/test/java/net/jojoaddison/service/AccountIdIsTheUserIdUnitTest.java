@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.Profile;
+import net.jojoaddison.repository.AccountCompletenessRepository;
 import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
@@ -69,6 +70,7 @@ class AccountIdIsTheUserIdUnitTest {
             mock(OnboardingEventRepository.class),
             profileRepository,
             personalDocumentRepository,
+            mock(AccountCompletenessRepository.class),
             events,
             mock(OrganizationReferenceValidator.class)
         );
@@ -223,6 +225,7 @@ class AccountIdIsTheUserIdUnitTest {
             mock(OnboardingEventRepository.class),
             profileRepository,
             mock(PersonalDocumentRepository.class),
+            mock(AccountCompletenessRepository.class),
             events,
             mock(OrganizationReferenceValidator.class)
         );

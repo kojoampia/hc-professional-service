@@ -3,17 +3,23 @@ package net.jojoaddison.broker;
 /**
  * The estate-shaped types this subsystem puts on the wire, and which application sends which.
  *
- * <p><b>Two channels, and they divide by subject rather than by shape.</b> The first three names
+ * <p><b>Two channels, and they divide by subject rather than by shape.</b> The first four names
  * below ride {@code hc.professional.registration} and are each about <em>a clinician</em>;
  * {@link #ENTITY_CHANGED} rides {@code professional.event} and is about <em>a document</em>. They
  * share the {@link ProfessionalEvent} envelope because every reader in the estate dispatches on
  * {@code type}, so one shape costs a consumer nothing while a second shape would cost it a parser.
  *
- * <p>The first three are one clinician's arrival told in two halves. {@link #ACCOUNT_CREATED} and
- * {@link #ACCOUNT_ACTIVATED} are the account — published by the gateway, which owns users and
- * authentication, and carrying nothing clinical because at those moments nothing clinical exists.
- * {@link #PROFILE_UPDATED} is the second half, published here, because this service owns the domain
- * and the profile.
+ * <p>⚠ <b>Three of the four are published here or by the gateway; one is CONSUMED here.</b>
+ * {@link #ACCOUNT_DETAILS_UPDATED} is the gateway's and this service reads it, which makes this
+ * class a list of the types on the contract rather than a list of what this application sends. That
+ * was true of the account pair already — neither is published from this repository — and it is worth
+ * saying out loud now that one of them is also subscribed to.
+ *
+ * <p>{@link #ACCOUNT_CREATED}, {@link #ACCOUNT_ACTIVATED} and {@link #PROFILE_STATUS} are one
+ * clinician's arrival told in two halves. The first two are the account — published by the gateway,
+ * which owns users and authentication, and carrying nothing clinical because at those moments nothing
+ * clinical exists. {@link #PROFILE_STATUS} is the second half, published here, because this service
+ * owns the domain and the profile.
  *
  * <p><b>Why two halves rather than one richer event.</b> A registration cannot say anything about a
  * clinician's profile, because there is no profile at that moment — the account holds
@@ -42,6 +48,34 @@ public final class ProfessionalEventType {
 
     /** Published by {@code hc-professional-gateway} when the activation link is followed. */
     public static final String ACCOUNT_ACTIVATED = "AccountActivated";
+
+    /**
+     * Published by {@code hc-professional-gateway} whenever a {@code User} row is written, carrying
+     * whether onboarding <b>step 1</b> is now satisfied — backlog.md row 230, unit A.
+     *
+     * <p><b>The first type on this topic that this service CONSUMES rather than publishes</b>, which
+     * is why it is named here. {@code MeterConsumer} reads it and
+     * {@code OnboardingService.recordAccountCompleteness} records it; nothing in this service sends
+     * it.
+     *
+     * <p>⛔ <b>{@code data} is one boolean, {@code detailsComplete}, and carries none of the four
+     * fields behind it.</b> {@code firstName}, {@code lastName}, {@code langKey} and {@code imageUrl}
+     * live on {@code User} in the gateway, and this service <b>deliberately makes no cross-service
+     * call to read them</b> — {@code OnboardingService.submitForReview}'s javadoc is the record of
+     * that refusal. A verdict about completeness is a fact <em>about</em> the account rather than its
+     * contents, which is the same distinction {@link #PROFILE_STATUS} draws when it sends
+     * {@code isVerified} rather than a licence number.
+     *
+     * <p>⚠ <b>Idempotent, and ordered only by {@code occurredAt}.</b> It is a snapshot, so a replay
+     * applies the same boolean twice; but at-least-once delivery is not at-least-once ordering, so an
+     * older frame must be refused rather than applied — see
+     * {@code OnboardingService.recordAccountCompleteness}, which is where that guard lives.
+     *
+     * <p>The bound reader is {@link AccountDetailsEvent} rather than {@link ProfessionalEvent},
+     * because this topic carries two envelope shapes and a consumer has to survive both before it can
+     * dispatch on either. See that record.
+     */
+    public static final String ACCOUNT_DETAILS_UPDATED = "AccountDetailsUpdated";
 
     /**
      * Published by this service whenever a clinician's profile, or its completeness or verification

@@ -145,7 +145,13 @@ spring:
       # The generated kafkaConsumer/kafkaProducer scaffold stays dormant, and
       # DomainEventPublisher's producer binding is created by StreamBridge rather than by a
       # declared function.
-      definition: messageEvents;pushEvents
+      #
+      # EVERY CONSUMER BEAN MUST BE NAMED HERE OR IT IS NEVER BOUND. A Consumer bean missing from
+      # this list is a bean, is injectable, passes its unit tests and receives nothing — which is
+      # precisely the state kafkaConsumer has been in since the scaffold. The two meter consumers
+      # (backlog.md row 230) are pinned against this line by MeterBindingTest, which reads the
+      # shipped file rather than the test one.
+      definition: messageEvents;pushEvents;meterAccountEvents;meterEntityEvents
     stream:
       kafka:
         binder:
@@ -214,6 +220,58 @@ spring:
           destination: hc.professional.entity
           content-type: application/json
           group: hc-professional-ms-push
+        # THE LIVE COMPLETION METER (backlog.md row 230, unit A). Two bindings because they are two
+        # topics, and two topics because the frames come from two applications.
+        #
+        # Step 1's four account fields are the GATEWAY's — api/ cannot see them and deliberately makes
+        # no cross-service call to read them — so the gateway publishes a boolean verdict,
+        # AccountDetailsUpdated, as an extension of RegistrationEventPublisher. It therefore rides the
+        # REGISTRATION topic, under the same accountId key as that clinician's other three frames.
+        #
+        # ⚠ That topic carries TWO ENVELOPE SHAPES from two producers, so the bound type must survive
+        # both: AccountDetailsEvent is a narrow reader record carrying @JsonIgnoreProperties, not the
+        # ProfessionalEvent contract. A record keyed to one shape makes every frame of the other a
+        # conversion failure before any dispatch runs.
+        meterAccountEvents-in-0:
+          destination: hc.professional.registration
+          content-type: application/json
+          group: hc-professional-ms-meter
+        # Steps 2, 3 and 4 need no new producer: EntityChangeAnnouncer already announces every
+        # document this service writes or removes, in every collection, on professional.event.
+        #
+        # THE GROUP MUST DIFFER from every other INBOUND group on this file, for
+        # messageEvents/pushEvents' reason: two consumers sharing a group compete for partitions and
+        # each sees roughly half the events, which here would read as "the meter refreshes about half
+        # the time" with nothing logged. It differs from meterAccountEvents-in-0's too, although they
+        # are on different topics, because one group id subscribed to two topics is a rebalance unit
+        # nobody intended.
+        #
+        # ⚠ "Inbound" is the accurate scope and not a hedge: binding-out-0, kafkaProducer-out-0 and
+        # the dormant kafkaConsumer-in-0 all declare group: hc-professional-ms. On an OUTPUT binding
+        # `group` is inert, so that duplicate costs nothing and is not this row's to resolve.
+        # MeterBindingTest.noTwoInboundBindingsShareAConsumerGroup is scoped the same way, so the
+        # comment and the guard agree.
+        #
+        # ⛔ THE MULTI-INSTANCE CAVEAT APPLIES TO BOTH METER BINDINGS, IN A SHARPER FORM THAN
+        # messageEvents'. That comment twenty lines above says a group is correct "only while every
+        # instance can reach every session". SSE EMITTERS ARE PER-INSTANCE STATE EXACTLY LIKE STOMP
+        # SESSIONS: OnboardingProgressStream is an in-memory Map on one JVM, so with a group set a
+        # scaled-out deployment delivers each frame to ONE instance, and only the clinicians connected
+        # to that instance see a refresh — "the meter refreshes for about a third of people", with
+        # nothing logged and nothing to point at. It is sharper than messageEvents' case because that
+        # one has a websocket broker-relay escape; this has no equivalent short of dropping the group,
+        # so every instance sees every frame and pushes to whoever it happens to hold.
+        #
+        # NOT REACHABLE TODAY, and the reason is worth stating rather than trusting: both compose files
+        # pin container_name on `api`, which forbids `docker compose up --scale`. So this is a note for
+        # whoever removes that, not a live defect. ⭐ And the GET is unaffected either way — it computes
+        # from the database, so a clinician on an instance that missed the frame still reads a correct
+        # meter on their next load. That is the degradation row 230 chose by keeping the GET
+        # authoritative, holding one layer further out than it was designed for.
+        meterEntityEvents-in-0:
+          destination: professional.event
+          content-type: application/json
+          group: hc-professional-ms-meter-changes
   profiles:
     # The commented value for `active` can be replaced with valid Spring profiles to load.
     # Otherwise, it will be filled in by maven when building the JAR file

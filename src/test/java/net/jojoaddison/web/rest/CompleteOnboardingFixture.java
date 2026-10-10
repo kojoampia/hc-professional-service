@@ -18,6 +18,11 @@ import net.jojoaddison.domain.enumeration.VerificationStatus;
  * A fully onboarded professional, built once for every integration test that needs one
  * (professional-onboarding-workflow.md § "Onboarding state events and the completion contract").
  *
+ * <p>⚠ <b>Nine requirements since backlog.md row 230, not eight</b> — {@code authority} joined the
+ * meter, which had reported eight while the submit gate could refuse on nine. Where the paragraphs
+ * below say "eight" they are describing the contract as it stood; the count is kept out of the
+ * assertions themselves, which derive from {@code OnboardingService.REQUIREMENT_KEYS}.
+ *
  * <p><b>Why this exists (backlog.md item 18).</b> The eight-requirement completion contract was built
  * three different ways in three IT classes — {@code ComplianceFlowIT}, {@code OnboardingProgressIT}
  * and {@code OnboardingFlowIT} — and no two were the same code. It is the thing in this domain most
@@ -55,12 +60,38 @@ final class CompleteOnboardingFixture {
     }
 
     /**
-     * Satisfies the {@code consent} requirement: an application in {@code status} whose consent is
-     * stamped. Callers chain whatever else their own subject needs — {@code login},
-     * {@code authority}, {@code profileId}, {@code source} — none of which the contract reads.
+     * The discipline every fixture application declares. Any of the eight would do — step 4 asks that
+     * a role <em>be named</em>, not which one — and {@code ROLE_NURSE} is what
+     * {@code OnboardingProgressIT} chained before this moved here.
+     */
+    static final String FIXTURE_AUTHORITY = "ROLE_NURSE";
+
+    /**
+     * Satisfies <b>step 4's two requirements</b> — {@code consent} and {@code authority} — on an
+     * application in {@code status}, with the consent date stamped. Callers chain whatever else their
+     * own subject needs: {@code login}, {@code profileId}, {@code source}.
+     *
+     * <h2>⭐ The authority is set here since backlog.md row 230, and this is the "one edit" promised above</h2>
+     *
+     * <p>This javadoc used to list an {@code authority} chained by a caller among the things
+     * <i>"the contract does not read"</i>. That was true of the <b>meter</b> and never of the
+     * <b>submit gate</b>, which has named {@code authority} among its unsatisfied keys since F-B —
+     * the nine-versus-eight divergence row 230 exists to close. The meter reports it now, so
+     * {@code authority} is part of what "complete" means and belongs here rather than in each caller.
+     *
+     * <p>⚠ <b>Three IT classes relied on the old reading</b>: {@code ComplianceFlowIT},
+     * {@code DocumentSupersedeIT} and {@code ProfileStatusOnEveryWriteIT} build applications through
+     * this method without chaining one, and two of them activate. Setting it here is what keeps them
+     * green, and is exactly the arrangement the class comment argues for — a ninth requirement is one
+     * edit in this file rather than a red test in three classes whose subject is something else.
      */
     static ProfessionalApplication consentedApplication(String accountId, ProfileStatus status) {
-        return new ProfessionalApplication().accountId(accountId).status(status).agreed(true).agreedDate(Instant.now());
+        return new ProfessionalApplication()
+            .accountId(accountId)
+            .status(status)
+            .agreed(true)
+            .agreedDate(Instant.now())
+            .authority(FIXTURE_AUTHORITY);
     }
 
     /**
