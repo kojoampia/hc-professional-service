@@ -2,10 +2,12 @@ package net.jojoaddison.service;
 
 import java.time.Instant;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import net.jojoaddison.broker.DomainEventPublisher;
+import net.jojoaddison.domain.AccountCompleteness;
 import net.jojoaddison.domain.OnboardingEvent;
 import net.jojoaddison.domain.PersonalDocument;
 import net.jojoaddison.domain.ProfessionalApplication;
@@ -13,6 +15,7 @@ import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
 import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
+import net.jojoaddison.repository.AccountCompletenessRepository;
 import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
@@ -135,6 +138,14 @@ public class OnboardingService {
     private final OnboardingEventRepository eventRepository;
     private final ProfileRepository profileRepository;
     private final PersonalDocumentRepository personalDocumentRepository;
+
+    /**
+     * The step-1 projection — the one input to the meter this service cannot compute, because its
+     * four fields live on {@code User} in the gateway (backlog.md row 230). Read by
+     * {@link #progressFor} and written only by {@link #recordAccountCompleteness}.
+     */
+    private final AccountCompletenessRepository accountCompletenessRepository;
+
     private final DomainEventPublisher domainEventPublisher;
 
     private final OrganizationReferenceValidator organizationReferenceValidator;
@@ -144,6 +155,7 @@ public class OnboardingService {
         OnboardingEventRepository eventRepository,
         ProfileRepository profileRepository,
         PersonalDocumentRepository personalDocumentRepository,
+        AccountCompletenessRepository accountCompletenessRepository,
         DomainEventPublisher domainEventPublisher,
         OrganizationReferenceValidator organizationReferenceValidator
     ) {
@@ -151,6 +163,7 @@ public class OnboardingService {
         this.eventRepository = eventRepository;
         this.profileRepository = profileRepository;
         this.personalDocumentRepository = personalDocumentRepository;
+        this.accountCompletenessRepository = accountCompletenessRepository;
         this.domainEventPublisher = domainEventPublisher;
         this.organizationReferenceValidator = organizationReferenceValidator;
     }
@@ -415,6 +428,17 @@ public class OnboardingService {
      * account is incomplete still passes, and the client is what keeps step 1 ahead of step 2. Raised
      * with the owner rather than guessed at.
      *
+     * <p>⭐ <b>That was answered by backlog.md row 230, and only half of it changed.</b> The gateway
+     * now publishes {@code AccountDetailsUpdated} carrying a boolean — never the four fields — and
+     * {@code MeterConsumer} records it, so {@link #progressFor} <em>reports</em> where step 1 stands
+     * in {@code OnboardingProgressDTO.Steps.account}. <b>This gate still does not enforce it, and
+     * neither does the {@code ACTIVE} gate</b>: that boolean depends on a Kafka frame having arrived,
+     * and {@code application.kafka.enabled=false} is a supported configuration, so gating on it would
+     * make every submission and every activation in the estate fail whenever the broker was absent.
+     * See {@code OnboardingProgressDTO.Steps}, which is where that separation is argued. So the
+     * sentence above is still true of the <em>gate</em>; what is no longer true is that the service
+     * cannot say anything about step 1.
+     *
      * @see #saveConsent the same storing and the same completeness evaluation, without the refusal
      */
     public ProfessionalApplication submitForReview(String accountId, boolean agreed, String authority) {
@@ -488,7 +512,7 @@ public class OnboardingService {
         // body named: since a body naming none no longer blanks the field, the two differ, and asking
         // about the body would refuse a Submit with "authority" missing from an application that
         // plainly carries one — a refusal naming a requirement the applicant has already met.
-        List<String> missing = unsatisfiedRequirements(accountId, application.getAuthority());
+        List<String> missing = unsatisfiedRequirements(accountId, application);
         if (!missing.isEmpty()) {
             if (refuseWhenIncomplete) {
                 // Nothing is saved: the refusal is the whole answer, and a Submit that stored and
@@ -784,11 +808,15 @@ public class OnboardingService {
     }
 
     /**
-     * The eight requirements, equally weighted, in the order the profile page shows them.
+     * The nine requirements, equally weighted, in the order the profile page shows them.
      *
      * <p>Named constants rather than inline strings because the client maps every key to a
      * translated label in four languages: a key renamed here and not there renders as the key
      * itself, mid-screen, with nothing thrown and nothing logged.
+     *
+     * <p>⭐ <b>Nine since backlog.md row 230, where the meter reported eight and the submit gate
+     * required nine</b> — see {@link #REQUIREMENT_KEYS}, which is now the single vocabulary both
+     * read.
      */
     private static final String REQ_CONSENT = "consent";
 
@@ -811,13 +839,75 @@ public class OnboardingService {
     /**
      * Step 4's other half: the role the applicant declares they are applying for.
      *
-     * <p>Not one of the eight progress-meter requirements, and deliberately so — the meter measures
-     * what the <em>profile</em> holds, and the authority is a property of the application. It is a
-     * submission requirement all the same: {@code profile.md} step 4 is <i>"The professional declares
-     * the role they are applying for <b>and</b> consents"</i>, so a submission naming no role has not
-     * satisfied it. Nothing refused one before F-B.
+     * <p>{@code profile.md} step 4 is <i>"The professional declares the role they are applying for
+     * <b>and</b> consents"</i>, so a submission naming no role has not satisfied it. Nothing refused
+     * one before F-B.
+     *
+     * <p>⛔ <b>It is one of the progress-meter requirements since backlog.md row 230, and this comment
+     * used to argue at length that it was not.</b> It read: <i>"Not one of the eight progress-meter
+     * requirements, and deliberately so — the meter measures what the {@code profile} holds, and the
+     * authority is a property of the application."</i> That distinction is real and it was the wrong
+     * one to draw here, for a reason the same file recorded two hundred lines up: {@code consent} is
+     * also a property of the application and was always on the meter, so "the meter measures the
+     * profile" was not even true of the list it was describing.
+     *
+     * <p><b>What it cost: an applicant could read 100% and be refused at Submit.</b> That is the
+     * <i>"client reads complete while the server refuses"</i> failure the whole eight-requirement
+     * design was chosen to prevent, happening inside that design — the meter built eight keys while
+     * {@link #unsatisfiedRequirements} could name nine. Row 230 orders it closed in unit A regardless
+     * of how far the rest of the row gets, because it is a divergence that makes the meter lie today.
+     *
+     * <p>⚠ It belongs to <b>step 4</b>, with consent, by {@code profile.md}'s "and" — see
+     * {@code OnboardingProgressDTO.Steps#consent}.
      */
     private static final String REQ_AUTHORITY = "authority";
+
+    /**
+     * ⭐ <b>The requirement vocabulary, declared once</b> — what the meter reports and what a refusal
+     * can name, in the order the profile page shows them (backlog.md row 230).
+     *
+     * <h2>Why a declared list, when both sites would read the same nine constants anyway</h2>
+     *
+     * <p>Before row 230 they did not. {@link #progressFor} built <b>eight</b>
+     * {@code Requirement}s and {@link #unsatisfiedRequirements} could add a <b>ninth</b>,
+     * {@code authority}, that the meter never reported — two hand-written lists over one set of
+     * constants, which is the arrangement that "happens to match today" and had in fact already
+     * stopped matching. A test can assert that the meter's keys and the gate's keys are the same set;
+     * it cannot assert that two literal lists will stay the same set. This constant is what makes the
+     * first assertion mean the second.
+     *
+     * <p>⚠ <b>It is the key set that is shared, not the predicates, and that distinction is
+     * load-bearing.</b> The two sites deliberately evaluate {@link #REQ_PROFILE},
+     * {@link #REQ_ADDRESS} and {@link #REQ_NEXT_OF_KIN} at <em>different strictness</em>: the meter
+     * reads the advisory predicates below, which leave some fields optional and count complete
+     * contacts, so that a meter does not go <em>down</em> when a clinician starts typing a third
+     * contact; the submit gate reads {@link ProfileCompleteness}, all 39 values, because
+     * {@code profile.md} says every field and a gate has no such problem. See
+     * {@link #unsatisfiedRequirements}, which records that at length. ⛔ Do not "finish the job" by
+     * unifying the predicates — that would either soften the gate or make the meter punish typing.
+     *
+     * <p>{@code consent} can never be among the keys {@link #unsatisfiedRequirements} returns in
+     * practice, because {@code storeThenAdvanceWhenComplete} refuses {@code agreed: false} with its
+     * own 400 and sets the flag before evaluating. It is in the shared vocabulary all the same, so
+     * that the two key sets are comparable at all — a vocabulary with a hole in it on one side cannot
+     * be asserted equal to one without.
+     *
+     * <p>Public because it <em>is</em> the wire vocabulary — every client maps each key to a
+     * translated label in four languages — and because {@code OnboardingRequirementKeysIT} asserts
+     * both surfaces against it from another package. ⛔ It is not a list to read a requirement's
+     * meaning from: the predicates differ by site, which {@code unsatisfiedRequirements} records.
+     */
+    public static final List<String> REQUIREMENT_KEYS = List.of(
+        REQ_CONSENT,
+        REQ_PROFILE,
+        REQ_ADDRESS,
+        REQ_NEXT_OF_KIN,
+        REQ_CERTIFICATE,
+        REQ_LICENSE,
+        REQ_IDENTITY,
+        REQ_PHOTO,
+        REQ_AUTHORITY
+    );
 
     /**
      * How far this account has got, for its own eyes.
@@ -825,6 +915,23 @@ public class OnboardingService {
      * <p>Answers for an account with no application at all — everything false, 0% — rather than
      * 404ing, because that is the state every clinician created by admin invitation starts in and
      * the profile page has to render something for them.
+     *
+     * <h2>⭐ Computed from the database on every request, and that is row 230's decision</h2>
+     *
+     * <p>Row 230 adds an SSE push and a {@code MeterConsumer}, and it keeps this method
+     * authoritative: <i>"SSE delivers changes after connecting, so the client needs an initial value
+     * regardless. So the {@code GET} keeps computing the four steps from the database and remains
+     * authoritative; events only push updates."</i> The failure that shape avoids is this estate's
+     * signature one — {@code application.kafka.enabled=false} is a <b>supported configuration</b>
+     * ({@code DomainEventPublisher} returns before {@code streamBridge.send}), and a meter whose only
+     * input was events would sit at a stale value, or zero, while the service reported healthy.
+     * <b>A broker outage therefore costs the live refresh and not the meter.</b>
+     *
+     * <p>Four reads per request — application, profile, documents, and the step-1 projection — all by
+     * an indexed key, with the predicates themselves running over at most a handful of in-memory
+     * documents. A stored projection of the whole meter was considered and rejected: it would have to
+     * be invalidated by every write to three collections, and the one input that genuinely cannot be
+     * read here is already the only thing projected. See {@code AccountCompleteness}.
      */
     public OnboardingProgressDTO progressFor(String accountId) {
         ProfessionalApplication application = applicationRepository.findByAccountId(accountId).orElse(null);
@@ -839,22 +946,22 @@ public class OnboardingService {
             ? List.<PersonalDocument>of()
             : personalDocumentRepository.findByProfileId(profile.getId()).stream().filter(PersonalDocumentService::isLive).toList();
 
-        List<OnboardingProgressDTO.Requirement> requirements = List.of(
-            new OnboardingProgressDTO.Requirement(REQ_CONSENT, application != null && application.isAgreed()),
-            new OnboardingProgressDTO.Requirement(REQ_PROFILE, personalDetailsComplete(profile)),
-            new OnboardingProgressDTO.Requirement(REQ_ADDRESS, addressComplete(profile)),
-            new OnboardingProgressDTO.Requirement(REQ_NEXT_OF_KIN, nextOfKinComplete(profile)),
-            new OnboardingProgressDTO.Requirement(
-                REQ_CERTIFICATE,
-                documents.stream().anyMatch(d -> d.getType() == DocumentType.CERTIFICATE)
-            ),
-            new OnboardingProgressDTO.Requirement(
-                REQ_LICENSE,
-                documents.stream().anyMatch(d -> d.getType() == DocumentType.LICENSE && d.getExpiryDate() != null)
-            ),
-            new OnboardingProgressDTO.Requirement(REQ_IDENTITY, documents.stream().anyMatch(d -> IDENTITY_TYPES.contains(d.getType()))),
-            new OnboardingProgressDTO.Requirement(REQ_PHOTO, documents.stream().anyMatch(d -> d.getType() == DocumentType.PASSPHOTO))
-        );
+        Map<String, Boolean> satisfied = new LinkedHashMap<>();
+        satisfied.put(REQ_CONSENT, application != null && application.isAgreed());
+        satisfied.put(REQ_PROFILE, personalDetailsComplete(profile));
+        satisfied.put(REQ_ADDRESS, addressComplete(profile));
+        satisfied.put(REQ_NEXT_OF_KIN, nextOfKinComplete(profile));
+        satisfied.put(REQ_CERTIFICATE, documents.stream().anyMatch(d -> d.getType() == DocumentType.CERTIFICATE));
+        satisfied.put(REQ_LICENSE, documents.stream().anyMatch(d -> d.getType() == DocumentType.LICENSE && d.getExpiryDate() != null));
+        satisfied.put(REQ_IDENTITY, documents.stream().anyMatch(d -> IDENTITY_TYPES.contains(d.getType())));
+        satisfied.put(REQ_PHOTO, documents.stream().anyMatch(d -> d.getType() == DocumentType.PASSPHOTO));
+        satisfied.put(REQ_AUTHORITY, application != null && hasText(application.getAuthority()));
+
+        // Ordered by the shared vocabulary rather than by insertion, so a key added to REQUIREMENT_KEYS
+        // and not evaluated above fails loudly here instead of quietly going missing from the wire.
+        List<OnboardingProgressDTO.Requirement> requirements = REQUIREMENT_KEYS.stream()
+            .map(key -> new OnboardingProgressDTO.Requirement(key, requireEvaluated(satisfied, key)))
+            .toList();
 
         long done = requirements.stream().filter(OnboardingProgressDTO.Requirement::done).count();
         int percent = Math.toIntExact(Math.round(((double) done / requirements.size()) * 100));
@@ -862,8 +969,101 @@ public class OnboardingService {
             percent,
             done == requirements.size(),
             application == null ? null : application.getStatus(),
-            requirements
+            requirements,
+            stepsFrom(satisfied, accountId)
         );
+    }
+
+    /**
+     * {@code profile.md}'s four steps, three of them <b>derived from the requirement answers already
+     * computed</b> rather than evaluated a second time (backlog.md row 230).
+     *
+     * <p>Deriving is the whole point: a coarse wire and a fine wire that each read the predicates
+     * would be two definitions of one step, and the fine one is already on two clients' screens. So
+     * steps 2, 3 and 4 are conjunctions over keys, and the only thing this method evaluates itself is
+     * step 1 — which has no requirement key at all, deliberately. See
+     * {@code OnboardingProgressDTO.Steps}, which argues why step 1 is reported and not required.
+     *
+     * <p>⚠ <b>Step 3 is an AND over all four documents, not an OR.</b> {@code profile.md} § Gap
+     * Update — <i>"all their respective requirements"</i> — and the concrete failure otherwise is a
+     * step-3 pane reading complete after one upload, behind a Submit that answers 400.
+     */
+    private OnboardingProgressDTO.Steps stepsFrom(Map<String, Boolean> satisfied, String accountId) {
+        return new OnboardingProgressDTO.Steps(
+            accountStepComplete(accountId),
+            requireEvaluated(satisfied, REQ_PROFILE) &&
+            requireEvaluated(satisfied, REQ_ADDRESS) &&
+            requireEvaluated(satisfied, REQ_NEXT_OF_KIN),
+            requireEvaluated(satisfied, REQ_CERTIFICATE) &&
+            requireEvaluated(satisfied, REQ_LICENSE) &&
+            requireEvaluated(satisfied, REQ_IDENTITY) &&
+            requireEvaluated(satisfied, REQ_PHOTO),
+            // profile.md step 4: "declares the role they are applying for AND consents".
+            requireEvaluated(satisfied, REQ_CONSENT) && requireEvaluated(satisfied, REQ_AUTHORITY)
+        );
+    }
+
+    /**
+     * Step 1, from the projection {@code MeterConsumer} maintains — the only part of the meter that
+     * is not computed from this service's own documents, because its four fields are on {@code User}
+     * in {@code hcProfessionalGateway} and there is deliberately no cross-service call to read them.
+     *
+     * <p>⚠ <b>Absent reads {@code false}</b>: an account whose details have not been written since
+     * row 230 shipped has no row, and "not known to be complete" is reported as outstanding rather
+     * than assumed. Fail-closed is the harmless direction here precisely because nothing gates on it.
+     */
+    private boolean accountStepComplete(String accountId) {
+        return accountCompletenessRepository.findById(accountId).map(AccountCompleteness::isComplete).orElse(false);
+    }
+
+    /**
+     * Records the gateway's verdict about step 1 — the <b>only</b> writer of
+     * {@code AccountCompleteness}, called only by {@code MeterConsumer}.
+     *
+     * <p>⛔ <b>An older observation is refused rather than applied.</b> At-least-once delivery is not
+     * at-least-once ordering, so a redelivered or reordered frame can carry a verdict that has since
+     * been superseded; applying it would move step 1 backwards and leave it there until the account
+     * was next written. Equal timestamps are allowed through as idempotent rewrites of the same
+     * answer.
+     *
+     * <p>A frame with no {@code occurredAt} is refused outright rather than stamped with the local
+     * clock: a row whose {@code observedAt} is a receive time cannot be compared with the next frame's
+     * send time, so one such write would disable the ordering guard for that account for good.
+     *
+     * @param observedAt the event's {@code occurredAt}, never the time this ran.
+     * @return {@code true} when the projection was written, {@code false} when the frame was refused
+     *     as stale or unusable — so the caller knows whether anything can have changed.
+     */
+    public boolean recordAccountCompleteness(String accountId, boolean complete, Instant observedAt) {
+        if (!hasText(accountId) || observedAt == null) {
+            log.warn("Ignoring an account-completeness observation with no accountId or no occurredAt");
+            return false;
+        }
+        AccountCompleteness stored = accountCompletenessRepository.findById(accountId).orElse(null);
+        if (stored != null && stored.getObservedAt() != null && stored.getObservedAt().isAfter(observedAt)) {
+            log.debug("Ignoring an account-completeness observation for {} older than the stored one", accountId);
+            return false;
+        }
+        accountCompletenessRepository.save(
+            (stored == null ? new AccountCompleteness().accountId(accountId) : stored).complete(complete).observedAt(observedAt)
+        );
+        return true;
+    }
+
+    /**
+     * The answer computed for a key, or a failure naming the key.
+     *
+     * <p>⚠ <b>A guard against the one mistake {@link #REQUIREMENT_KEYS} introduces.</b> Adding a key
+     * to that list and forgetting to evaluate it would otherwise put {@code false} on the wire for
+     * ever — a requirement nobody can satisfy, which is a meter stuck below 100% and a Submit that
+     * refuses naming something the applicant has already done. Loud beats plausible.
+     */
+    private static boolean requireEvaluated(Map<String, Boolean> satisfied, String key) {
+        Boolean done = satisfied.get(key);
+        if (done == null) {
+            throw new IllegalStateException("requirement '" + key + "' is declared in REQUIREMENT_KEYS but nothing evaluates it");
+        }
+        return done;
     }
 
     private static boolean hasText(String value) {
@@ -1020,11 +1220,22 @@ public class OnboardingService {
      *           {@code profile.md}'s <i>"Every field in the Profile model is required"</i></td></tr>
      *   <tr><td>3</td><td>{@code certificate}, {@code license}, {@code identity}, {@code photo}</td>
      *       <td>the live documents on the caller's profile, as before</td></tr>
-     *   <tr><td>4</td><td>{@code authority}</td>
-     *       <td>the role on the submitted body; consent is refused earlier and separately, with
-     *           {@link #CONSENT_REQUIRED}, because a withheld tick is a different answer from an
-     *           incomplete one</td></tr>
+     *   <tr><td>4</td><td>{@code consent}, {@code authority}</td>
+     *       <td>the application as stored after this write. ⚠ {@code consent} can never actually come
+     *           back missing, because {@code storeThenAdvanceWhenComplete} refuses
+     *           {@code agreed: false} earlier and separately with {@link #CONSENT_REQUIRED} — a
+     *           withheld tick is a different answer from an incomplete one — and sets the flag before
+     *           evaluating. It is evaluated anyway, so that this method's key set is
+     *           {@link #REQUIREMENT_KEYS} entire and can be <em>asserted</em> equal to the meter's
+     *           rather than inspected</td></tr>
      * </table>
+     *
+     * <p>⭐ <b>The keys come from {@link #REQUIREMENT_KEYS}, shared with {@link #progressFor}</b>
+     * (backlog.md row 230). Until then this method could name a ninth key, {@code authority}, that the
+     * meter never reported — so an applicant could read 100% here and be refused there. Two
+     * hand-written lists over one set of constants is the arrangement that matches until it does not.
+     * ⚠ What is shared is the vocabulary and <b>not</b> the predicates; the paragraph below is the
+     * reason, and it still holds.
      *
      * <p>⭐ <b>Step 2's definition is {@link ProfileCompleteness}, not the progress meter's three
      * predicates.</b> Those are deliberately weaker — {@code addressComplete} leaves
@@ -1051,39 +1262,41 @@ public class OnboardingService {
      * step 4's buttons ask the same question and only one of them turns a non-empty answer into a
      * 400 — so the evaluation cannot live inside the refusal, or Save would have to re-derive it.
      *
-     * @param authority ⚠ the authority <b>as stored on the application after this write</b>, not as
-     *     the body named it. Since the owner's decision of 2026-10-09 a body naming none no longer
+     * @param application ⚠ the application <b>as it stands after this write</b> and not as the body
+     *     named it. Since the owner's decision of 2026-10-09 a body naming no authority no longer
      *     blanks the field, so the two differ — and keying step 4's requirement on the body would name
-     *     {@code authority} missing on an application that carries one. See
-     *     {@code storeThenAdvanceWhenComplete}, the only caller.
-     * @return the unsatisfied requirement keys, in the order the profile page shows them; empty when
-     *     every requirement this service can see is satisfied.
+     *     {@code authority} missing on an application that plainly carries one. It was a bare
+     *     {@code String authority} parameter until row 230; the whole application is passed now
+     *     because {@code consent} is evaluated here too, and re-reading the row would read the
+     *     unsaved flag as {@code false}. {@code storeThenAdvanceWhenComplete} is the only caller.
+     * @return the unsatisfied requirement keys, in {@link #REQUIREMENT_KEYS} order; empty when every
+     *     requirement this service can see is satisfied.
      */
-    private List<String> unsatisfiedRequirements(String accountId, String authority) {
+    private List<String> unsatisfiedRequirements(String accountId, ProfessionalApplication application) {
         Profile profile = profileRepository.findByAccountId(accountId).orElse(null);
-        List<String> missing = new java.util.ArrayList<>(ProfileCompleteness.missingRequirements(profile));
+        List<String> providedByProfile = ProfileCompleteness.missingRequirements(profile);
 
         List<PersonalDocument> documents = profile == null || profile.getId() == null
             ? List.<PersonalDocument>of()
             : personalDocumentRepository.findByProfileId(profile.getId()).stream().filter(PersonalDocumentService::isLive).toList();
-        if (documents.stream().noneMatch(d -> d.getType() == DocumentType.CERTIFICATE)) {
-            missing.add(REQ_CERTIFICATE);
-        }
-        if (documents.stream().noneMatch(d -> d.getType() == DocumentType.LICENSE && d.getExpiryDate() != null)) {
-            missing.add(REQ_LICENSE);
-        }
-        if (documents.stream().noneMatch(d -> IDENTITY_TYPES.contains(d.getType()))) {
-            missing.add(REQ_IDENTITY);
-        }
-        if (documents.stream().noneMatch(d -> d.getType() == DocumentType.PASSPHOTO)) {
-            missing.add(REQ_PHOTO);
-        }
 
-        if (!hasText(authority)) {
-            missing.add(REQ_AUTHORITY);
-        }
+        Map<String, Boolean> satisfied = new LinkedHashMap<>();
+        // Step 2, by the STRICTER predicate — see the paragraph above. ProfileCompleteness reports
+        // which of its three groups is missing, so the three keys are its answer inverted rather than
+        // three more conditions written here.
+        satisfied.put(REQ_PROFILE, !providedByProfile.contains(REQ_PROFILE));
+        satisfied.put(REQ_ADDRESS, !providedByProfile.contains(REQ_ADDRESS));
+        satisfied.put(REQ_NEXT_OF_KIN, !providedByProfile.contains(REQ_NEXT_OF_KIN));
+        satisfied.put(REQ_CERTIFICATE, documents.stream().anyMatch(d -> d.getType() == DocumentType.CERTIFICATE));
+        satisfied.put(REQ_LICENSE, documents.stream().anyMatch(d -> d.getType() == DocumentType.LICENSE && d.getExpiryDate() != null));
+        satisfied.put(REQ_IDENTITY, documents.stream().anyMatch(d -> IDENTITY_TYPES.contains(d.getType())));
+        satisfied.put(REQ_PHOTO, documents.stream().anyMatch(d -> d.getType() == DocumentType.PASSPHOTO));
+        satisfied.put(REQ_CONSENT, application != null && application.isAgreed());
+        satisfied.put(REQ_AUTHORITY, application != null && hasText(application.getAuthority()));
 
-        return List.copyOf(missing);
+        // One vocabulary, one order, and the same guard the meter uses: a key declared and not
+        // evaluated fails here rather than silently appearing in every refusal for ever.
+        return REQUIREMENT_KEYS.stream().filter(key -> !requireEvaluated(satisfied, key)).toList();
     }
 
     /**

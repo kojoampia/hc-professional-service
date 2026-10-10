@@ -255,6 +255,47 @@ class EntityChangeAnnouncerTest {
     }
 
     /**
+     * ⛔ <b>{@code AccountCompleteness} is excluded, and this is the exclusion this class's subject
+     * asks for</b> — backlog.md row 230. It is the first document here written by a <em>consumer</em>
+     * of {@code professional.event}, which is the case {@code EntityChangeAnnouncer}'s own javadoc
+     * warns about.
+     *
+     * <p>⚠ <b>The reason is not the recursion.</b> That loop would terminate after one hop, because
+     * {@code MeterConsumer} acts on a positive list of three entity types and this is not one of them.
+     * The reason is that the frame would be <em>wrong</em>: {@code professional.event} is hc-admin's
+     * audit trail of a clinician's rows and who changed them, and a local projection of a boolean the
+     * gateway published, written by no person, is not one of those.
+     *
+     * <p>Asserted over a save with a perfectly resolvable id, so that the exclusion is what refuses it
+     * rather than the id check beside it — and over a delete too, since both paths reach
+     * {@code announce}.
+     */
+    @Test
+    void theStepOneProjectionIsNeverAnnouncedOnTheEstatesEntityChannel() {
+        authenticateAsGatewayUser();
+        net.jojoaddison.domain.AccountCompleteness projection = new net.jojoaddison.domain.AccountCompleteness()
+            .accountId(ACCOUNT_ID)
+            .complete(true)
+            .observedAt(Instant.now());
+
+        announcer.onBeforeConvert(new BeforeConvertEvent<>(projection, "account_completeness"));
+        announcer.onAfterSave(new AfterSaveEvent<>(projection, new Document(), "account_completeness"));
+        announcer.onAfterDelete(deleteEvent(new Document("_id", ACCOUNT_ID), projection.getClass(), "account_completeness"));
+
+        verify(publisher, never()).publishEntityChange(anyString(), any(), any(), any(), any());
+    }
+
+    /**
+     * The exclusion is a short list and stays one. A class added to it stops appearing in hc-admin's
+     * audit trail silently — the opposite failure from the one above, and just as quiet — so the list
+     * is spelled out rather than sampled.
+     */
+    @Test
+    void onlyTheStepOneProjectionIsExcluded() {
+        assertThat(EntityChangeAnnouncer.NOT_ANNOUNCED).containsExactly(net.jojoaddison.domain.AccountCompleteness.class);
+    }
+
+    /**
      * The listener is typed to {@code Object}, so it takes an {@code AfterDeleteEvent<Object>} — but
      * that event's constructor takes a {@code Class<T>}, which pins {@code T} to the entity type and
      * makes the diamond refuse. The cast is the seam between the two and is confined to this helper.

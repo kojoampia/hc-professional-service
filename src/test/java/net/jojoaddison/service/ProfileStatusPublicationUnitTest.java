@@ -22,6 +22,7 @@ import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
 import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.VerificationStatus;
+import net.jojoaddison.repository.AccountCompletenessRepository;
 import net.jojoaddison.repository.OnboardingEventRepository;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.repository.ProfessionalApplicationRepository;
@@ -71,6 +72,7 @@ class ProfileStatusPublicationUnitTest {
             mock(OnboardingEventRepository.class),
             profileRepository,
             personalDocumentRepository,
+            mock(AccountCompletenessRepository.class),
             events,
             mock(OrganizationReferenceValidator.class)
         );

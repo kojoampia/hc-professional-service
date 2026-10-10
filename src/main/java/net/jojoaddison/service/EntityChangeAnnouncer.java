@@ -64,6 +64,11 @@ import org.springframework.stereotype.Component;
  * writes back into this database: that loop has a broker in the middle, so it does not announce
  * itself as a stack overflow, it announces itself as traffic.
  *
+ * <p>⭐ <b>That consumer now exists</b> — {@code MeterConsumer}, backlog.md row 230 — and
+ * {@link #NOT_ANNOUNCED} is the exclusion the paragraph above asks for. Read that constant before
+ * adding to it: the reason the one collection in it is excluded is <em>not</em> the recursion, which
+ * would terminate anyway.
+ *
  * <h2>One frame per write, deliberately unlike its neighbour</h2>
  *
  * <p>{@link ProfileStatusAnnouncer} batches to one frame per request, because the frame it sends is a
@@ -115,6 +120,32 @@ public class EntityChangeAnnouncer extends AbstractMongoEventListener<Object> {
 
     /** How many unconsumed conversions one thread may accumulate before the set is dropped. */
     static final int IN_FLIGHT_CAP = 10_000;
+
+    /**
+     * ⛔ Collections this announcer is silent about — <b>the exclusion this class's own javadoc asks
+     * for</b> (see "The recursion guard, and why this one is empty").
+     *
+     * <h2>{@code AccountCompleteness}, since backlog.md row 230</h2>
+     *
+     * <p>It is the first document in this service <b>written by a consumer of
+     * {@code professional.event}</b> — the warning above names exactly that case: <i>"that loop has a
+     * broker in the middle, so it does not announce itself as a stack overflow, it announces itself as
+     * traffic."</i> In fact the loop here would terminate after one hop, because {@code MeterConsumer}
+     * acts only on a positive list of three entity types and this is not one of them. <b>That is not
+     * the reason for the exclusion and must not be taken for it</b>: the reason is that a frame here
+     * would be <em>wrong</em>, not merely wasteful.
+     *
+     * <p>{@code professional.event} is hc-admin's audit trail of this subsystem's domain — a record
+     * that a clinician's row changed and who changed it. A row of
+     * {@code account_completeness} is neither: it is this service's local projection of a boolean the
+     * gateway published, written by no person, and announcing it would put an entity type into
+     * another product's trail that names nothing a reviewer or an auditor could act on.
+     *
+     * <p>⚠ <b>The exclusion is by {@code Class}, not by collection name</b>, so a {@code @Document}
+     * annotation that is renamed cannot silently re-open the channel; and it is checked before the id,
+     * so a frame cannot leak through a path that happens to resolve one.
+     */
+    static final Set<Class<?>> NOT_ANNOUNCED = Set.of(net.jojoaddison.domain.AccountCompleteness.class);
 
     private final DomainEventPublisher publisher;
 
@@ -211,6 +242,9 @@ public class EntityChangeAnnouncer extends AbstractMongoEventListener<Object> {
      * rather than by carrying a placeholder.
      */
     private void announce(Class<?> type, String entityId, EntityChangeAction action) {
+        if (NOT_ANNOUNCED.contains(type)) {
+            return;
+        }
         if (entityId == null) {
             log.debug("A {} on {} resolved to no id — not announced", action, type.getSimpleName());
             return;
