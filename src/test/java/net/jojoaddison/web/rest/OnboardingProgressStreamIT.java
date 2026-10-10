@@ -3,8 +3,10 @@ package net.jojoaddison.web.rest;
 import static net.jojoaddison.security.WithMockGatewayUser.Factory.accountIdFor;
 import static net.jojoaddison.security.WithMockGatewayUser.Factory.gatewayUser;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -273,6 +275,113 @@ class OnboardingProgressStreamIT {
             .getContentAsString();
 
         assertThat(stream.getResponse().getContentAsString()).contains(read);
+    }
+
+    /**
+     * <b>{@code X-Accel-Buffering: no} is on the response, on {@code GET} and on {@code HEAD}</b> —
+     * backlog.md row 230, unit B.
+     *
+     * <p>⚠ This summary read <i>"and without it this endpoint silently does nothing in every deployed
+     * environment"</i> — <b>a claim retracted two paragraphs below, in this same comment, while
+     * remaining the sentence an IDE hover and the generated docs show.</b> It was the last surviving
+     * instance of the phrasing in either repository. A retracted claim left in a javadoc summary is
+     * how a correction gets quietly un-made, so the summary now states what the case asserts and
+     * nothing about what the header prevents.
+     *
+     * <h2>Why a response header and not an nginx directive</h2>
+     *
+     * <p>The web container's nginx — {@code deploy/docker/web-nginx.conf}, which ships in <b>both</b>
+     * quality and production — proxies this path through
+     * {@code location ~ ^/(api|services|management|auth|v3/api-docs|health)(/|$)} and carries <b>no
+     * {@code proxy_buffering off} anywhere in the file</b>. nginx honours this header per response, so
+     * the response is where it belongs. ⛔ <b>{@code /etc/nginx} and {@code deploy/} belong to the
+     * architect; this header is the sanctioned route and editing nginx from here is not.</b>
+     *
+     * <p>⛔ <b>This case asserts the header and NOT that the header fixes anything</b>, and the
+     * distinction was corrected on 2026-10-11 after this javadoc had claimed the endpoint "silently
+     * does nothing" without it. Measured: nginx streams a <b>chunked</b> upstream — which is what
+     * {@link SseEmitter} produces — in real time with buffering <b>on</b>. The header is defence in
+     * depth. {@code OnboardingResource.progressStream} carries the full correction, including that
+     * nginx <em>strips</em> this header so it can only affect the inner hop, and that
+     * {@code proxy_buffering off} is quality's alone — {@code buffering} appears zero times across all
+     * six {@code deploy/} configs.
+     *
+     * <p>⚠ <b>Asserted on the real response rather than reasoned about</b>, because the header is one
+     * line, carries no behaviour of its own in a test, and is exactly the kind of thing a later
+     * refactor back to a bare {@code SseEmitter} return type would drop with every other case still
+     * green. Nothing in {@code api/}'s own test run can observe a proxy at all.
+     */
+    @Test
+    void theStreamTellsNginxNotToBufferIt() throws Exception {
+        restMockMvc
+            .perform(get("/api/onboarding/progress/stream").with(gatewayUser(AMA, "ROLE_USER")))
+            .andExpect(request().asyncStarted())
+            .andExpect(header().string("X-Accel-Buffering", "no"));
+
+        // HEAD beside GET, for the reason headIsGatedAndScopedExactlyLikeGet gives: Spring MVC
+        // dispatches a HEAD to a @GetMapping handler, and a header set on one verb and not the other
+        // is the shape this estate has shipped twice.
+        restMockMvc
+            .perform(head("/api/onboarding/progress/stream").with(gatewayUser(AMA, "ROLE_USER")))
+            .andExpect(header().string("X-Accel-Buffering", "no"));
+    }
+
+    /**
+     * ⭐ <b>The heartbeat is a COMMENT, and that is what stops the stream becoming a second source of
+     * the number</b> — backlog.md row 230, unit B.
+     *
+     * <h2>Why there has to be a heartbeat at all</h2>
+     *
+     * <p>The same nginx location sets {@code proxy_read_timeout 120s}, sized deliberately for slow
+     * {@code /services} round trips — the {@code /websocket} location's 3600s is a different location
+     * and does not apply here. Unit A sends <b>no initial frame and no heartbeat</b>, both deliberately,
+     * so a clinician who opens the page and changes nothing has an idle socket that nginx cuts after two
+     * minutes — and ⚠ <b>the client cannot distinguish that from idleness</b>, because an SSE stream
+     * that has never emitted looks identical whether it is healthy or gone.
+     *
+     * <p>Measured on the running quality stack before this change, as {@code nurse} through
+     * {@code professional.abofonsa.local}: <b>zero bytes in eight seconds — not even the response
+     * headers.</b> Nothing is flushed until something is written, so the status line itself never
+     * arrived. The heartbeat is therefore not only a timeout guard; it is what makes the stream
+     * <em>observable</em> at all.
+     *
+     * <h2>⛔ And why it must carry no data</h2>
+     *
+     * <p>{@code OnboardingResource.progressStream}'s javadoc protects a property: <i>"Pushing a first
+     * frame here would make the stream a second source for the same number."</i> The {@code GET}
+     * computes from the database and is authoritative; the stream only pushes changes. An SSE
+     * <b>comment</b> — a line opening {@code :} — is discarded by every conforming client and carries
+     * no event name and no payload, so it keeps the socket warm without saying anything about the
+     * meter. ⛔ Do not "improve" this into a periodic progress frame: that is the second source this
+     * assertion exists to refuse, and it would also make the meter's freshness depend on the broker.
+     */
+    @Test
+    void theHeartbeatIsACommentAndSaysNothingAboutTheMeter() throws Exception {
+        MvcResult stream = openStream(AMA);
+
+        progressStream.sendHeartbeats();
+
+        String received = stream.getResponse().getContentAsString();
+        assertThat(received).as("the heartbeat must reach an open stream").isNotEmpty().startsWith(":");
+        assertThat(received)
+            .as("⛔ a heartbeat carries no payload — it must not become a second source of the meter")
+            .doesNotContain("data:")
+            .doesNotContain("event:")
+            .doesNotContain(OnboardingProgressStream.EVENT_NAME)
+            .doesNotContain("percent");
+    }
+
+    /**
+     * A heartbeat with nobody connected is a no-op, and must not throw.
+     *
+     * <p>This runs on a scheduler thread every interval for the whole life of the application, and
+     * almost always with no stream open at all — the ordinary case. An exception here would be logged
+     * once per interval for ever, and {@code @Scheduled} suppresses it silently, so the symptom would
+     * be a log nobody reads rather than a failure anybody sees.
+     */
+    @Test
+    void aHeartbeatWithNoOpenStreamDoesNothing() {
+        assertThatNoException().isThrownBy(() -> progressStream.sendHeartbeats());
     }
 
     private MvcResult openStream(String login) throws Exception {
