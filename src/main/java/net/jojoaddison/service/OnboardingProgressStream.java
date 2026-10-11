@@ -9,6 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import net.jojoaddison.service.dto.OnboardingProgressDTO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -74,6 +75,27 @@ public class OnboardingProgressStream {
     public static final String EVENT_NAME = "onboarding-progress";
 
     /**
+     * How often {@link #sendHeartbeats} runs, in milliseconds.
+     *
+     * <p><b>30s against nginx's {@code proxy_read_timeout 120s}</b> — a four-fold margin, so <b>two</b>
+     * consecutive heartbeats can be lost and the next write still arrives inside the window. ⚠ This
+     * said <i>three</i>; at 30s the write after three losses lands at exactly t=120s, on the boundary. ⚠ It
+     * must stay comfortably under that 120s, which lives in {@code deploy/docker/web-nginx.conf} and
+     * therefore in another repository: see {@link #sendHeartbeats} for why this is a constant and not a
+     * bound property.
+     */
+    public static final long HEARTBEAT_MILLIS = 30_000L;
+
+    /**
+     * The body of the heartbeat comment.
+     *
+     * <p>Not empty: {@code SseEmitter} writes a comment as {@code ":" + text + "\n\n"}, and a nameless
+     * one byte on the wire is harder to recognise in a packet capture or an nginx debug log than a word
+     * is. ⛔ It must stay a comment and must not become data — {@link #sendHeartbeats} says why.
+     */
+    private static final String HEARTBEAT_COMMENT = "heartbeat";
+
+    /**
      * Emitters by account id. ⚠ <b>The key is never client-supplied</b> — see the class comment.
      *
      * <p>{@code ConcurrentHashMap} with a concurrent set per account because registration runs on a
@@ -122,6 +144,70 @@ public class OnboardingProgressStream {
                 log.debug("Dropping a closed onboarding progress stream for {}", accountId);
                 remove(accountId, emitter);
                 emitter.complete();
+            }
+        }
+    }
+
+    /**
+     * Keeps every open stream warm with a <b>comment</b>, so nginx does not cut an idle one
+     * (backlog.md row 230, unit B).
+     *
+     * <h2>⚠ Why an idle stream dies, and why the client cannot tell</h2>
+     *
+     * <p>{@code deploy/docker/web-nginx.conf} — the web container's nginx, which ships in <b>both</b>
+     * quality and production — proxies this path through its
+     * {@code ^/(api|services|management|auth|v3/api-docs|health)} location and sets
+     * {@code proxy_read_timeout 120s}, sized for slow {@code /services} round trips. ({@code /websocket}
+     * has 3600s and is a <em>different</em> location; it does not apply here.) {@link #register} opens
+     * the emitter with no timeout of its own precisely because nginx is what bounds it — so with no
+     * traffic at all, a clinician who opens the page and changes nothing has their socket closed after
+     * two minutes.
+     *
+     * <p>⛔ <b>And an SSE stream that has never emitted is indistinguishable from a dead one.</b>
+     * Measured on the running quality stack before this method existed, as {@code nurse} through
+     * {@code professional.abofonsa.local}: <b>zero bytes in eight seconds, not even the response
+     * headers</b> — nothing is flushed until something is written, so even the status line never
+     * arrives. So this is not only a timeout guard; it is what makes the stream observable.
+     *
+     * <p>⚠ <b>That probe says nothing about buffering, and it was briefly cited as though it did.</b>
+     * The response is empty because <em>this application wrote nothing</em> — which is the sentence
+     * immediately above. A stream that has written nothing cannot be evidence about a proxy.
+     * {@code OnboardingResource.progressStream} carries the correction in full. The heartbeat is why
+     * the same probe would answer differently today; nginx has not changed.
+     *
+     * <h2>⭐ A comment, which is the whole point</h2>
+     *
+     * <p>{@code OnboardingResource.progressStream} protects a property: the {@code GET} computes from
+     * the database and is authoritative, and <i>"pushing a first frame here would make the stream a
+     * second source for the same number"</i>. An SSE comment — a line opening {@code :} — is discarded
+     * by every conforming client and carries no event name and no payload, so it keeps the socket warm
+     * <b>without saying anything about the meter</b>. ⛔ Do not turn this into a periodic progress
+     * frame: that is the second source, and it would make the meter's freshness depend on the broker,
+     * which row 230 argued against at length.
+     *
+     * <p>⚠ <b>{@link #HEARTBEAT_MILLIS} is a constant rather than a bound property, deliberately.</b>
+     * The value that matters is nginx's timeout, which ships from a different repository, so a
+     * deploy-time knob here could be set <em>above</em> it and reintroduce exactly this defect with
+     * nothing failing. {@code api/}'s {@code ApplicationProperties} is also
+     * {@code ignoreUnknownFields=false} and its tests load a test-resources config that replaces the
+     * production one, so a new {@code application.*} key is the one class of change {@code clean
+     * verify} cannot see (backlog.md rows 50 and 86). A constant costs an image rebuild to change and
+     * cannot fail a production context.
+     */
+    @Scheduled(fixedRateString = "#{T(net.jojoaddison.service.OnboardingProgressStream).HEARTBEAT_MILLIS}")
+    public void sendHeartbeats() {
+        for (Map.Entry<String, Set<SseEmitter>> account : emitters.entrySet()) {
+            for (SseEmitter emitter : List.copyOf(account.getValue())) {
+                try {
+                    emitter.send(SseEmitter.event().comment(HEARTBEAT_COMMENT));
+                } catch (IOException | IllegalStateException e) {
+                    // Same reading as in push: a send that throws means the client is gone. A
+                    // heartbeat is in fact the only thing that notices a client which disappeared
+                    // without closing cleanly while nothing was being pushed.
+                    log.debug("Dropping a closed onboarding progress stream for {}", account.getKey());
+                    remove(account.getKey(), emitter);
+                    emitter.complete();
+                }
             }
         }
     }

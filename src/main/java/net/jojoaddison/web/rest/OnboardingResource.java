@@ -96,10 +96,59 @@ public class OnboardingResource {
      * value: that read is authoritative, computes from the database, and answers with
      * {@code application.kafka.enabled=false} — a supported configuration. Pushing a first frame here
      * would make the stream a second source for the same number.
+     *
+     * <h2>{@code X-Accel-Buffering: no} — defence in depth, and <b>not</b> the repair of a measured break</h2>
+     *
+     * <p>Added by backlog.md row 230, <b>unit B</b>. The web container's nginx —
+     * {@code deploy/docker/web-nginx.conf}, which ships in <b>both</b> quality and production — proxies
+     * this path through its {@code ^/(api|services|management|auth|v3/api-docs|health)} location and
+     * carries <b>no {@code proxy_buffering off} anywhere in the file</b>. nginx honours this header per
+     * response, so the response is the right place to say it. ⛔ <b>Not nginx itself:</b>
+     * {@code /etc/nginx} and {@code deploy/} belong to the architect, and a header the application sets
+     * travels with the artefact rather than depending on another repository's file staying right.
+     *
+     * <h2>⛔ What this javadoc claimed, and what measurement says — corrected 2026-10-11</h2>
+     *
+     * <p>It asserted in bold that <i>without this header the endpoint "silently does nothing in every
+     * deployed environment"</i> and that <i>"a buffered SSE response is indistinguishable from a hung
+     * one"</i>. ⚠ <b>Both overstate the evidence.</b> With a <b>chunked</b> upstream — which is exactly
+     * what {@link SseEmitter} produces — nginx streams SSE frames in real time with buffering
+     * <b>on</b>, through one hop and through two, on 1.27.5 and on 1.31.4 — the former being what
+     * {@code web.Dockerfile}'s <b>floating</b> {@code nginx:1.27-alpine} resolves to today. ⚠ Nothing
+     * pins it, so that is a fact about this week rather than about the artefact. The all-at-once failure reproduces only against a non-chunked
+     * {@code Connection: close} origin, which is not Spring's shape.
+     *
+     * <p>⛔ <b>And the "zero bytes in eight seconds" probe quoted in support of it does not distinguish
+     * the hypotheses.</b> It is fully explained by the server having written nothing at all before
+     * {@link OnboardingProgressStream#sendHeartbeats()} existed — which the heartbeat note below says
+     * in its own words, one paragraph later. <b>A stream that has written nothing is not evidence about
+     * a proxy.</b> The reading was accurate and the conclusion drawn from it did not follow, which is
+     * this estate's recurring shape; the correction is kept rather than quietly edited out.
+     *
+     * <p>⚠ Two further facts, because getting them wrong sends a debugger to the wrong hop. nginx
+     * <b>consumes and strips</b> this header, so it can only ever affect the <b>inner</b> hop and the
+     * outer one never sees it. And <i>"the host vhost disables buffering"</i> is true of <b>quality
+     * only</b>: {@code quality/host-site.conf} carries {@code proxy_buffering off} twice, while
+     * {@code buffering} appears <b>zero times across all six nginx configs in {@code deploy/}</b> —
+     * the outer production vhost included (measured on {@code origin/main}, 2026-10-11). In production
+     * <b>neither</b> hop disables it.
+     *
+     * <p>So the header stays — one line, free, correct in intent, and the sanctioned route — but it is
+     * insurance against a configuration this estate could adopt, not a fix for an observed failure.
+     *
+     * <p>⚠ <b>{@link ResponseEntity} is what carries it, so the return type is load-bearing</b> —
+     * a refactor back to a bare {@code SseEmitter} drops the header with every other case still green.
+     * {@code OnboardingProgressStreamIT.theStreamTellsNginxNotToBufferIt} asserts it on the real
+     * response, on {@code HEAD} as well as {@code GET}.
+     *
+     * <p>⚠ <b>And an idle stream still needs a heartbeat</b>, which is the other half of the same
+     * problem: the same nginx location sets {@code proxy_read_timeout 120s}. See
+     * {@link OnboardingProgressStream#sendHeartbeats()}, which keeps the socket warm with a
+     * <em>comment</em> — carrying no data, so the stream does not become a second source of the meter.
      */
     @GetMapping("/progress/stream")
-    public SseEmitter progressStream() {
-        return progressStream.register(currentAccountId());
+    public ResponseEntity<SseEmitter> progressStream() {
+        return ResponseEntity.ok().header("X-Accel-Buffering", "no").body(progressStream.register(currentAccountId()));
     }
 
     public record AcknowledgementStatus(boolean acknowledged) {}
