@@ -65,7 +65,7 @@
     {
       "fieldName": "cardType",
       "fieldType": "DocumentType",
-      "fieldValues": "PASSPORT,CERTIFICATE,LICENSE,GHANACARD,PASSPHOTO,DRIVERLICENSE,VOTERCARD,NHIS,OTHER"
+      "fieldValues": "PASSPORT,CERTIFICATE,LICENSE,GHANACARD,PASSPHOTO,DRIVERLICENSE,VOTERCARD,NHIS,OTHER,AVATAR"
     },
     {
       "fieldName": "cardNumber",

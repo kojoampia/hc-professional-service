@@ -324,6 +324,9 @@ public class OnboardingService {
      * that method now asks this rather than repeating the rule — one definition, for the reason
      * {@link #isCurrentVerifiedLicense} gives at length. Archived rows are excluded: a superseded
      * upload is credential history, not something still awaiting a reviewer.
+     *
+     * <p>⛔ <b>So is the avatar</b>, and that exclusion is load-bearing rather than tidy — see
+     * {@link #isReviewableCredential}.
      */
     public boolean allLiveDocumentsVerified(String profileId) {
         if (profileId == null) {
@@ -333,8 +336,35 @@ public class OnboardingService {
             .findByProfileId(profileId)
             .stream()
             .filter(PersonalDocumentService::isLive)
+            .filter(OnboardingService::isReviewableCredential)
             .toList();
         return !live.isEmpty() && live.stream().allMatch(d -> d.getVerificationStatus() == VerificationStatus.VERIFIED);
+    }
+
+    /**
+     * ⛔ <b>A document a reviewer gives a verdict on — which excludes the avatar, and this is the
+     * predicate that let row 232 add {@link DocumentType#AVATAR} at all.</b>
+     *
+     * <p>Every requirement predicate in this class is positive: it names the type it wants, so a new
+     * type satisfies none of them by construction and {@code REQ_PHOTO} needed no edit.
+     * {@link #allLiveDocumentsVerified} is the one aggregation that quantifies over a profile's
+     * documents <em>without</em> naming a type, and it is an {@code allMatch(VERIFIED)} — so an avatar
+     * stored {@code PENDING} and left in that set would have made it answer {@code false} for ever.
+     *
+     * <p><b>What that reaches is not cosmetic.</b> The 409 in
+     * {@link #requireAllMandatoryDocumentsVerified} gates approval, so <em>every clinician who
+     * uploaded an avatar could never be approved</em> — and with no action open to anyone, because
+     * nothing in the estate can verify an avatar: no reviewer surface lists one. It also feeds the
+     * {@code documentsVerified} flag on the {@code ProfileStatus} event hc-admin reads, so hc-admin's
+     * view of this product would have gone quietly false at the same moment.
+     *
+     * <p>⚠ <b>Type-based rather than status-based, deliberately.</b> Storing the avatar
+     * {@code VERIFIED} would also have cleared the {@code allMatch}, and was rejected: it would assert
+     * that somebody checked a photograph nobody looked at, and it would render as a verified
+     * credential anywhere the status is shown. The exclusion belongs where the question is asked.
+     */
+    private static boolean isReviewableCredential(PersonalDocument document) {
+        return document.getType() != DocumentType.AVATAR;
     }
 
     /** Attribution is a short opaque label; cap it so the field can't be abused as free storage. */
@@ -704,9 +734,17 @@ public class OnboardingService {
      * archived row and keep it out of its own "every document verified" check — which is the client
      * mirror of {@link #requireAllMandatoryDocumentsVerified}, and would otherwise let an archived
      * row block approval from the browser after the server had stopped letting it.
+     *
+     * <p>⛔ <b>The avatar is NOT included</b> (row 232), and the client mirror named in the previous
+     * paragraph is the sharpest reason: that screen's "every document verified" check runs over
+     * whatever this returns, so a {@code PENDING} avatar here would block approval <em>from the
+     * browser</em> after {@link #allLiveDocumentsVerified} had stopped blocking it on the server —
+     * the same two-answers-to-one-question failure that paragraph is about, arriving by a new route.
+     * Beside that it is a plain privacy point: a reviewer credentialing a nurse has no business being
+     * handed a photograph of her, and the byte stream behind this list would serve it in full.
      */
     public List<PersonalDocument> documentsForApplication(String applicationId) {
-        return documentsFor(getById(applicationId));
+        return documentsFor(getById(applicationId)).stream().filter(OnboardingService::isReviewableCredential).toList();
     }
 
     public PersonalDocument verifyDocument(String documentId, String actor) {
