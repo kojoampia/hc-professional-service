@@ -90,6 +90,16 @@ public class SecurityConfiguration {
                     // this service. So the prefix is required, and the plural literal is spelled too
                     // because "/api/personal-document/**" does not match "/api/personal-document".
                     //
+                    // THE AVATAR UPLOAD ADDED NO LINE HERE AND NEEDS NONE (backlog.md row 232).
+                    // POST /api/personal-document/avatar matches the prefix below, and matches it
+                    // BEFORE `POST /api/** -> CLINICAL_MUTATION` further down, because the first
+                    // matching rule wins. That ordering is the whole of why the handler works for the
+                    // caller it exists for: `imageUrl` is a step-1 field, step 1 is performed by an
+                    // applicant holding ROLE_USER and nothing else, and every clinical authority list
+                    // excludes ROLE_USER -- so an authority gate on that upload would 403 exactly the
+                    // people it is for, which is a defect and not a hardening. Asserted by
+                    // OwnPersonalDocumentAvatarIT rather than left to this comment.
+                    //
                     // /api/personal-document IS NOT /api/personal-documents, and this is the line that
                     // depends on it. The PLURAL path is PersonalDocumentResource -- the generated CRUD
                     // surface, and it maps NO GET since S1 closed (backlog.md row 226): its three GETs

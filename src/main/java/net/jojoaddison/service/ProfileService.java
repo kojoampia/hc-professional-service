@@ -44,15 +44,16 @@ public class ProfileService {
      *
      * The paths that legitimately create a profile do it through the repository, each with its own
      * reason recorded: `partialUpdateOwnProfile` below (the caller's own, because profile.md's step 2
-     * IS "create the profile" and PUT /api/profile is the endpoint it names) and
-     * `updatePushPreferences` below (the caller's own, so a toggle works before onboarding finishes).
-     * `OnboardingService.upsertOwnProfile` was a third until F8 retired it with
-     * /api/onboarding/profile.
+     * IS "create the profile" and PUT /api/profile is the endpoint it names), `updatePushPreferences`
+     * below (the caller's own, so a toggle works before onboarding finishes) and
+     * `adoptOrCreateOwnProfile` below (the caller's own, so an avatar can be uploaded in step 1,
+     * before step 2 has run — backlog.md row 232). `OnboardingService.upsertOwnProfile` was another
+     * until F8 retired it with /api/onboarding/profile.
      *
      * There were two until profile.md's T1 and this sentence said so; it is a count maintained by
      * hand, so prefer the shared property to the tally — EVERY ONE OF THEM FORCES accountId FROM THE
      * CALLER'S TOKEN AND NONE TAKES IT FROM A BODY. That is the invariant item 54 exists for, and a
-     * fourth writer that honours it is fine while a third that did not would be the takeover again.
+     * further writer that honours it is fine while one that did not would be the takeover again.
      */
 
     /**
@@ -206,6 +207,52 @@ public class ProfileService {
             merged.setStatus(ProfileStatus.PROFILE_COMPLETED);
         }
         return profileRepository.save(merged);
+    }
+
+    /**
+     * The caller's own profile row, created holding nothing but the account id if there is not one
+     * yet — for a write that must work <b>before</b> {@code profile.md}'s step 2 has run (row 232).
+     *
+     * <h2>⛔ Why an avatar upload cannot simply demand a profile the way a document upload does</h2>
+     *
+     * <p>{@code OwnPersonalDocumentResource.ownProfile()} answers 400 — <i>"create your professional
+     * profile before uploading documents"</i> — and that is right for a credential, because step 3
+     * genuinely follows step 2. <b>The avatar is in step 1</b>, which precedes step 2, so the same
+     * refusal would make the field unsatisfiable in exactly the order the wizard asks for it: the
+     * step-1 dialog opens because {@code imageUrl} is empty, the upload 400s because step 2 has not
+     * happened, and the dialog reopens for ever. That is the defect row 232 exists to close, reached
+     * by a different route.
+     *
+     * <p><b>Adopt, do not duplicate.</b> {@code findByAccountId} first, exactly as
+     * {@link #partialUpdateOwnProfile} and {@link #updatePushPreferences} do — nothing in the schema
+     * forbids two profiles under one account, so a path that always created would let one account
+     * accumulate them, which is the reasoning backlog.md item 66 rejected a token-forced
+     * {@code POST /api/profiles} on. A later step-2 write finds this row by {@code accountId} and
+     * fills it in.
+     *
+     * <p>⭐ <b>The row it creates is deliberately incomplete and stays that way.</b>
+     * {@link ProfileCompleteness} wants 39 values, so a document holding only an {@code accountId}
+     * can never be {@code PROFILE_COMPLETED} — and unlike {@link #partialUpdateOwnProfile} this
+     * method does not even evaluate the predicate, because it applies no fields a caller named and so
+     * cannot have moved the answer. The step-2 meter reads this account exactly as it did before the
+     * avatar arrived.
+     *
+     * <p>⚠ No {@code entity.created} is published, which is {@link #updatePushPreferences}'s
+     * precedent and that method's argument: the save raises {@code AfterSaveEvent}, so
+     * {@code ProfileStatusAnnouncer} announces {@code ProfileStatus} from there, which is the half
+     * the estate consumes.
+     *
+     * @param accountId the caller's gateway {@code User.id}, from the {@code uid} claim — never from
+     *     a request body, which is the invariant every creator on this class shares.
+     * @return the stored profile, adopted or newly created.
+     */
+    public Profile adoptOrCreateOwnProfile(String accountId) {
+        return profileRepository
+            .findByAccountId(accountId)
+            .orElseGet(() -> {
+                log.debug("Creating a profile holding only the account id for {} — an avatar before step 2", accountId);
+                return profileRepository.save(new Profile().accountId(accountId));
+            });
     }
 
     /**

@@ -4,6 +4,7 @@ import java.util.Objects;
 import java.util.Optional;
 import net.jojoaddison.broker.DomainEventPublisher;
 import net.jojoaddison.domain.PersonalDocument;
+import net.jojoaddison.domain.enumeration.DocumentType;
 import net.jojoaddison.repository.PersonalDocumentRepository;
 import net.jojoaddison.service.PersonalDocumentService;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
@@ -11,8 +12,10 @@ import net.jojoaddison.web.rest.util.LocationUri;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 import tech.jhipster.web.util.HeaderUtil;
 import tech.jhipster.web.util.ResponseUtil;
 
@@ -122,6 +125,24 @@ public class PersonalDocumentResource {
     /**
      * {@code POST  /personal-documents} : Create a new personalDocument.
      *
+     * <h2>⛔ It refuses {@code type: AVATAR}, and the reason is the same one the singular path's
+     * generic {@code POST} refuses it for — only more so (backlog.md row 232)</h2>
+     *
+     * <p>An avatar is created by {@code OwnPersonalDocumentResource.uploadAvatar} and nowhere else.
+     * <b>This handler binds the whole entity</b>, which is what makes the refusal sharper here than
+     * there: a body arriving on this path chooses its own {@code profileId}, its own
+     * {@code verificationStatus} and its own {@code sizeBytes}, and the handler applies none of the
+     * avatar rules — no 2 MB ceiling, no two-member allow-list, no magic-byte check and <b>no metadata
+     * strip, so a photograph's GPS coordinates would be stored verbatim</b> and then served by the
+     * owner-or-reviewer byte stream. So the one path that could write an avatar <em>onto somebody
+     * else's profile</em> is also the one that would write it unscrubbed.
+     *
+     * <p>⚠ <b>Create only.</b> The {@code PUT} and {@code PATCH} below can still move an existing
+     * row's {@code type} in or out of {@code AVATAR}, and that is <b>not</b> closed here: those two
+     * are backlog.md row 227's surface — ownership residue on an admin data-maintenance path — and
+     * reaching them at all needs one of {@code CLINICAL_MUTATION}'s six, which an applicant is not.
+     * The type-mutation observation is recorded for that row rather than fixed under this one.
+     *
      * @param personalDocument the personalDocument to create.
      * @return the {@link ResponseEntity} with status {@code 201 (Created)} and with body the new personalDocument, or with status {@code 400 (Bad Request)} if the personalDocument has already an ID.
      */
@@ -130,6 +151,18 @@ public class PersonalDocumentResource {
         log.debug("REST request to save PersonalDocument : {}", personalDocument);
         if (personalDocument.getId() != null) {
             throw new BadRequestAlertException("A new personalDocument cannot already have an ID", ENTITY_NAME, "idexists");
+        }
+        // ⚠ ResponseStatusException and not BadRequestAlertException like the four refusals around it,
+        // which is a deliberate break from this file's idiom and was decided by measurement rather than
+        // taste. BadRequestAlertException passes its defaultMessage to `withTitle`, and the rendered
+        // body overwrites the title with the status — measured: `{"title":"Bad Request", …,
+        // "message":"error.avatarownpathonly"}`, with `detail` null. So the human sentence is DROPPED
+        // and only the key survives. That is fine for `idexists` and `idnull` beside it, which tell a
+        // machine that its own request was malformed; this refusal exists to tell a PERSON which
+        // endpoint to use instead, and a refusal naming no alternative is how somebody concludes the
+        // avatar cannot be uploaded at all.
+        if (personalDocument.getType() == DocumentType.AVATAR) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Upload an avatar through POST /api/personal-document/avatar");
         }
 
         personalDocument = personalDocumentService.save(personalDocument);
