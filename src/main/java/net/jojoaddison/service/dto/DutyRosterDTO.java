@@ -38,9 +38,9 @@ import net.jojoaddison.domain.enumeration.ShiftType;
  * name and against the response body. Assert absence rather than presence if you extend it — a
  * serialiser change that put a field back would pass every positive assertion unchanged.
  */
-public final class DutyRosterDtos {
+public final class DutyRosterDTO {
 
-    private DutyRosterDtos() {}
+    private DutyRosterDTO() {}
 
     /**
      * One visit, as a read that is not the day view may see it.

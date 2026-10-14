@@ -31,7 +31,7 @@ import org.springframework.web.client.RestClientResponseException;
  * is the conflation this type exists to remove — but breadth means a <em>schema</em> fault arrives
  * here too. Jackson throws on a field the sibling has changed the type of, and the whole clinician
  * surface then answers 503 <em>persistently</em>, until a DTO or the sibling changes; that drift has
- * happened once already (see {@code PatientServiceDtos.ActivityLog}, corrected 2026-08-22). Both are
+ * happened once already (see {@code PatientServiceDTO.ActivityLog}, corrected 2026-08-22). Both are
  * 503 on purpose — showing a clinician an empty record is worse than showing them an error either
  * way — but an operator must be able to tell "the sibling is down" from "this service cannot read
  * the sibling", because only one of the two clears itself. So every one of these names its fault, in
@@ -119,7 +119,7 @@ public class PatientServiceUnavailableException extends RuntimeException {
      * an operator to three wrong places. Before this key a {@code SCHEMA} clinician read the true, opaque,
      * untranslated operator sentence; with two keys they read a false, fluent, translated retry
      * instruction. Confidently wrong is worse than merely opaque, and {@code SCHEMA} is the one fault here
-     * with a production precedent — see this class's own note on {@code PatientServiceDtos.ActivityLog},
+     * with a production precedent — see this class's own note on {@code PatientServiceDTO.ActivityLog},
      * corrected 2026-08-22.
      *
      * <p><b>It says a third thing, not a softer version of the other two.</b> A refusal is about who is
@@ -177,7 +177,7 @@ public class PatientServiceUnavailableException extends RuntimeException {
          *
          * <p>The one fault here that is a defect in <em>this</em> repository rather than a condition
          * of the estate, and the one that persists: every subsequent read fails identically until a
-         * DTO in {@code PatientServiceDtos} or the sibling's schema changes.
+         * DTO in {@code PatientServiceDTO} or the sibling's schema changes.
          */
         SCHEMA("the sibling's response did not fit this service's DTOs", false),
         /** There was no caller token to relay, so the request was never made. */

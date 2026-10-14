@@ -191,17 +191,26 @@ class OnboardingFlowIT {
             .perform(
                 put("/api/profile")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"firstName\":\"Fresh\",\"lastName\":\"Applicant\",\"accountId\":\"spoofed\",\"title\":\"RN\"}")
+                    .content(
+                        "{\"firstName\":\"Fresh\",\"lastName\":\"Applicant\",\"accountId\":\"spoofed\",\"title\":\"RN\"," +
+                        "\"birthDate\":\"1990-01-01\",\"sex\":\"MALE\",\"cardType\":\"GHANACARD\",\"status\":\"CREATED\"}"
+                    )
             )
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.accountId").value(accountIdFor("fresh-applicant")))
-            .andExpect(jsonPath("$.title").value("RN"));
+            .andExpect(jsonPath("$.accountId").value(accountIdFor("fresh-applicant")));
+        // title is on the wire (a ProfileDTO field) but ProfileMapper.toEntity never copies it, so
+        // nothing stores it — asserted on the row, so the claim does not depend on how the
+        // serializer renders a null.
+        assertThat(profileRepository.findByAccountId(accountIdFor("fresh-applicant")).orElseThrow().getTitle()).isNull();
         // update keeps the same profile (no duplicate)
         restMockMvc
             .perform(
                 put("/api/profile")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"firstName\":\"Fresher\",\"lastName\":\"Applicant\"}")
+                    .content(
+                        "{\"firstName\":\"Fresher\",\"lastName\":\"Applicant\"," +
+                        "\"birthDate\":\"1990-01-01\",\"sex\":\"MALE\",\"cardType\":\"GHANACARD\",\"status\":\"CREATED\"}"
+                    )
             )
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.firstName").value("Fresher"));

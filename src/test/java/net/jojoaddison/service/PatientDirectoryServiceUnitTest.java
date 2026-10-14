@@ -20,14 +20,14 @@ import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.repository.TaskRepository;
 import net.jojoaddison.security.WithMockGatewayUser;
 import net.jojoaddison.service.PatientDirectoryService.DirectoryFilter;
-import net.jojoaddison.service.dto.PatientDtos.CreateActivity;
-import net.jojoaddison.service.dto.PatientDtos.CreateReport;
-import net.jojoaddison.service.dto.PatientDtos.PatientListItem;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ActivityLog;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.PatientProfile;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.Report;
+import net.jojoaddison.service.dto.PatientDTO.CreateActivity;
+import net.jojoaddison.service.dto.PatientDTO.CreateReport;
+import net.jojoaddison.service.dto.PatientDTO.PatientListItem;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.ActivityLog;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.ClinicalCase;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.PatientProfile;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.Report;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -648,7 +648,7 @@ class PatientDirectoryServiceUnitTest {
         when(patientService.activityLogs(RECORDED)).thenReturn(List.of(loggedFor("al-1", RECORDED)));
         when(patientService.medications(RECORDED)).thenReturn(
             List.of(
-                new PatientServiceDtos.Medication(
+                new PatientServiceDTO.Medication(
                     "med-1",
                     RECORDED,
                     null,
@@ -1623,8 +1623,8 @@ class PatientDirectoryServiceUnitTest {
 
     // --- Cases (web-mobile-port.md § Phase 1.4) -----------------------------------------------
 
-    private static PatientServiceDtos.ClinicalCase aCase(String id, String patientId, String status, String assignedTo) {
-        return new PatientServiceDtos.ClinicalCase(
+    private static PatientServiceDTO.ClinicalCase aCase(String id, String patientId, String status, String assignedTo) {
+        return new PatientServiceDTO.ClinicalCase(
             id,
             patientId,
             1,
@@ -1666,7 +1666,7 @@ class PatientDirectoryServiceUnitTest {
 
     @Test
     void anARCHIVEDcaseIsNotInTheWORKINGqueue() {
-        var archived = new PatientServiceDtos.ClinicalCase(
+        var archived = new PatientServiceDTO.ClinicalCase(
             "c-old",
             MINE,
             1,
@@ -1946,8 +1946,8 @@ class PatientDirectoryServiceUnitTest {
     // --- An archived case is readable, and only by the people it always was (backlog.md item 82) ---
 
     /** The archived twin of {@link #aCase}: same shape, retired at a stated instant. */
-    private static PatientServiceDtos.ClinicalCase anArchivedCase(String id, String patientId, String assignedTo) {
-        return new PatientServiceDtos.ClinicalCase(
+    private static PatientServiceDTO.ClinicalCase anArchivedCase(String id, String patientId, String assignedTo) {
+        return new PatientServiceDTO.ClinicalCase(
             id,
             patientId,
             1,

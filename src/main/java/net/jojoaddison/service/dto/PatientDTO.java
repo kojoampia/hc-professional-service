@@ -9,9 +9,9 @@ import java.util.List;
  * That file predates this implementation and its specs are written against these exact names, so a
  * rename in either place is a silent 200-with-nulls rather than a failure.
  */
-public final class PatientDtos {
+public final class PatientDTO {
 
-    private PatientDtos() {}
+    private PatientDTO() {}
 
     /** A row in the patient directory. {@code isChild} is derived, never stored. */
     public record PatientListItem(String id, String patientName, String lastActivityAt, String sex, boolean isChild) {}

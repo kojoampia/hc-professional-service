@@ -22,21 +22,21 @@ import net.jojoaddison.repository.PatientWriteReceiptRepository;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.repository.TaskRepository;
 import net.jojoaddison.security.SecurityUtils;
-import net.jojoaddison.service.dto.PatientDtos.ActivityLogEntry;
-import net.jojoaddison.service.dto.PatientDtos.CaseDetail;
-import net.jojoaddison.service.dto.PatientDtos.CaseSummary;
-import net.jojoaddison.service.dto.PatientDtos.ClinicalReport;
-import net.jojoaddison.service.dto.PatientDtos.CreateActivity;
-import net.jojoaddison.service.dto.PatientDtos.CreateReport;
-import net.jojoaddison.service.dto.PatientDtos.DashboardSummary;
-import net.jojoaddison.service.dto.PatientDtos.EmergencyContact;
-import net.jojoaddison.service.dto.PatientDtos.PatientListItem;
-import net.jojoaddison.service.dto.PatientDtos.PatientRecord;
-import net.jojoaddison.service.dto.PatientDtos.RecordEntry;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ActivityLog;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.PatientProfile;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.Report;
+import net.jojoaddison.service.dto.PatientDTO.ActivityLogEntry;
+import net.jojoaddison.service.dto.PatientDTO.CaseDetail;
+import net.jojoaddison.service.dto.PatientDTO.CaseSummary;
+import net.jojoaddison.service.dto.PatientDTO.ClinicalReport;
+import net.jojoaddison.service.dto.PatientDTO.CreateActivity;
+import net.jojoaddison.service.dto.PatientDTO.CreateReport;
+import net.jojoaddison.service.dto.PatientDTO.DashboardSummary;
+import net.jojoaddison.service.dto.PatientDTO.EmergencyContact;
+import net.jojoaddison.service.dto.PatientDTO.PatientListItem;
+import net.jojoaddison.service.dto.PatientDTO.PatientRecord;
+import net.jojoaddison.service.dto.PatientDTO.RecordEntry;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.ActivityLog;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.ClinicalCase;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.PatientProfile;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.Report;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
@@ -925,7 +925,7 @@ public class PatientDirectoryService {
                 null,
                 cases,
                 // Visitations have no source: patientservice serves no visitation collection, and
-                // this service holds none. Empty rather than invented — see PatientDtos.
+                // this service holds none. Empty rather than invented — see PatientDTO.
                 List.of(),
                 activities,
                 medications,
@@ -1682,7 +1682,7 @@ public class PatientDirectoryService {
             .filter(a -> a.patientId() != null && (a.loggedAt() != null || a.createdDate() != null))
             .collect(
                 Collectors.toMap(
-                    net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ActivityLog::patientId,
+                    net.jojoaddison.service.dto.patientservice.PatientServiceDTO.ActivityLog::patientId,
                     a -> occurredAt(a.loggedAt(), a.createdDate()),
                     (a, b) -> a.compareTo(b) >= 0 ? a : b
                 )

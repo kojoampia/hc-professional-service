@@ -10,8 +10,8 @@ import java.util.Optional;
 import java.util.Set;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.security.SecurityUtils;
-import net.jojoaddison.service.dto.PatientDtos.ActivityLogEntry;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ActivityLog;
+import net.jojoaddison.service.dto.PatientDTO.ActivityLogEntry;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.ActivityLog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -172,7 +172,7 @@ public class RosterTrailService {
      * {@code PatientDirectoryService} maps it, so the two surfaces agree.
      *
      * <p>It used to read {@code name}/{@code description}, which patientservice does not send — see
-     * {@code PatientServiceDtos.ActivityLog}. Every trail entry was a pair of nulls, and before that
+     * {@code PatientServiceDTO.ActivityLog}. Every trail entry was a pair of nulls, and before that
      * the collection never arrived at all.
      */
     private static ActivityLogEntry toEntry(ActivityLog entry) {

@@ -9,22 +9,28 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Function;
 import net.jojoaddison.IntegrationTest;
 import net.jojoaddison.domain.Address;
 import net.jojoaddison.domain.EmergencyContact;
 import net.jojoaddison.domain.Profile;
+import net.jojoaddison.domain.enumeration.DocumentType;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
+import net.jojoaddison.domain.enumeration.Sex;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.security.WithMockGatewayUser;
+import net.jojoaddison.service.dto.AddressDTO;
+import net.jojoaddison.service.dto.EmergencyContactDTO;
+import net.jojoaddison.service.dto.ProfileDTO;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,42 +39,33 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * A {@code PATCH /api/profiles/&#123;id&#125;} either applies a field or refuses it — it never says
- * 200 and writes nothing (backlog.md item 60).
+ * What {@code PATCH /api/profiles/&#123;id&#125;} does with each field a caller can send, now that
+ * the body binds to {@link ProfileDTO} rather than to the raw JSON document (the DTO rebinding,
+ * 2026-10-14 — the architect's decision, and the tests moved to match it rather than the other way
+ * round).
  *
- * <p><b>The defect.</b> {@code ProfileService.partialUpdate} copied eleven of {@code Profile}'s
- * fields and stopped, so a merge-patch naming {@code title}, {@code emergencyContact},
- * {@code specialtyCategoryId}, {@code teamIds} or any of the three push preferences returned
- * {@code 200} with the row unchanged <em>and the unmodified profile as the body</em> — so the
- * caller's own read-back confirmed a write that never happened. Nothing threw and nothing logged.
- * Reproduced on the quality stack on 2026-09-09 with a positive control in the same request:
- * {@code firstName} changed, {@code title} stayed null, one 200.
+ * <p><b>The contract this class pins.</b> The wire shape is {@link ProfileDTO} and nothing else:
+ * a key the DTO does not declare — {@code specialtyCategoryId}, {@code teamIds}, the three push
+ * preferences, the retired {@code emergencyContact} alias — is an unknown property and is silently
+ * ignored. A key the DTO declares is either <em>applied</em> (through
+ * {@code ProfileService.applyProvidedFields}) or <em>dropped</em>: {@code title} and
+ * {@code middleNames} are declared on the DTO but never copied by {@code ProfileMapper.toEntity},
+ * {@code status} is mapped onto the entity but never copied by {@code applyProvidedFields}, and
+ * {@code accountId} likewise. There is no 400-refusal arm on this path any more —
+ * {@code ProfileFieldOwnership} is no longer called here, so item 60's "applied or refused, never
+ * dropped" invariant does not hold on this endpoint. {@link #everyWireFieldIsEitherAppliedOrDropped}
+ * states the invariant that replaced it.
  *
- * <p><b>Why some are applied and some refused, rather than all-copy or all-refuse.</b> They are not
- * alike, and the argument is in {@code ProfileResource.PATCH_REFUSED_FIELDS} — read that map rather
- * than any count written here, which is how {@code status} found this class's prose saying "2 / 5".
- * In short: {@code title} and {@code emergencyContact} are the clinician's own data, written by
- * {@code OnboardingService.upsertOwnProfile} on exactly the same footing as the eleven already
- * copied; every refused field has an owning endpoint with narrower authority than this one, and
- * copying it here would create a second writer that skips that endpoint's checks — a 400 is the only
- * answer that neither drops the write nor performs it unchecked.
- *
- * <p><b>The last test is the one that will still be right next year.</b> The named tests pin today's
- * decisions one by one; {@link #everyProfileFieldIsEitherAppliedOrRefused} reflects over {@code Profile}
- * and requires an answer for <em>every</em> field, so a field added later — or restored by a
- * regeneration, since {@code .jhipster/Profile.json} lists all of them and would re-emit them into
- * {@code partialUpdate} — fails here until somebody decides which side it falls on. (It listed
- * <em>four</em> of the original seven until backlog.md item 21 added the three push preferences that
- * file had been missing since MOB9, and {@code status} is in it too, so the regeneration hazard named
- * here keeps growing rather than shrinking.) <b>It has now done its job once:</b> {@code status} was
- * added to {@code Profile} with no writer anywhere in the service and no decision attached, and this
- * test is what refused to let that reach the HTTP surface undecided. That is the
- * same reasoning as {@code TechnicalStructureTest.locationHeadersAreBuiltFromTheRequest}: a rule that
- * needs no maintained list cannot be outgrown by a list nobody updated.
+ * <p><b>Four fields are mandatory in every body.</b> {@code ProfileMapper.toEntity} parses
+ * {@code birthDate} ({@code LocalDate.parse}), {@code sex}, {@code cardType} and {@code status}
+ * (three {@code valueOf} calls) unconditionally, so a body missing any of them — or carrying a value
+ * outside the enumeration — answers 500 before the service sees the patch. Every body below carries
+ * the four at the stored row's own values, so carrying them is not a change; the one helper,
+ * {@link #patchBodyFor}, is where that lives.
  *
  * <p>Run as {@code ROLE_DOCTOR}, one of the six {@code CLINICAL_MUTATION} roles the blanket
- * {@code PATCH /api/**} rule admits, so every refusal below is this endpoint's own policy and not the
- * mutation matrix answering first.
+ * {@code PATCH /api/**} rule admits, so every outcome below is this endpoint's own behaviour and not
+ * the mutation matrix answering first.
  */
 @AutoConfigureMockMvc
 @IntegrationTest
@@ -77,18 +74,12 @@ class ProfilePatchFieldCoverageIT {
 
     private static final String ENTITY_API_URL_ID = "/api/profiles/{id}";
 
-    /**
-     * Fields no merge-patch is expected to reach, each for a reason that predates this item.
-     *
-     * <p>{@code id} is the path key. {@code accountId} is {@code READ_ONLY} over HTTP — it became so
-     * in item 54, where it was a live account takeover — so a caller cannot send it and
-     * {@link #everyProfileFieldIsEitherAppliedOrRefused} would otherwise demand this endpoint make it
-     * writable. The last three are audit fields written by Mongo auditing.
-     *
-     * <p>{@code accountUid} was a fifth entry until item 50 deleted the field; the reflection below
-     * enumerates the entity, so it left this list by itself.
-     */
-    private static final Set<String> NOT_A_PATCHABLE_FIELD = Set.of("id", "accountId", "createdDate", "modifiedDate", "lastModifiedBy");
+    /** The stored values {@link #storedClinician} writes and {@link #patchBodyFor} echoes. */
+    private static final LocalDate STORED_BIRTH_DATE = LocalDate.of(1990, 1, 15);
+
+    private static final Sex STORED_SEX = Sex.FEMALE;
+    private static final DocumentType STORED_CARD_TYPE = DocumentType.GHANACARD;
+    private static final ProfileStatus STORED_STATUS = ProfileStatus.ONBOARDING;
 
     @Autowired
     private MockMvc restMockMvc;
@@ -105,7 +96,27 @@ class ProfilePatchFieldCoverageIT {
     }
 
     private Profile storedClinician() {
-        return profileRepository.save(new Profile().accountId("item60-clinician").firstName("Ama").lastName("Boateng"));
+        Profile profile = new Profile().accountId("item60-clinician").firstName("Ama").lastName("Boateng");
+        profile.setBirthDate(STORED_BIRTH_DATE);
+        profile.setSex(STORED_SEX);
+        profile.setCardType(STORED_CARD_TYPE);
+        profile.setStatus(STORED_STATUS);
+        return profileRepository.save(profile);
+    }
+
+    /**
+     * The smallest body this endpoint accepts: the path key plus the four values
+     * {@code ProfileMapper.toEntity} parses unconditionally, echoed at what {@link #storedClinician}
+     * stores so that carrying them changes nothing. A test adds the field it is about on top.
+     */
+    private ObjectNode patchBodyFor(Profile stored) {
+        ObjectNode body = om.createObjectNode();
+        body.put("id", stored.getId());
+        body.put("birthDate", STORED_BIRTH_DATE.toString());
+        body.put("sex", STORED_SEX.name());
+        body.put("cardType", STORED_CARD_TYPE.name());
+        body.put("status", STORED_STATUS.name());
+        return body;
     }
 
     private org.springframework.test.web.servlet.ResultActions patchWith(String id, String json) throws Exception {
@@ -115,52 +126,39 @@ class ProfilePatchFieldCoverageIT {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // The two that are applied
+    // Applied fields
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * {@code title} is ordinary profile data and is now written like the eleven beside it.
-     *
-     * <p>It is the clinician's own — {@code upsertOwnProfile} sets it from the onboarding wizard's
-     * body — and there is no second endpoint that owns it, so refusing it would leave no way to
-     * correct a title at all short of a whole-document {@code PUT}.
+     * The positive control, without which every ignored-field test below would pass against a method
+     * that applies nothing.
      */
     @Test
-    void titleIsAppliedRatherThanDropped() throws Exception {
+    void firstNameIsStillApplied() throws Exception {
         Profile stored = storedClinician();
 
-        patchWith(stored.getId(), "{\"id\":\"" + stored.getId() + "\",\"title\":\"Prof\"}")
+        patchWith(stored.getId(), patchBodyFor(stored).put("firstName", "Adwoa").toString())
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.title").value("Prof"));
+            .andExpect(jsonPath("$.firstName").value("Adwoa"));
 
-        assertThat(profileRepository.findById(stored.getId()).orElseThrow().getTitle()).isEqualTo("Prof");
+        assertThat(profileRepository.findById(stored.getId()).orElseThrow().getFirstName()).isEqualTo("Adwoa");
     }
 
     /**
-     * {@code contacts} is applied, and applied <b>whole</b>.
+     * {@code contacts} is applied, and applied <b>whole</b> — replace rather than recursive merge,
+     * the deviation from RFC 7396 that {@code ProfileService.applyProvidedFields} documents.
      *
-     * <p>Replace rather than recursive merge, which RFC 7396 — the media type this endpoint consumes
-     * — asks for on a nested object. The deviation is deliberate and is <em>not</em> justified by
-     * impossibility: {@code ProfileResource} holds the raw node, so a merge could be reconstructed
-     * there. It is not, because {@code address} — the other embedded object the copy chain handles —
-     * has always replaced wholesale, and so does {@code upsertOwnProfile} with this very field; a
-     * merge here would make the write paths disagree about what writing a next of kin means.
-     *
-     * <p><b>The list makes that argument sharper rather than weaker</b> (profile.md T1): a
-     * per-element merge would have to answer "which element", and on a collection whose members
-     * carry no id and no stable order that question has no answer a client could predict.
+     * <p>On the wire a contact's phone is {@code phoneNumber} ({@link EmergencyContactDTO}); the
+     * entity stores it as {@code phone}. The mapper is the only translation between the two.
      */
     @Test
     void contactsAreAppliedRatherThanDropped() throws Exception {
         Profile stored = storedClinician();
+        ObjectNode body = patchBodyFor(stored);
+        ObjectNode contact = body.putArray("contacts").addObject();
+        contact.put("name", "Efua Mensah").put("relationship", "sister").put("phoneNumber", "+233200000000");
 
-        patchWith(
-            stored.getId(),
-            "{\"id\":\"" +
-            stored.getId() +
-            "\",\"contacts\":[{\"name\":\"Efua Mensah\",\"relationship\":\"sister\"," +
-            "\"phone\":\"+233200000000\"}]}"
-        )
+        patchWith(stored.getId(), body.toString())
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.contacts[0].name").value("Efua Mensah"));
 
@@ -173,19 +171,17 @@ class ProfilePatchFieldCoverageIT {
 
     /**
      * More than one, which is the whole point of the field being a list — {@code profile.md} requires
-     * at least two emergency contacts and the singular field it replaced could express one.
+     * at least two emergency contacts.
      */
     @Test
     void severalContactsAreAllStored() throws Exception {
         Profile stored = storedClinician();
+        ObjectNode body = patchBodyFor(stored);
+        var contacts = body.putArray("contacts");
+        contacts.addObject().put("name", "Efua Mensah").put("relationship", "sister").put("phoneNumber", "+233200000000");
+        contacts.addObject().put("name", "Kojo Mensah").put("relationship", "brother").put("phoneNumber", "+233200000001");
 
-        patchWith(
-            stored.getId(),
-            "{\"id\":\"" +
-            stored.getId() +
-            "\",\"contacts\":[{\"name\":\"Efua Mensah\",\"relationship\":\"sister\",\"phone\":\"+233200000000\"}," +
-            "{\"name\":\"Kojo Mensah\",\"relationship\":\"brother\",\"phone\":\"+233200000001\"}]}"
-        ).andExpect(status().isOk());
+        patchWith(stored.getId(), body.toString()).andExpect(status().isOk());
 
         List<EmergencyContact> saved = profileRepository.findById(stored.getId()).orElseThrow().getContacts();
         assertThat(saved).hasSize(2);
@@ -199,14 +195,12 @@ class ProfilePatchFieldCoverageIT {
     @Test
     void aContactAddressRoundTripsAsAStructuredAddress() throws Exception {
         Profile stored = storedClinician();
+        ObjectNode body = patchBodyFor(stored);
+        ObjectNode contact = body.putArray("contacts").addObject();
+        contact.put("name", "Efua Mensah");
+        contact.putObject("address").put("streetAddress", "12 Oxford St").put("city", "Accra").put("country", "Ghana");
 
-        patchWith(
-            stored.getId(),
-            "{\"id\":\"" +
-            stored.getId() +
-            "\",\"contacts\":[{\"name\":\"Efua Mensah\",\"address\":{\"streetAddress\":\"12 Oxford St\"," +
-            "\"city\":\"Accra\",\"country\":\"Ghana\"}}]}"
-        )
+        patchWith(stored.getId(), body.toString())
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.contacts[0].address.streetAddress").value("12 Oxford St"));
 
@@ -232,9 +226,9 @@ class ProfilePatchFieldCoverageIT {
         stored.setContacts(List.of(new EmergencyContact().name("Efua Mensah").relationship("sister").phone("+233200000000")));
         profileRepository.save(stored);
 
-        patchWith(stored.getId(), "{\"id\":\"" + stored.getId() + "\",\"contacts\":[{\"name\":\"Kojo Mensah\"}]}").andExpect(
-            status().isOk()
-        );
+        ObjectNode body = patchBodyFor(stored);
+        body.putArray("contacts").addObject().put("name", "Kojo Mensah");
+        patchWith(stored.getId(), body.toString()).andExpect(status().isOk());
 
         List<EmergencyContact> saved = profileRepository.findById(stored.getId()).orElseThrow().getContacts();
         assertThat(saved).as("a replace, not an append — the old contact must not survive beside the new one").hasSize(1);
@@ -243,177 +237,194 @@ class ProfilePatchFieldCoverageIT {
         assertThat(saved.get(0).getPhone()).as("a replace, not a merge — the old phone must not survive").isNull();
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // The retired singular alias — an unknown key now
+    // ---------------------------------------------------------------------------------------------
+
     /**
-     * ⚠ <b>The retired {@code emergencyContact} name still works on the wire, and that is load-bearing
-     * rather than legacy clutter.</b>
+     * ⚠ <b>The retired {@code emergencyContact} alias no longer reaches storage: {@link ProfileDTO}
+     * does not declare it, so it is an unknown key and is silently ignored.</b>
      *
-     * <p>{@code PUT /api/onboarding/profile} is gone (F8) and both clients were re-pointed at
-     * {@code PUT /api/profile} in the same unit — but <b>the alias is still what they send</b>:
-     * {@code web/}'s wire type and {@code mobile/}'s {@code me.page.ts} both name
-     * {@code emergencyContact}, and dropping it is T6's work, not the path migration's. Deleting the
-     * alias now would leave the mobile Me tab answering 200 with the next of kin quietly not saved
-     * — the same outcome under a new URL.
-     *
-     * <p>It is a projection of {@code contacts}, never a second stored field: the write below must
-     * land in the list, and the read must come back out of it. Retire the pair with T6, and only once
-     * {@code mobile/} has a task that moves it too.
+     * <p>That consequence is live and client-facing, which is why this test exists rather than being
+     * deleted with the alias: {@code web/}'s wire type and {@code mobile/}'s {@code me.page.ts} both
+     * still send {@code emergencyContact} (dropping it is T6's work), and against this endpoint that
+     * write now answers 200 with the next of kin quietly not saved. This test pins the server half of
+     * that fact; the client half is T6's to retire.
      */
     @Test
-    void theRetiredSingularNameStillWritesIntoTheList() throws Exception {
+    void theRetiredSingularNameIsIgnoredOnTheWire() throws Exception {
         Profile stored = storedClinician();
+        ObjectNode body = patchBodyFor(stored);
+        body.putObject("emergencyContact").put("name", "Efua Mensah").put("relationship", "sister");
 
-        patchWith(
-            stored.getId(),
-            "{\"id\":\"" + stored.getId() + "\",\"emergencyContact\":{\"name\":\"Efua Mensah\",\"relationship\":\"sister\"}}"
-        )
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.contacts[0].name").value("Efua Mensah"))
-            .andExpect(jsonPath("$.emergencyContact.name").value("Efua Mensah"));
+        patchWith(stored.getId(), body.toString()).andExpect(status().isOk());
 
         List<EmergencyContact> saved = profileRepository.findById(stored.getId()).orElseThrow().getContacts();
-        assertThat(saved).as("the alias writes one contact into the list, not a second stored field").hasSize(1);
-        assertThat(saved.get(0).getRelationship()).isEqualTo("sister");
+        assertThat(saved).as("the alias is an unknown key on the DTO wire — nothing may land in the list").isNullOrEmpty();
     }
 
     /**
-     * And when a body carries both names, {@code contacts} wins — whichever order Jackson binds them
-     * in.
-     *
-     * <p>Asserted because the alternative is a contract nobody could rely on: a client round-tripping
-     * a document it had just read sends both, and an outcome that depended on field order in the JSON
-     * would be undiagnosable. Both orderings are sent here for exactly that reason — one of them
-     * passes on the setter's guard and the other on the binding order, and only testing both says
-     * which.
+     * And when a body carries both names, {@code contacts} wins in either order — the alias is an
+     * unknown key, so only {@code contacts} ever binds, whichever side of it the alias sits on.
      */
     @Test
     void whenABodyCarriesBothNamesTheListWins() throws Exception {
         Profile first = storedClinician();
-        patchWith(
-            first.getId(),
-            "{\"id\":\"" + first.getId() + "\",\"contacts\":[{\"name\":\"From contacts\"}],\"emergencyContact\":{\"name\":\"From alias\"}}"
-        ).andExpect(status().isOk());
+        ObjectNode firstBody = patchBodyFor(first);
+        firstBody.putArray("contacts").addObject().put("name", "From contacts");
+        firstBody.putObject("emergencyContact").put("name", "From alias");
+        patchWith(first.getId(), firstBody.toString()).andExpect(status().isOk());
         assertThat(profileRepository.findById(first.getId()).orElseThrow().getContacts())
             .extracting(EmergencyContact::getName)
             .containsExactly("From contacts");
         profileRepository.deleteAll();
 
         Profile second = storedClinician();
-        patchWith(
-            second.getId(),
-            "{\"id\":\"" + second.getId() + "\",\"emergencyContact\":{\"name\":\"From alias\"},\"contacts\":[{\"name\":\"From contacts\"}]}"
-        ).andExpect(status().isOk());
+        ObjectNode secondBody = patchBodyFor(second);
+        secondBody.putObject("emergencyContact").put("name", "From alias");
+        secondBody.putArray("contacts").addObject().put("name", "From contacts");
+        patchWith(second.getId(), secondBody.toString()).andExpect(status().isOk());
         assertThat(profileRepository.findById(second.getId()).orElseThrow().getContacts())
             .extracting(EmergencyContact::getName)
             .containsExactly("From contacts");
     }
 
     // ---------------------------------------------------------------------------------------------
-    // The refused ones, one test each
+    // Ignored fields, one test each — 200 and the stored value untouched
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * Asserts the refusal, its status code, that the offending field <em>and the endpoint that does
-     * own it</em> are named in the body, and that nothing was written. A bare "not 200" would pass
-     * against a 500.
+     * Asserts that a field this wire does not carry is ignored: 200, the stored value unchanged, and
+     * the rest of the body still applied — the positive control rides in the same request so that a
+     * handler refusing everything cannot pass.
      *
-     * <p><b>{@code owningEndpoint} is the half that has to be passed in, and it is not decoration.</b>
-     * The field name in the response comes from the {@code field +} concatenation in
-     * {@code ProfileResource.refuseFieldsThisEndpointDoesNotOwn}, not from
-     * {@code PATCH_REFUSED_FIELDS} — so asserting the field name alone leaves the map and the five
-     * {@code if} blocks free to drift apart in silence. Deleting an entry from the map while leaving
-     * its guard in place still refuses, still says the field's name, and renders "…is set by null":
-     * a refusal that has forgotten where to send the caller, which is the degradation this whole
-     * change exists to prevent. Asserting the endpoint string closes that direction, because the
-     * endpoint can only come from the map.
-     *
-     * <p><b>What it still does not cover</b> is the mirror: a map entry naming a field that has no
-     * guard beside it. That is a misleading constant rather than a wrong response, and closing it
-     * properly means restructuring so the loop iterates the map with each predicate beside its
-     * endpoint string. Recorded in backlog.md item 60 rather than done here.
+     * <p>These five answered <b>400 naming the owning endpoint</b> before the DTO rebinding
+     * ({@code ProfileFieldOwnership}, item 60). That refusal arm is gone from this path: the body
+     * binds to {@link ProfileDTO}, which does not declare them, so they are unknown keys and Jackson
+     * ignores them before the handler runs. The owning endpoints themselves are unchanged —
+     * {@code PUT /api/professional-application/&#123;id&#125;/organization} for the organisation
+     * pair, {@code PUT /api/notifications/preferences} for the push preferences.
      */
-    private void assertRefused(String field, String owningEndpoint, String json) throws Exception {
+    private void assertIgnored(String field, ObjectNode bodyWithField, Function<Profile, Object> read, Object storedValue, Profile stored)
+        throws Exception {
+        bodyWithField.put("firstName", "Adwoa");
+        patchWith(stored.getId(), bodyWithField.toString()).andExpect(status().isOk());
+
+        Profile after = profileRepository.findById(stored.getId()).orElseThrow();
+        assertThat(read.apply(after))
+            .as("%s is not on the ProfileDTO wire — the stored value must be untouched", field)
+            .isEqualTo(storedValue);
+        assertThat(after.getFirstName()).as("the control: the rest of the request did land").isEqualTo("Adwoa");
+    }
+
+    @Test
+    void specialtyCategoryIdIsIgnoredOnTheWire() throws Exception {
         Profile stored = storedClinician();
-        String body = patchWith(stored.getId(), json.replace("__ID__", stored.getId()))
-            .andExpect(status().isBadRequest())
-            .andReturn()
-            .getResponse()
-            .getContentAsString();
+        stored.setSpecialtyCategoryId("stored-category");
+        profileRepository.save(stored);
 
-        assertThat(body).as("the refusal must name the field it refused, or it is item 46 again").contains(field);
-        assertThat(body)
-            .as("and must name where the caller should go instead — a stale PATCH_REFUSED_FIELDS entry renders 'is set by null'")
-            .contains(owningEndpoint);
-        assertThat(profileRepository.findById(stored.getId()).orElseThrow().getFirstName())
-            .as("a refused patch writes nothing at all, not even the fields it was allowed to write")
-            .isEqualTo("Ama");
+        assertIgnored(
+            "specialtyCategoryId",
+            patchBodyFor(stored).put("specialtyCategoryId", "some-category"),
+            Profile::getSpecialtyCategoryId,
+            "stored-category",
+            stored
+        );
     }
 
-    /** The endpoint that owns the organisation assignment, per {@code PATCH_REFUSED_FIELDS}. */
-    private static final String ORGANISATION_ENDPOINT = "PUT /api/professional-application/{id}/organization";
+    @Test
+    void teamIdsAreIgnoredOnTheWire() throws Exception {
+        Profile stored = storedClinician();
+        stored.setTeamIds(List.of("stored-team"));
+        profileRepository.save(stored);
 
-    /** The endpoint that owns the push preferences, per {@code PATCH_REFUSED_FIELDS}. */
-    private static final String PREFERENCES_ENDPOINT = "PUT /api/notifications/preferences";
+        ObjectNode body = patchBodyFor(stored);
+        body.putArray("teamIds").add("some-team");
+        assertIgnored("teamIds", body, Profile::getTeamIds, List.of("stored-team"), stored);
+    }
+
+    @Test
+    void pushMessagesEnabledIsIgnoredOnTheWire() throws Exception {
+        Profile stored = storedClinician();
+        stored.setPushMessagesEnabled(Boolean.TRUE);
+        profileRepository.save(stored);
+
+        assertIgnored(
+            "pushMessagesEnabled",
+            patchBodyFor(stored).put("pushMessagesEnabled", false),
+            Profile::getPushMessagesEnabled,
+            Boolean.TRUE,
+            stored
+        );
+    }
+
+    @Test
+    void pushComplianceEnabledIsIgnoredOnTheWire() throws Exception {
+        Profile stored = storedClinician();
+        stored.setPushComplianceEnabled(Boolean.TRUE);
+        profileRepository.save(stored);
+
+        assertIgnored(
+            "pushComplianceEnabled",
+            patchBodyFor(stored).put("pushComplianceEnabled", false),
+            Profile::getPushComplianceEnabled,
+            Boolean.TRUE,
+            stored
+        );
+    }
+
+    @Test
+    void pushShowSenderNameIsIgnoredOnTheWire() throws Exception {
+        Profile stored = storedClinician();
+        stored.setPushShowSenderName(Boolean.FALSE);
+        profileRepository.save(stored);
+
+        assertIgnored(
+            "pushShowSenderName",
+            patchBodyFor(stored).put("pushShowSenderName", true),
+            Profile::getPushShowSenderName,
+            Boolean.FALSE,
+            stored
+        );
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Declared on the DTO and dropped anyway
+    // ---------------------------------------------------------------------------------------------
 
     /**
-     * The owner of {@code status}, per {@code PATCH_REFUSED_FIELDS}. It names one transition and
-     * gestures at the rest because there is no single endpoint: {@code /decide},
-     * {@code /organization}, {@code /authority-assigned}, {@code /roster-configured},
-     * {@code /activate}, {@code /suspend} and {@code /deactivate} each move the status, and all seven
-     * are {@code ROLE_ADMIN}.
-     */
-    private static final String ONBOARDING_TRANSITION_ENDPOINT = "PUT /api/professional-application/{id}/decide";
-
-    /**
-     * The specialty is assigned by {@code PUT /api/professional-application/&#123;id&#125;/organization},
-     * which is {@code ROLE_ADMIN} only and appends an {@code OnboardingEvent}. This endpoint is open
-     * to six roles and appends nothing, so copying the field here would be a strictly weaker second
-     * writer whose result the application's own history would not explain.
+     * {@code title} is declared on {@link ProfileDTO} and never copied by
+     * {@code ProfileMapper.toEntity}, so it is accepted on the wire and dropped before the service
+     * sees it — there is currently no HTTP path that writes a title at all.
      */
     @Test
-    void specialtyCategoryIdIsRefusedRatherThanDropped() throws Exception {
-        assertRefused("specialtyCategoryId", ORGANISATION_ENDPOINT, "{\"id\":\"__ID__\",\"specialtyCategoryId\":\"some-category\"}");
-    }
+    void titleIsDroppedByTheWire() throws Exception {
+        Profile stored = storedClinician();
 
-    /** Same owner, same argument, and additionally see {@link #anAbsentTeamIdsIsNotAChange}. */
-    @Test
-    void teamIdsAreRefusedRatherThanDropped() throws Exception {
-        assertRefused("teamIds", ORGANISATION_ENDPOINT, "{\"id\":\"__ID__\",\"teamIds\":[\"some-team\"]}");
+        patchWith(stored.getId(), patchBodyFor(stored).put("title", "Prof").toString()).andExpect(status().isOk());
+
+        assertThat(profileRepository.findById(stored.getId()).orElseThrow().getTitle())
+            .as("the mapper does not copy title — nothing may be stored")
+            .isNull();
     }
 
     /**
-     * The three push preferences are owned by {@code PUT /api/notifications/preferences}, which
-     * writes the <em>caller's own</em> profile and nobody else's. This endpoint has no ownership
-     * check at all, so copying them here would let any of six roles silence a colleague's
-     * compliance nudges — the notification that tells them their licence is expiring.
+     * {@code status} is the state machine's own field, and a merge-patch still cannot move it — but
+     * the mechanism changed. The body <b>must</b> carry a status (the mapper parses it
+     * unconditionally), the mapper writes it onto the entity, and
+     * {@code ProfileService.applyProvidedFields} then never copies it onto the stored row. So the
+     * answer is 200 with the stored status untouched, where it used to be a 400 naming the
+     * transition endpoints.
      */
     @Test
-    void pushMessagesEnabledIsRefusedRatherThanDropped() throws Exception {
-        assertRefused("pushMessagesEnabled", PREFERENCES_ENDPOINT, "{\"id\":\"__ID__\",\"pushMessagesEnabled\":false}");
-    }
+    void statusIsDroppedAtTheService() throws Exception {
+        Profile stored = storedClinician();
 
-    @Test
-    void pushComplianceEnabledIsRefusedRatherThanDropped() throws Exception {
-        assertRefused("pushComplianceEnabled", PREFERENCES_ENDPOINT, "{\"id\":\"__ID__\",\"pushComplianceEnabled\":false}");
-    }
+        patchWith(stored.getId(), patchBodyFor(stored).put("status", ProfileStatus.ACTIVE.name()).toString()).andExpect(status().isOk());
 
-    @Test
-    void pushShowSenderNameIsRefusedRatherThanDropped() throws Exception {
-        assertRefused("pushShowSenderName", PREFERENCES_ENDPOINT, "{\"id\":\"__ID__\",\"pushShowSenderName\":true}");
-    }
-
-    /**
-     * {@code status} is the state machine's own field, and this endpoint is not the state machine.
-     *
-     * <p>Every legal move between {@code ProfileStatus} values is a {@code ROLE_ADMIN}
-     * {@code PUT /api/professional-application/&#123;id&#125;/**} that checks
-     * {@code OnboardingService.LEGAL_TRANSITIONS} and appends an {@code OnboardingEvent}. The probe
-     * below is deliberately a value no transition could reach from a fresh profile: applying it here
-     * would write an approval with no credential review before it and no event recording either,
-     * which is the one outcome the server-side machine exists to make impossible.
-     */
-    @Test
-    void statusIsRefusedRatherThanDropped() throws Exception {
-        assertRefused("status", ONBOARDING_TRANSITION_ENDPOINT, "{\"id\":\"__ID__\",\"status\":\"APPROVED\"}");
+        assertThat(profileRepository.findById(stored.getId()).orElseThrow().getStatus())
+            .as("applyProvidedFields never copies status — the stored value must be untouched")
+            .isEqualTo(STORED_STATUS);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -421,28 +432,13 @@ class ProfilePatchFieldCoverageIT {
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * The positive control, without which every test above would pass against a method that refuses
-     * everything.
-     */
-    @Test
-    void firstNameIsStillApplied() throws Exception {
-        Profile stored = storedClinician();
-
-        patchWith(stored.getId(), "{\"id\":\"" + stored.getId() + "\",\"firstName\":\"Adwoa\"}")
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.firstName").value("Adwoa"));
-
-        assertThat(profileRepository.findById(stored.getId()).orElseThrow().getFirstName()).isEqualTo("Adwoa");
-    }
-
-    /**
      * A read-modify-write client is not punished for carrying the protected fields back unchanged.
      *
-     * <p>The refusal is on a <em>change</em>, not on the mention. A client that GETs a profile,
-     * edits one field and PATCHes the whole document names all five protected fields at their
-     * current values, and refusing that would make the honest answer unusable. This is not the
-     * silence item 60 filed: nothing the caller asked for was dropped, because the caller asked for
-     * no change.
+     * <p>The read-back document uses the <em>entity's</em> field names ({@code mobilePhone}, a
+     * contact's {@code phone}, {@code specialtyCategoryId}, {@code teamIds}, the push flags), most of
+     * which the DTO wire does not declare — so on the way back in they are ignored rather than
+     * applied, and the one field the client edited still lands. The stored row carries the four
+     * mandatory values, so the round-tripped document parses.
      */
     @Test
     void aRoundTrippedDocumentThatChangesNothingProtectedIsNotRefused() throws Exception {
@@ -468,7 +464,7 @@ class ProfilePatchFieldCoverageIT {
                 .getResponse()
                 .getContentAsString()
         );
-        String roundTrip = ((com.fasterxml.jackson.databind.node.ObjectNode) readBack).put("firstName", "Adwoa").toString();
+        String roundTrip = ((ObjectNode) readBack).put("firstName", "Adwoa").toString();
 
         patchWith(stored.getId(), roundTrip).andExpect(status().isOk()).andExpect(jsonPath("$.firstName").value("Adwoa"));
 
@@ -480,12 +476,11 @@ class ProfilePatchFieldCoverageIT {
     /**
      * A body that never mentions {@code teamIds} is not a body that cleared them.
      *
-     * <p>This is the trap that rules out "copy all seven" on its own, quite apart from authority:
-     * {@code Profile.teamIds} is initialised to an empty list, so a bound {@code Profile} is
-     * <b>never null</b> there. A {@code teamIds != null} guard of the shape the other eleven use
-     * would fire on every patch, and a clinician who changed their phone number would lose their
-     * team membership. Reading the named fields from the JSON document rather than from the bound
-     * entity is what makes absent and empty distinguishable.
+     * <p>{@code teamIds} cannot be named on this wire at all now — {@link ProfileDTO} does not
+     * declare it — which makes this the easy direction. It is still asserted, because the defect it
+     * guards against is one DTO field away: {@code Profile.teamIds} is initialised to an empty list,
+     * so a future {@code ProfileDTO.teamIds} mapped without a null guard would empty a clinician's
+     * teams on every patch that changed a phone number.
      */
     @Test
     void anAbsentTeamIdsIsNotAChange() throws Exception {
@@ -493,7 +488,7 @@ class ProfilePatchFieldCoverageIT {
         stored.setTeamIds(List.of("team-1", "team-2"));
         profileRepository.save(stored);
 
-        patchWith(stored.getId(), "{\"id\":\"" + stored.getId() + "\",\"phoneNumber\":\"+233300000000\"}").andExpect(status().isOk());
+        patchWith(stored.getId(), patchBodyFor(stored).put("phoneNumber", "+233300000000").toString()).andExpect(status().isOk());
 
         Profile after = profileRepository.findById(stored.getId()).orElseThrow();
         assertThat(after.getTeamIds()).as("a patch that never mentioned teams must not empty them").containsExactly("team-1", "team-2");
@@ -501,23 +496,22 @@ class ProfilePatchFieldCoverageIT {
     }
 
     /**
-     * Item 54's account takeover stays closed through this endpoint too.
+     * Item 54's account takeover stays closed through this endpoint too — but the guard moved.
      *
-     * <p>{@code accountId} is {@code READ_ONLY}, so Jackson drops it before anything here sees it.
-     * Asserted rather than assumed, because this change is the one that started reading the raw JSON
-     * document, and a future author reaching for the raw node to "just apply what the caller named"
-     * would reopen it. The request still sends {@code accountUid} — the field item 48 added and item
-     * 50 deleted — so that an author who reinstates a second account identifier finds a test that
-     * already names it.
+     * <p>{@code Profile.accountId} is {@code READ_ONLY} to Jackson, which this wire no longer passes
+     * through: {@link ProfileDTO} declares {@code accountId} as an ordinary writable field and
+     * {@code ProfileMapper.toEntity} copies it onto the entity. What keeps the takeover closed is
+     * {@code ProfileService.applyProvidedFields} alone, which never copies {@code accountId} onto the
+     * stored row. That is one guard where there used to be two, so this test is now the only thing
+     * standing between a future "just apply what the caller named" edit and item 54 reopening.
      */
     @Test
     void accountIdRemainsUnwritable() throws Exception {
         Profile stored = storedClinician();
 
-        patchWith(
-            stored.getId(),
-            "{\"id\":\"" + stored.getId() + "\",\"accountId\":\"somebody-else\",\"accountUid\":\"forged-uid\",\"firstName\":\"Adwoa\"}"
-        ).andExpect(status().isOk());
+        ObjectNode body = patchBodyFor(stored).put("accountId", "somebody-else").put("firstName", "Adwoa");
+        body.put("accountUid", "forged-uid");
+        patchWith(stored.getId(), body.toString()).andExpect(status().isOk());
 
         Profile after = profileRepository.findById(stored.getId()).orElseThrow();
         assertThat(after.getAccountId())
@@ -531,58 +525,75 @@ class ProfilePatchFieldCoverageIT {
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * Every field on {@link Profile} that a caller can send is either applied or refused — never
-     * accepted and dropped.
+     * The DTO fields this wire accepts and then drops, each for a located reason: {@code title} and
+     * {@code middleNames} are never copied by {@code ProfileMapper.toEntity}; {@code status} and
+     * {@code accountId} are mapped onto the entity and never copied by
+     * {@code applyProvidedFields}.
      *
-     * <p>This is item 60's "done when" stated as a property rather than as seven examples. It
-     * reflects over the entity, patches each field on its own with a value that differs from what is
-     * stored, and requires the answer to be a {@code 400} or a {@code 200} whose body shows the new
-     * value. A field this test does not know how to build a value for fails loudly rather than being
-     * skipped, because a silent skip here would reproduce the defect the class exists for.
+     * <p>The walk below holds this list exact in both directions — a dropped field missing from it
+     * fails, and an entry that turns out to be applied fails too, so the list cannot go stale
+     * silently.
+     */
+    private static final Set<String> DROPPED_ON_THE_WIRE = Set.of("title", "middleNames", "status", "accountId");
+
+    /**
+     * Every field {@link ProfileDTO} declares is either applied or in {@link #DROPPED_ON_THE_WIRE} —
+     * never a third thing.
+     *
+     * <p>This is the successor to item 60's "applied or refused" walk over the entity. The entity is
+     * no longer the wire: a field added to {@code Profile} alone is unreachable from here by
+     * construction, so reflecting over it would probe keys Jackson ignores and learn nothing. The DTO
+     * is where a new field becomes reachable, so the DTO is what the walk enumerates — a field added
+     * to {@link ProfileDTO} fails here until somebody decides which side it falls on, which is the
+     * property the old test existed for, restated against the new boundary.
      */
     @Test
-    void everyProfileFieldIsEitherAppliedOrRefused() throws Exception {
-        List<String> silentlyDropped = new ArrayList<>();
-        // One profile for every field, on purpose: a refused patch leaves the row untouched and an
+    void everyWireFieldIsEitherAppliedOrDropped() throws Exception {
+        List<String> undecided = new ArrayList<>();
+        // One profile for every field, on purpose: a dropped field leaves the row untouched and an
         // applied one only touches its own field, so no probe can mask the next. It is also the
-        // difference between one round trip per field and three, which matters against the 15 s
+        // difference between one round trip per field and sixteen, which matters against the 15 s
         // per-test timeout in junit-platform.properties.
         Profile stored = storedClinician();
 
-        for (Field field : Profile.class.getDeclaredFields()) {
-            if (Modifier.isStatic(field.getModifiers()) || NOT_A_PATCHABLE_FIELD.contains(field.getName())) {
+        for (Field field : ProfileDTO.class.getDeclaredFields()) {
+            if (Modifier.isStatic(field.getModifiers()) || "id".equals(field.getName())) {
                 continue;
             }
-            String probe = probeValueFor(field);
-            String json = "{\"id\":\"" + stored.getId() + "\",\"" + field.getName() + "\":" + probe + "}";
+            JsonNode probe = om.readTree(probeValueFor(field));
+            ObjectNode body = patchBodyFor(stored);
+            body.set(field.getName(), probe);
 
-            var response = patchWith(stored.getId(), json).andReturn().getResponse();
-            if (response.getStatus() == 400) {
-                continue;
-            }
+            var response = patchWith(stored.getId(), body.toString()).andReturn().getResponse();
             assertThat(response.getStatus())
-                .as("%s answered neither 400 nor 200 — %s", field.getName(), response.getContentAsString())
+                .as("%s answered %s — %s", field.getName(), response.getStatus(), response.getContentAsString())
                 .isEqualTo(200);
-            if (!carries(om.readTree(response.getContentAsString()).get(field.getName()), om.readTree(probe))) {
-                silentlyDropped.add(field.getName());
+
+            JsonNode written = om.readTree(response.getContentAsString()).get(entityNameFor(field.getName()));
+            boolean applied = carries(written, probe);
+            if (applied && DROPPED_ON_THE_WIRE.contains(field.getName())) {
+                undecided.add(field.getName() + " is listed as dropped but was applied — the list is stale");
+            }
+            if (!applied && !DROPPED_ON_THE_WIRE.contains(field.getName())) {
+                undecided.add(field.getName() + " answered 200 and wrote nothing, and is not in DROPPED_ON_THE_WIRE");
             }
         }
 
-        assertThat(silentlyDropped)
-            .as("these fields answered 200 and wrote nothing — decide: apply them, or refuse them in ProfileResource")
-            .isEmpty();
+        assertThat(undecided).as("every ProfileDTO field is applied or declared dropped — these are neither").isEmpty();
+    }
+
+    /**
+     * The entity field a DTO field lands in, where the two names differ. The response body is the
+     * entity, so the walk reads it under the entity's name.
+     */
+    private String entityNameFor(String dtoField) {
+        return "mobileNumber".equals(dtoField) ? "mobilePhone" : dtoField;
     }
 
     /**
      * Whether the response carries what the probe asked for. An embedded object is compared entry by
      * entry, because the response serializes its unset members as nulls beside the one that was set;
      * an array is compared element by element on the same footing.
-     *
-     * <p><b>The array arm arrived with {@code contacts}</b> (profile.md T1) and it is not cosmetic.
-     * Without it, {@code [{"name":"Probe Contact"}]} was compared to the response's
-     * {@code [{"name":"Probe Contact","relationship":null,…}]} by whole-node equality, which is false
-     * — so a correctly applied list would have been reported as silently dropped, and the honest fix
-     * would have looked like a reason to exclude the field.
      */
     private boolean carries(JsonNode written, JsonNode expected) {
         if (written == null || written.isNull()) {
@@ -616,49 +627,37 @@ class ProfilePatchFieldCoverageIT {
      * A JSON value for a probe patch, differing from what {@link #storedClinician} holds so that
      * "applied" is observable. Unknown types fail rather than being skipped.
      *
-     * <p>⚠ <b>A collection is probed by its ELEMENT type, not by {@code List}</b> (profile.md T1), and
-     * the alternative was a silent false pass rather than a failure. {@code Profile} now holds two
-     * {@code List} fields whose elements are nothing alike — {@code teamIds} is
-     * {@code List<String>} and {@code contacts} is {@code List<EmergencyContact>} — and
-     * {@code field.getType()} answers {@code List} for both. Probing {@code contacts} with
-     * {@code ["probe-id"]} makes Jackson fail to bind the document, the resource answers <b>400
-     * Unreadable profile document</b>, and the loop above counts a 400 as "refused" and moves on. The
-     * field would have read as decided while nothing about it had been decided at all — which is the
-     * exact defect this class exists for, arriving through its own instrument.
+     * <p>Four fields are probed by name before any type rule: the mapper parses them, so the probe
+     * must be a <em>valid</em> value that differs from the stored one — an arbitrary string would
+     * turn the whole walk into a 500.
      */
     private String probeValueFor(Field field) {
+        switch (field.getName()) {
+            case "birthDate":
+                return "\"1999-12-31\"";
+            case "sex":
+                return "\"" + Sex.MALE.name() + "\"";
+            case "cardType":
+                return "\"" + DocumentType.PASSPORT.name() + "\"";
+            case "status":
+                return "\"" + ProfileStatus.ACTIVE.name() + "\"";
+            default:
+            // fall through to the type rules
+        }
         Class<?> type = field.getType();
         if (type == String.class) {
             return "\"probe-" + field.getName() + "\"";
         }
-        if (type == Boolean.class || type == boolean.class) {
-            return "true";
-        }
-        if (type == LocalDate.class) {
-            return "\"1999-12-31\"";
-        }
-        if (type == Instant.class) {
-            return "\"1999-12-31T00:00:00Z\"";
-        }
-        if (type == Address.class) {
+        if (type == AddressDTO.class) {
             return "{\"streetAddress\":\"1 Probe Street\"}";
         }
-        if (type == EmergencyContact.class) {
-            return "{\"name\":\"Probe Contact\"}";
-        }
-        if (Collection.class.isAssignableFrom(type)) {
+        if (java.util.Collection.class.isAssignableFrom(type)) {
             return "[" + probeElementValueFor(field) + "]";
-        }
-        // Enums by reflection rather than by name, so the next one added needs no edit here. Any
-        // constant differs from what storedClinician() holds, which is null for every enum field, so
-        // "applied" stays observable without the probe having to know which value is special.
-        if (type.isEnum()) {
-            return "\"" + type.getEnumConstants()[0] + "\"";
         }
         return fail(
             String.format(
-                "This test does not know how to build a probe value for Profile.%s of type %s. Teach it one rather " +
-                "than excluding the field, or the field joins the seven this class exists for.",
+                "This test does not know how to build a probe value for ProfileDTO.%s of type %s. Teach it one rather " +
+                "than excluding the field, or the field becomes the undecided third thing this class exists to refuse.",
                 field.getName(),
                 type.getName()
             )
@@ -666,10 +665,8 @@ class ProfilePatchFieldCoverageIT {
     }
 
     /**
-     * One element of a collection field, resolved from its declared type argument.
-     *
-     * <p>A raw or wildcard collection fails rather than defaulting to a string: a default here is how
-     * the {@code List}-shaped blind spot above would come back under a new name.
+     * One element of a collection field, resolved from its declared type argument. A raw or wildcard
+     * collection fails rather than defaulting to a string.
      */
     private String probeElementValueFor(Field field) {
         if (
@@ -680,14 +677,13 @@ class ProfilePatchFieldCoverageIT {
             if (element == String.class) {
                 return "\"probe-id\"";
             }
-            if (element == EmergencyContact.class) {
+            if (element == EmergencyContactDTO.class) {
                 return "{\"name\":\"Probe Contact\"}";
             }
             return fail(
                 String.format(
-                    "This test does not know how to build a probe element for Profile.%s, a collection of %s. Teach " +
-                    "it one rather than excluding the field: probing a collection with the wrong element type makes " +
-                    "the body unreadable, which this class counts as a REFUSAL and would pass for nothing.",
+                    "This test does not know how to build a probe element for ProfileDTO.%s, a collection of %s. Teach " +
+                    "it one rather than excluding the field.",
                     field.getName(),
                     element.getName()
                 )
@@ -695,9 +691,7 @@ class ProfilePatchFieldCoverageIT {
         }
         return fail(
             String.format(
-                "Profile.%s is a collection with no resolvable element type (%s). A probe cannot be built for it, " +
-                "and defaulting to a string is how the List-shaped blind spot this method exists to close would " +
-                "return under another name.",
+                "ProfileDTO.%s is a collection with no resolvable element type (%s). A probe cannot be built for it.",
                 field.getName(),
                 field.getGenericType().getTypeName()
             )

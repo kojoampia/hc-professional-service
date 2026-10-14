@@ -4,8 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ActivityLog;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.Report;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.ActivityLog;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.Report;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -33,7 +33,7 @@ import org.junit.jupiter.api.Test;
  * fails in a build here rather than as a 503 on every clinician surface computed from that
  * collection.
  */
-class PatientServiceDtosTest {
+class PatientServiceDTOTest {
 
     private final ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
 

@@ -110,7 +110,7 @@ public class Visit implements Serializable {
     @Field("customer_name")
     private String customerName;
 
-    /** Snapshot. One formatted line, digital address first — see {@code PatientServiceDtos.Address}. */
+    /** Snapshot. One formatted line, digital address first — see {@code PatientServiceDTO.Address}. */
     @Field("customer_address")
     private String customerAddress;
 

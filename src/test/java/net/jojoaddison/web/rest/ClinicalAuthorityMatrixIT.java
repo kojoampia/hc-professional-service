@@ -352,7 +352,15 @@ class ClinicalAuthorityMatrixIT {
     @WithMockGatewayUser(login = "matrix-applicant", authorities = { "ROLE_USER" })
     void anApplicantCanWriteTheirOwnProfile() throws Exception {
         restMockMvc
-            .perform(put("/api/profile").contentType(MediaType.APPLICATION_JSON).content("{\"firstName\":\"Appli\"}"))
+            .perform(
+                put("/api/profile")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    // birthDate, sex, cardType and status ride along because ProfileMapper.toEntity
+                    // parses all four unconditionally.
+                    .content(
+                        "{\"firstName\":\"Appli\",\"birthDate\":\"1990-01-01\",\"sex\":\"MALE\",\"cardType\":\"GHANACARD\",\"status\":\"CREATED\"}"
+                    )
+            )
             .andExpect(status().isOk());
     }
 

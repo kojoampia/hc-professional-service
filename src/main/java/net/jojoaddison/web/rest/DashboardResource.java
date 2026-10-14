@@ -1,7 +1,7 @@
 package net.jojoaddison.web.rest;
 
 import net.jojoaddison.service.PatientDirectoryService;
-import net.jojoaddison.service.dto.PatientDtos.DashboardSummary;
+import net.jojoaddison.service.dto.PatientDTO.DashboardSummary;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;

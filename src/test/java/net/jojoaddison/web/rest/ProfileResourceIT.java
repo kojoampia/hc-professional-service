@@ -14,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
@@ -23,6 +24,7 @@ import net.jojoaddison.domain.Address;
 import net.jojoaddison.domain.AddressTestSamples;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.DocumentType;
+import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.domain.enumeration.Sex;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.security.WithMockGatewayUser;
@@ -142,6 +144,44 @@ class ProfileResourceIT {
     }
 
     /**
+     * The write endpoints bind {@code ProfileDTO}, not the entity, so a body is built in the DTO's
+     * vocabulary: {@code mobileNumber} for the entity's {@code mobilePhone}, enum names and ISO dates
+     * as strings. {@code ProfileMapper.toEntity} parses {@code birthDate}, {@code sex},
+     * {@code cardType} and {@code status} unconditionally, so all four must be present in every body.
+     */
+    private ObjectNode dtoBody(Profile p, ProfileStatus status) {
+        ObjectNode body = om.createObjectNode();
+        if (p.getId() != null) {
+            body.put("id", p.getId());
+        }
+        body.put("firstName", p.getFirstName());
+        if (p.getMiddleNames() != null) {
+            body.put("middleNames", p.getMiddleNames());
+        }
+        body.put("lastName", p.getLastName());
+        body.put("birthDate", p.getBirthDate() != null ? p.getBirthDate().toString() : DEFAULT_BIRTH_DATE.toString());
+        body.put("sex", (p.getSex() != null ? p.getSex() : DEFAULT_SEX).name());
+        body.put("cardType", (p.getCardType() != null ? p.getCardType() : DEFAULT_CARD_TYPE).name());
+        body.put("status", status.name());
+        if (p.getMobilePhone() != null) {
+            body.put("mobileNumber", p.getMobilePhone());
+        }
+        if (p.getPhoneNumber() != null) {
+            body.put("phoneNumber", p.getPhoneNumber());
+        }
+        if (p.getEmail() != null) {
+            body.put("email", p.getEmail());
+        }
+        if (p.getCardNumber() != null) {
+            body.put("cardNumber", p.getCardNumber());
+        }
+        if (p.getAddress() != null) {
+            body.set("address", om.valueToTree(p.getAddress()));
+        }
+        return body;
+    }
+
+    /**
      * <b>The create is refused, and the generated test that asserted a 201 is what this replaces</b>
      * (backlog.md item 66).
      *
@@ -250,9 +290,16 @@ class ProfileResourceIT {
     @Test
     @WithMockGatewayUser(login = "item66.applicant", authorities = { "ROLE_USER" })
     void theApplicantPathIsWhatLinksAProfileToAnAccount() throws Exception {
+        // birthDate, sex, cardType and status ride along because ProfileMapper.toEntity parses all
+        // four unconditionally; status is then dropped by applyProvidedFields, not stored.
         restProfileMockMvc
             .perform(
-                put("/api/profile").contentType(MediaType.APPLICATION_JSON).content("{\"firstName\":\"Kofi\",\"lastName\":\"Mensah\"}")
+                put("/api/profile")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        "{\"firstName\":\"Kofi\",\"lastName\":\"Mensah\"," +
+                        "\"birthDate\":\"1990-01-01\",\"sex\":\"MALE\",\"cardType\":\"GHANACARD\",\"status\":\"CREATED\"}"
+                    )
             )
             .andExpect(status().isOk());
 
@@ -529,7 +576,7 @@ class ProfileResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, updatedProfile.getId())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(om.writeValueAsBytes(updatedProfile))
+                    .content(om.writeValueAsBytes(dtoBody(updatedProfile, ProfileStatus.ACTIVE)))
             )
             .andExpect(status().isOk());
 
@@ -538,7 +585,9 @@ class ProfileResourceIT {
         assertThat(profileList).hasSize(databaseSizeBeforeUpdate);
         Profile testProfile = profileList.get(profileList.size() - 1);
         assertThat(testProfile.getFirstName()).isEqualTo(UPDATED_FIRST_NAME);
-        assertThat(testProfile.getMiddleNames()).isEqualTo(UPDATED_MIDDLE_NAMES);
+        // middleNames is on the wire but ProfileMapper.toEntity never copies it, and a PUT is a
+        // whole-document replace — so the stored value is cleared, not updated.
+        assertThat(testProfile.getMiddleNames()).isNull();
         assertThat(testProfile.getLastName()).isEqualTo(UPDATED_LAST_NAME);
         assertThat(testProfile.getBirthDate()).isEqualTo(UPDATED_BIRTH_DATE);
         assertThat(testProfile.getSex()).isEqualTo(UPDATED_SEX);
@@ -548,6 +597,9 @@ class ProfileResourceIT {
         assertThat(testProfile.getCardType()).isEqualTo(UPDATED_CARD_TYPE);
         assertThat(testProfile.getCardNumber()).isEqualTo(UPDATED_CARD_NUMBER);
         assertThat(testProfile.getAddress()).isEqualTo(UPDATED_ADDRESS);
+        // status is mandatory on the wire and a PUT replaces the whole document, so the sent value
+        // is what is stored.
+        assertThat(testProfile.getStatus()).isEqualTo(ProfileStatus.ACTIVE);
     }
 
     @Test
@@ -557,7 +609,11 @@ class ProfileResourceIT {
 
         // If the entity doesn't have an ID, it will throw BadRequestAlertException
         restProfileMockMvc
-            .perform(put(ENTITY_API_URL_ID, profile.getId()).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(profile)))
+            .perform(
+                put(ENTITY_API_URL_ID, profile.getId())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(om.writeValueAsBytes(dtoBody(profile, ProfileStatus.CREATED)))
+            )
             .andExpect(status().isBadRequest());
 
         // Validate the Profile in the database
@@ -575,7 +631,7 @@ class ProfileResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(om.writeValueAsBytes(profile))
+                    .content(om.writeValueAsBytes(dtoBody(profile, ProfileStatus.CREATED)))
             )
             .andExpect(status().isBadRequest());
 
@@ -606,22 +662,25 @@ class ProfileResourceIT {
 
         int databaseSizeBeforeUpdate = profileRepository.findAll().size();
 
-        // Update the profile using partial update
-        Profile partialUpdatedProfile = new Profile();
-        partialUpdatedProfile.setId(profile.getId());
-
-        partialUpdatedProfile
-            .sex(UPDATED_SEX)
-            .phoneNumber(UPDATED_PHONE_NUMBER)
-            .email(UPDATED_EMAIL)
-            .cardNumber(UPDATED_CARD_NUMBER)
-            .address(UPDATED_ADDRESS);
+        // Update the profile using partial update. birthDate, cardType and status must ride along
+        // (ProfileMapper.toEntity parses them unconditionally), so the two the test does not mean to
+        // change carry the stored values and status carries a value applyProvidedFields drops.
+        ObjectNode patchBody = om.createObjectNode();
+        patchBody.put("id", profile.getId());
+        patchBody.put("sex", UPDATED_SEX.name());
+        patchBody.put("phoneNumber", UPDATED_PHONE_NUMBER);
+        patchBody.put("email", UPDATED_EMAIL);
+        patchBody.put("cardNumber", UPDATED_CARD_NUMBER);
+        patchBody.set("address", om.valueToTree(UPDATED_ADDRESS));
+        patchBody.put("birthDate", DEFAULT_BIRTH_DATE.toString());
+        patchBody.put("cardType", DEFAULT_CARD_TYPE.name());
+        patchBody.put("status", ProfileStatus.CREATED.name());
 
         restProfileMockMvc
             .perform(
-                patch(ENTITY_API_URL_ID, partialUpdatedProfile.getId())
+                patch(ENTITY_API_URL_ID, profile.getId())
                     .contentType("application/merge-patch+json")
-                    .content(om.writeValueAsBytes(partialUpdatedProfile))
+                    .content(om.writeValueAsBytes(patchBody))
             )
             .andExpect(status().isOk());
 
@@ -670,7 +729,7 @@ class ProfileResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, partialUpdatedProfile.getId())
                     .contentType("application/merge-patch+json")
-                    .content(om.writeValueAsBytes(partialUpdatedProfile))
+                    .content(om.writeValueAsBytes(dtoBody(partialUpdatedProfile, ProfileStatus.CREATED)))
             )
             .andExpect(status().isOk());
 
@@ -679,7 +738,9 @@ class ProfileResourceIT {
         assertThat(profileList).hasSize(databaseSizeBeforeUpdate);
         Profile testProfile = profileList.get(profileList.size() - 1);
         assertThat(testProfile.getFirstName()).isEqualTo(UPDATED_FIRST_NAME);
-        assertThat(testProfile.getMiddleNames()).isEqualTo(UPDATED_MIDDLE_NAMES);
+        // middleNames is on the wire but ProfileMapper.toEntity never copies it, so the stored
+        // value survives untouched.
+        assertThat(testProfile.getMiddleNames()).isEqualTo(DEFAULT_MIDDLE_NAMES);
         assertThat(testProfile.getLastName()).isEqualTo(UPDATED_LAST_NAME);
         assertThat(testProfile.getBirthDate()).isEqualTo(UPDATED_BIRTH_DATE);
         assertThat(testProfile.getSex()).isEqualTo(UPDATED_SEX);
@@ -696,12 +757,15 @@ class ProfileResourceIT {
         int databaseSizeBeforeUpdate = profileRepository.findAll().size();
         profile.setId(UUID.randomUUID().toString());
 
-        // If the entity doesn't have an ID, it will throw BadRequestAlertException
+        // There is no stored-row precheck on PATCH — partialUpdate finds nothing and
+        // wrapOrNotFound answers 404.
         restProfileMockMvc
             .perform(
-                patch(ENTITY_API_URL_ID, profile.getId()).contentType("application/merge-patch+json").content(om.writeValueAsBytes(profile))
+                patch(ENTITY_API_URL_ID, profile.getId())
+                    .contentType("application/merge-patch+json")
+                    .content(om.writeValueAsBytes(dtoBody(profile, ProfileStatus.CREATED)))
             )
-            .andExpect(status().isBadRequest());
+            .andExpect(status().isNotFound());
 
         // Validate the Profile in the database
         List<Profile> profileList = profileRepository.findAll();
@@ -718,7 +782,7 @@ class ProfileResourceIT {
             .perform(
                 patch(ENTITY_API_URL_ID, UUID.randomUUID().toString())
                     .contentType("application/merge-patch+json")
-                    .content(om.writeValueAsBytes(profile))
+                    .content(om.writeValueAsBytes(dtoBody(profile, ProfileStatus.CREATED)))
             )
             .andExpect(status().isBadRequest());
 
@@ -792,7 +856,12 @@ class ProfileResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, attacker.getId())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"id\":\"" + attacker.getId() + "\",\"firstName\":\"Mal\",\"accountId\":\"parked\"}")
+                    .content(
+                        "{\"id\":\"" +
+                        attacker.getId() +
+                        "\",\"firstName\":\"Mal\",\"accountId\":\"parked\"," +
+                        "\"birthDate\":\"1990-01-01\",\"sex\":\"MALE\",\"cardType\":\"GHANACARD\",\"status\":\"ACTIVE\"}"
+                    )
             )
             .andExpect(status().isOk());
         assertThat(profileRepository.findById(attacker.getId()).orElseThrow().getAccountId()).isEqualTo("mallory");
@@ -802,7 +871,12 @@ class ProfileResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, victim.getId())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"id\":\"" + victim.getId() + "\",\"firstName\":\"Ama\",\"accountId\":\"mallory\"}")
+                    .content(
+                        "{\"id\":\"" +
+                        victim.getId() +
+                        "\",\"firstName\":\"Ama\",\"accountId\":\"mallory\"," +
+                        "\"birthDate\":\"1990-01-01\",\"sex\":\"FEMALE\",\"cardType\":\"GHANACARD\",\"status\":\"ACTIVE\"}"
+                    )
             )
             .andExpect(status().isOk());
 
@@ -825,7 +899,12 @@ class ProfileResourceIT {
             .perform(
                 put(ENTITY_API_URL_ID, stored.getId())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"id\":\"" + stored.getId() + "\",\"firstName\":\"Ama Updated\"}")
+                    .content(
+                        "{\"id\":\"" +
+                        stored.getId() +
+                        "\",\"firstName\":\"Ama Updated\"," +
+                        "\"birthDate\":\"1990-01-01\",\"sex\":\"FEMALE\",\"cardType\":\"GHANACARD\",\"status\":\"ACTIVE\"}"
+                    )
             )
             .andExpect(status().isOk());
 

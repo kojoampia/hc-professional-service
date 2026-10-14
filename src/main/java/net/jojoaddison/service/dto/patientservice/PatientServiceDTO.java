@@ -18,9 +18,9 @@ import java.util.stream.Stream;
  * carries a {@code patientId} alongside its own id, and that — not the profile id — is the key that
  * joins to {@code ClinicalCase.patientId} and to this service's {@code Task.patientId}.
  */
-public final class PatientServiceDtos {
+public final class PatientServiceDTO {
 
-    private PatientServiceDtos() {}
+    private PatientServiceDTO() {}
 
     /**
      * A row of one of the sibling's collections — anything {@code PatientServiceClient.getAll} pages.

@@ -2,7 +2,7 @@ package net.jojoaddison.web.rest;
 
 import java.util.List;
 import net.jojoaddison.service.PatientDirectoryService;
-import net.jojoaddison.service.dto.PatientDtos.CaseSummary;
+import net.jojoaddison.service.dto.PatientDTO.CaseSummary;
 import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;

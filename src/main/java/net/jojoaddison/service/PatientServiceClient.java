@@ -9,12 +9,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import net.jojoaddison.security.SecurityUtils;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ActivityLog;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.Medication;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.PatientProfile;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.PatientServiceRow;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.Report;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.ActivityLog;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.ClinicalCase;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.Medication;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.PatientProfile;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.PatientServiceRow;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.Report;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -722,7 +722,7 @@ public class PatientServiceClient {
      * costs is that a <b>schema</b> fault arrives here too: one row whose {@code loggedAt} the sibling
      * has changed the type of fails Jackson, and every clinician surface computed from that collection
      * then answers 503 <em>persistently</em>, where a transport outage clears itself. That drift has
-     * happened once already ({@code PatientServiceDtos.ActivityLog}, corrected 2026-08-22).
+     * happened once already ({@code PatientServiceDTO.ActivityLog}, corrected 2026-08-22).
      *
      * <p><b>Both are still 503</b> — an empty record is a worse answer to a clinician than an error,
      * whichever the cause — but they are told apart, because the remedies are opposites: waiting is
@@ -760,7 +760,7 @@ public class PatientServiceClient {
         } else {
             LOG.error(
                 "patientservice read of {} failed after {} row(s) [{}: {}]. This does NOT clear itself: every read of this " +
-                "collection will fail the same way until a DTO in PatientServiceDtos or the sibling's schema changes. " +
+                "collection will fail the same way until a DTO in PatientServiceDTO or the sibling's schema changes. " +
                 "Retrying, restarting and waiting are all the wrong remedy",
                 path,
                 rowsSeen,

@@ -4,6 +4,7 @@ import java.util.Optional;
 import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.repository.ProfileRepository;
+import net.jojoaddison.service.dto.ProfileTeamDTO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -25,6 +26,16 @@ public class ProfileService {
     public ProfileService(ProfileRepository profileRepository, OrganizationReferenceValidator organizationReferenceValidator) {
         this.profileRepository = profileRepository;
         this.organizationReferenceValidator = organizationReferenceValidator;
+    }
+
+    public ProfileTeamDTO addProfileToTeam(ProfileTeamDTO profileTeamDTO) {
+        log.debug("Request to add Profile to Team : {}", profileTeamDTO);
+        String profileId = profileTeamDTO.getProfileId();
+        String teamId = profileTeamDTO.getTeamId();
+        Profile profile = profileRepository.findById(profileId).orElseThrow(() -> new IllegalArgumentException("Profile not found"));
+        profile.getTeamIds().add(teamId);
+        profileRepository.save(profile);
+        return profileTeamDTO;
     }
 
     /*
