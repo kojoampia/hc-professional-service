@@ -13,8 +13,8 @@ import net.jojoaddison.security.SecurityUtils;
 import net.jojoaddison.service.CustomerDayPlanService;
 import net.jojoaddison.service.DutyRosterService;
 import net.jojoaddison.service.RosterTrailService;
-import net.jojoaddison.service.dto.DutyRosterDtos;
-import net.jojoaddison.service.dto.PatientDtos;
+import net.jojoaddison.service.dto.DutyRosterDTO;
+import net.jojoaddison.service.dto.PatientDTO;
 import net.jojoaddison.web.rest.util.LocationUri;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -144,13 +144,13 @@ public class DutyRosterResource {
      * {@link #listAll} already serves. A round carries customer snapshots since DR2, and
      * {@link #day} is the one read that discloses them, one day at a time and to the clinician whose
      * round it is. Serving the document here would have made this the second, for a wider audience,
-     * as a side effect of making a header followable. {@link DutyRosterDtos.Round} has nowhere to put
+     * as a side effect of making a header followable. {@link DutyRosterDTO.Round} has nowhere to put
      * a customer, so the single-item read discloses exactly what the estate-wide list already does.
      */
     @GetMapping("/{id}")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
-    public ResponseEntity<DutyRosterDtos.Round> one(@PathVariable String id) {
-        return ResponseUtil.wrapOrNotFound(dutyRosterRepository.findById(id).map(DutyRosterDtos.Round::of));
+    public ResponseEntity<DutyRosterDTO.Round> one(@PathVariable String id) {
+        return ResponseUtil.wrapOrNotFound(dutyRosterRepository.findById(id).map(DutyRosterDTO.Round::of));
     }
 
     @DeleteMapping("/{id}")
@@ -176,10 +176,10 @@ public class DutyRosterResource {
      */
     @GetMapping("/all")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
-    public ResponseEntity<List<DutyRosterDtos.Round>> listAll(@org.springdoc.core.annotations.ParameterObject Pageable pageable) {
+    public ResponseEntity<List<DutyRosterDTO.Round>> listAll(@org.springdoc.core.annotations.ParameterObject Pageable pageable) {
         Page<DutyRoster> page = dutyRosterService.estateRoster(pageable);
         HttpHeaders headers = PaginationUtil.generatePaginationHttpHeaders(ServletUriComponentsBuilder.fromCurrentRequest(), page);
-        return ResponseEntity.ok().headers(headers).body(DutyRosterDtos.rounds(page.getContent()));
+        return ResponseEntity.ok().headers(headers).body(DutyRosterDTO.rounds(page.getContent()));
     }
 
     /**
@@ -194,16 +194,16 @@ public class DutyRosterResource {
      * <p><b>Projected, and this is the read that made the projection necessary.</b> Omitting both
      * bounds is the dashboard's every-load call, so serialising the stored document here shipped
      * every customer name, address and phone number on the caller's whole roster to draw a grid of
-     * shift names. {@link DutyRosterDtos.Round} has nowhere to put them; {@link #day} is where the
+     * shift names. {@link DutyRosterDTO.Round} has nowhere to put them; {@link #day} is where the
      * snapshot is served, deliberately and one day at a time.
      */
     @GetMapping
-    public List<DutyRosterDtos.Round> myAssignments(
+    public List<DutyRosterDTO.Round> myAssignments(
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
     ) {
         return ownProfileId()
-            .map(professionalId -> DutyRosterDtos.rounds(dutyRosterService.forProfessional(professionalId, from, to)))
+            .map(professionalId -> DutyRosterDTO.rounds(dutyRosterService.forProfessional(professionalId, from, to)))
             .orElse(List.of());
     }
 
@@ -213,7 +213,7 @@ public class DutyRosterResource {
      * <p>The day view's read, and <b>the only one that carries customer names, addresses and phone
      * numbers to a browser</b>. That is true because this is the only roster read that returns the
      * stored {@link DutyRoster} — the range read and {@code /all} go through
-     * {@link DutyRosterDtos.Round}, which has no field to put a snapshot in, and the summary read
+     * {@link DutyRosterDTO.Round}, which has no field to put a snapshot in, and the summary read
      * returns counts. <b>Until item 7 this paragraph was an intention rather than a description:</b>
      * all three reads serialised the document, so the claim was false on the wire in the exact place a
      * reader would come to check it. If you add a fourth read, it takes the projection unless it has
@@ -313,7 +313,7 @@ public class DutyRosterResource {
      * here, which is the correct answer.
      */
     @GetMapping("/customers/{customerId}/trail")
-    public List<PatientDtos.ActivityLogEntry> customerTrail(@PathVariable String customerId) {
+    public List<PatientDTO.ActivityLogEntry> customerTrail(@PathVariable String customerId) {
         return rosterTrailService.trailFor(customerId, LocalDate.now());
     }
 
@@ -354,7 +354,7 @@ public class DutyRosterResource {
      * around today rather than the patient's whole history.
      */
     @GetMapping("/customer/{customerId}")
-    public List<DutyRosterDtos.CustomerVisit> customerDayPlan(
+    public List<DutyRosterDTO.CustomerVisit> customerDayPlan(
         @PathVariable String customerId,
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to

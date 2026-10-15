@@ -19,8 +19,8 @@ import net.jojoaddison.service.PatientDirectoryService;
 import net.jojoaddison.service.PatientDirectoryService.RestrictedPart;
 import net.jojoaddison.service.PatientServiceClient;
 import net.jojoaddison.service.PatientServiceUnavailableException;
-import net.jojoaddison.service.dto.PatientDtos.PatientListItem;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.PatientProfile;
+import net.jojoaddison.service.dto.PatientDTO.PatientListItem;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.PatientProfile;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -229,8 +229,8 @@ class PatientDirectoryRestrictionHeaderTest {
 
     // --- The same header on one patient's record (backlog item 112) --------------------------
 
-    private static net.jojoaddison.service.dto.PatientDtos.PatientRecord aRecord() {
-        return new net.jojoaddison.service.dto.PatientDtos.PatientRecord(
+    private static net.jojoaddison.service.dto.PatientDTO.PatientRecord aRecord() {
+        return new net.jojoaddison.service.dto.PatientDTO.PatientRecord(
             "p-1",
             "Ama Mensah",
             null,
@@ -263,7 +263,7 @@ class PatientDirectoryRestrictionHeaderTest {
     void aRecordWithNothingRestrictedCarriesNoHeader() {
         answersRecord(java.util.Set.of());
 
-        ResponseEntity<net.jojoaddison.service.dto.PatientDtos.PatientRecord> response = resource.get("p-1");
+        ResponseEntity<net.jojoaddison.service.dto.PatientDTO.PatientRecord> response = resource.get("p-1");
 
         assertThat(response.getHeaders().headerNames()).doesNotContain(PatientResource.RESTRICTED_PARTS);
         assertThat(response.getBody().id()).isEqualTo("p-1");
@@ -280,7 +280,7 @@ class PatientDirectoryRestrictionHeaderTest {
     void aRestrictedPartIsNAMEDonTheRecordResponse() {
         answersRecord(java.util.EnumSet.of(RestrictedPart.LAST_ACTIVITY));
 
-        ResponseEntity<net.jojoaddison.service.dto.PatientDtos.PatientRecord> response = resource.get("p-1");
+        ResponseEntity<net.jojoaddison.service.dto.PatientDTO.PatientRecord> response = resource.get("p-1");
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getHeaders().getFirst(PatientResource.RESTRICTED_PARTS)).isEqualTo("lastActivity");

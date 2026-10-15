@@ -3,14 +3,14 @@ package net.jojoaddison.web.rest;
 import java.util.List;
 import java.util.stream.Collectors;
 import net.jojoaddison.service.PatientDirectoryService;
-import net.jojoaddison.service.dto.PatientDtos.ActivityLogEntry;
-import net.jojoaddison.service.dto.PatientDtos.CaseDetail;
-import net.jojoaddison.service.dto.PatientDtos.CaseSummary;
-import net.jojoaddison.service.dto.PatientDtos.ClinicalReport;
-import net.jojoaddison.service.dto.PatientDtos.CreateActivity;
-import net.jojoaddison.service.dto.PatientDtos.CreateReport;
-import net.jojoaddison.service.dto.PatientDtos.PatientListItem;
-import net.jojoaddison.service.dto.PatientDtos.PatientRecord;
+import net.jojoaddison.service.dto.PatientDTO.ActivityLogEntry;
+import net.jojoaddison.service.dto.PatientDTO.CaseDetail;
+import net.jojoaddison.service.dto.PatientDTO.CaseSummary;
+import net.jojoaddison.service.dto.PatientDTO.ClinicalReport;
+import net.jojoaddison.service.dto.PatientDTO.CreateActivity;
+import net.jojoaddison.service.dto.PatientDTO.CreateReport;
+import net.jojoaddison.service.dto.PatientDTO.PatientListItem;
+import net.jojoaddison.service.dto.PatientDTO.PatientRecord;
 import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -309,7 +309,7 @@ public class PatientResource {
      * <p>Separate from the list because {@code symptoms} and {@code diagnosis} are unbounded free
      * text. Carrying them on every row of a page would put kilobytes of clinical prose on the wire
      * to render a summary line of it — the wrong trade on a phone, and the reason
-     * {@link net.jojoaddison.service.dto.PatientDtos.CaseSummary} stays lean.
+     * {@link net.jojoaddison.service.dto.PatientDTO.CaseSummary} stays lean.
      *
      * <p><b>This is the one case endpoint that serves an archived case, since 2026-09-11</b> (backlog
      * item 82). The lists above exclude them and still do; a case retired while a clinician had it open

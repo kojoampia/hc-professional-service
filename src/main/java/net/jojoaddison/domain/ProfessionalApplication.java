@@ -2,6 +2,7 @@ package net.jojoaddison.domain;
 
 import java.io.Serializable;
 import java.time.Instant;
+import java.util.List;
 import net.jojoaddison.domain.enumeration.ProfileStatus;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
@@ -122,6 +123,9 @@ public class ProfessionalApplication extends AbstractAuditingEntity<String> impl
     /** Acquisition attribution, e.g. "web-careers" (careers handoff contract §3). */
     @Field("source")
     private String source;
+
+    @Field("items")
+    private List<ApplicationItem> items;
 
     @Override
     public String getId() {
@@ -317,6 +321,19 @@ public class ProfessionalApplication extends AbstractAuditingEntity<String> impl
 
     public void setCorrectionNotes(String correctionNotes) {
         this.correctionNotes = correctionNotes;
+    }
+
+    public List<ApplicationItem> getItems() {
+        return this.items;
+    }
+
+    public ProfessionalApplication items(List<ApplicationItem> items) {
+        this.items = items;
+        return this;
+    }
+
+    public void setItems(List<ApplicationItem> items) {
+        this.items = items;
     }
 
     @Override

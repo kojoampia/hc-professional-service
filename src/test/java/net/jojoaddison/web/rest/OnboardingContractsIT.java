@@ -88,24 +88,24 @@ class OnboardingContractsIT {
     }
 
     /**
-     * The WP2 contract this class exists for — the four fields WP2 added to {@code Profile} survive a
-     * REST round trip — driven over {@code PUT} and {@code GET} rather than {@code POST}.
+     * What survives a {@code PUT /api/profiles/{id}} now that the endpoint binds {@code ProfileDTO}.
      *
-     * <p>It was a create until backlog.md item 66 refused that: since item 54 made {@code accountId}
-     * {@code READ_ONLY} over HTTP, a {@code POST} could only produce a profile belonging to nobody,
-     * and this test was one of the places that never noticed, because it asserted the four fields and
-     * never looked at the account. <b>The contract it guards is unchanged</b> — that is why the same
-     * six assertions are made twice here, once on the write's own response and once on an independent
-     * read, which is strictly more than the create asserted.
+     * <p>Of the four WP2 fields, only the next of kin is carried by the DTO wire:
+     * {@code specialtyCategoryId} and {@code teamIds} are not {@code ProfileDTO} fields and arrive as
+     * unknown keys, and {@code title} is a DTO field {@code ProfileMapper.toEntity} never copies. A
+     * {@code PUT} is a whole-document replace, so the three the wire cannot carry are <b>cleared</b>
+     * by any PUT, however faithfully the caller echoes them.
      *
-     * <p>The row is seeded through the repository, so the {@code PUT} carries the organisation
-     * pointers forward rather than introducing them and {@code OrganizationReferenceValidator}
-     * (item 60) has nothing to resolve — the reference integrity rule has its own test in
-     * {@code OrganizationReferenceIntegrityIT} and is not what this one is about.
+     * <p>The contact is sent in the DTO's vocabulary — {@code phoneNumber}, where the entity stores
+     * {@code phone} — and asserted under both {@code contacts} and the {@code emergencyContact}
+     * output alias, which still projects the first element on serialization.
+     *
+     * <p>{@code birthDate}, {@code sex}, {@code cardType} and {@code status} ride along because
+     * {@code ProfileMapper.toEntity} parses all four unconditionally.
      */
     @Test
     @WithMockGatewayUser(authorities = { "ROLE_DOCTOR" })
-    void profileRoundTripsOnboardingFieldsOverRest() throws Exception {
+    void aPutClearsTheWp2FieldsTheDtoWireCannotCarry() throws Exception {
         Profile profile = profileRepository.save(
             new Profile()
                 .accountId("account-1")
@@ -117,39 +117,42 @@ class OnboardingContractsIT {
                 .contacts(List.of(new EmergencyContact().name("Kojo A").relationship("spouse").phone("0242000000")))
         );
 
+        String body =
+            "{\"id\":\"" +
+            profile.getId() +
+            "\",\"firstName\":\"Ama\",\"lastName\":\"Serwaa\",\"title\":\"RN\"," +
+            "\"specialtyCategoryId\":\"cat-midwifery\",\"teamIds\":[\"team-1\",\"team-2\"]," +
+            "\"contacts\":[{\"name\":\"Kojo A\",\"relationship\":\"spouse\",\"phoneNumber\":\"0242000000\"}]," +
+            "\"birthDate\":\"1990-01-01\",\"sex\":\"FEMALE\",\"cardType\":\"GHANACARD\",\"status\":\"ACTIVE\"}";
+
         restMockMvc
-            .perform(
-                put("/api/profiles/{id}", profile.getId()).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(profile))
-            )
+            .perform(put("/api/profiles/{id}", profile.getId()).contentType(MediaType.APPLICATION_JSON).content(body))
             .andExpect(status().isOk())
-            .andExpectAll(theFourWP2Fields());
+            .andExpectAll(theNextOfKinUnderBothNames());
 
         // The independent read is an administrator's since backlog.md item 143: GET /api/profiles/**
         // takes its subject from the path and is ROLE_ADMIN. The write above stays the doctor's —
-        // the mutation matrix is unchanged — and what this test is about is the four WP2 fields
-        // surviving a round trip rather than who may perform either half.
+        // the mutation matrix is unchanged.
         restMockMvc
             .perform(get("/api/profiles/{id}", profile.getId()).with(gatewayUser("item143.admin", "ROLE_ADMIN")))
             .andExpect(status().isOk())
-            .andExpectAll(theFourWP2Fields());
+            .andExpectAll(theNextOfKinUnderBothNames());
+
+        // Asserted on the stored row rather than the response, so the claim does not depend on how
+        // the serializer renders a null.
+        Profile after = profileRepository.findById(profile.getId()).orElseThrow();
+        assertThat(after.getTitle()).isNull();
+        assertThat(after.getSpecialtyCategoryId()).isNull();
+        assertThat(after.getTeamIds()).isEmpty();
     }
 
     /**
-     * {@code title}, {@code specialtyCategoryId}, {@code teamIds} and the next of kin.
-     *
-     * <p><b>The next of kin is asserted under BOTH names, which is the contract since profile.md's
-     * T1.</b> {@code contacts} is the stored field and the one the specification names;
-     * {@code emergencyContact} is a wire alias projecting its first element, kept because two
-     * shipped clients still speak it on {@code PUT /api/profile} — dropping it is T6's. Asserting only
-     * the new name would let the alias be deleted with every test green and the mobile Me tab
-     * silently unable to save a next of kin; asserting only the old one would let the field it
-     * projects be lost under it.
+     * The next of kin round-trips under BOTH names — {@code contacts} is the stored field,
+     * {@code emergencyContact} the output alias projecting its first element. It is the only WP2
+     * field the DTO wire still carries.
      */
-    private static ResultMatcher[] theFourWP2Fields() {
+    private static ResultMatcher[] theNextOfKinUnderBothNames() {
         return new ResultMatcher[] {
-            jsonPath("$.title").value("RN"),
-            jsonPath("$.specialtyCategoryId").value("cat-midwifery"),
-            jsonPath("$.teamIds", org.hamcrest.Matchers.contains("team-1", "team-2")),
             jsonPath("$.contacts[0].name").value("Kojo A"),
             jsonPath("$.contacts[0].relationship").value("spouse"),
             jsonPath("$.contacts[0].phone").value("0242000000"),

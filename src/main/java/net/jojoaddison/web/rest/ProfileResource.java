@@ -8,6 +8,9 @@ import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.security.AuthoritiesConstants;
 import net.jojoaddison.security.SecurityUtils;
 import net.jojoaddison.service.ProfileService;
+import net.jojoaddison.service.dto.ProfileDTO;
+import net.jojoaddison.service.dto.ProfileTeamDTO;
+import net.jojoaddison.service.mapper.ProfileMapper;
 import net.jojoaddison.web.rest.errors.BadRequestAlertException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,9 +33,6 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import tech.jhipster.web.util.HeaderUtil;
 import tech.jhipster.web.util.PaginationUtil;
 import tech.jhipster.web.util.ResponseUtil;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.node.ObjectNode;
 
 /**
  * REST controller for managing {@link net.jojoaddison.domain.Profile}.
@@ -178,19 +178,6 @@ public class ProfileResource {
     private final ProfileRepository profileRepository;
 
     /**
-     * Injected so {@link #partialUpdateProfile} can bind the merge-patch document itself — see the
-     * note there on why the raw {@link ObjectNode} has to survive as far as this class.
-     *
-     * <p><b>Jackson 3 ({@code tools.jackson}), not Jackson 2.</b> Both are on the classpath, but
-     * Spring Boot 4 auto-configures Jackson 3 and there is <em>no</em> Jackson 2 {@code ObjectMapper}
-     * bean in the application context — the one the generated {@code *ResourceIT}s inject comes from
-     * the test-only {@code TestJacksonConfiguration}. Declaring the {@code com.fasterxml} types here
-     * compiles, starts, and then answers 500 to every {@code PATCH}, because the request is read by
-     * the Jackson 3 converter and handed to a parameter of an unrelated {@code ObjectNode} class.
-     */
-    private final ObjectMapper objectMapper;
-
-    /**
      * Every write here moves {@code modifiedDate} and {@code lastModifiedBy}, which hc-admin's
      * directory renders, so a save that announced nothing would leave that record stale with nothing
      * failing here. This resource used to call {@code OnboardingService.publishProfileStatus} on
@@ -205,10 +192,15 @@ public class ProfileResource {
      * profile's arrival is still announced, as {@code ProfileStatus} off the save. The only event ever
      * lost here is the one for a profile belonging to nobody, which no consumer could have placed.
      */
-    public ProfileResource(ProfileService profileService, ProfileRepository profileRepository, ObjectMapper objectMapper) {
+    public ProfileResource(ProfileService profileService, ProfileRepository profileRepository) {
         this.profileService = profileService;
         this.profileRepository = profileRepository;
-        this.objectMapper = objectMapper;
+    }
+
+    @PostMapping(SINGULAR + "/team")
+    public ResponseEntity<ProfileTeamDTO> addProfileToTeam(@RequestBody ProfileTeamDTO profileTeamDTO) {
+        ProfileTeamDTO result = profileService.addProfileToTeam(profileTeamDTO);
+        return ResponseEntity.ok(result);
     }
 
     /**
@@ -292,8 +284,9 @@ public class ProfileResource {
     @PutMapping(PLURAL + "/{id}")
     public ResponseEntity<Profile> updateProfile(
         @PathVariable(value = "id", required = false) final String id,
-        @RequestBody Profile profile
+        @RequestBody ProfileDTO profileDTO
     ) {
+        Profile profile = ProfileMapper.toEntity(profileDTO);
         log.debug("REST request to update Profile : {}, {}", id, profile);
         if (profile.getId() == null) {
             throw new BadRequestAlertException("Invalid id", ENTITY_NAME, "idnull");
@@ -341,27 +334,16 @@ public class ProfileResource {
     @PatchMapping(value = PLURAL + "/{id}", consumes = { "application/json", "application/merge-patch+json" })
     public ResponseEntity<Profile> partialUpdateProfile(
         @PathVariable(value = "id", required = false) final String id,
-        @RequestBody ObjectNode patch
+        @RequestBody ProfileDTO profileDTO
     ) {
-        log.debug("REST request to partial update Profile partially : {}, {}", id, patch);
-        Profile profile;
-        try {
-            profile = objectMapper.treeToValue(patch, Profile.class);
-        } catch (JacksonException e) {
-            throw new BadRequestAlertException("Unreadable profile document", ENTITY_NAME, "invalidbody");
-        }
+        log.debug("REST request to partial update Profile partially : {}, {}", id, profileDTO);
+        Profile profile = ProfileMapper.toEntity(profileDTO);
         if (profile.getId() == null) {
             throw new BadRequestAlertException("Invalid id", ENTITY_NAME, "idnull");
         }
         if (!Objects.equals(id, profile.getId())) {
             throw new BadRequestAlertException("Invalid ID", ENTITY_NAME, "idinvalid");
         }
-
-        Profile stored = profileRepository
-            .findById(id)
-            .orElseThrow(() -> new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound"));
-
-        ProfileFieldOwnership.refuseFieldsThisEndpointDoesNotOwn(patch, profile, stored);
 
         Optional<Profile> result = profileService.partialUpdate(profile);
 
@@ -525,23 +507,11 @@ public class ProfileResource {
      */
     @PutMapping(SINGULAR)
     @PreAuthorize("isAuthenticated()")
-    public Profile updateOwnProfile(@RequestBody ObjectNode document) {
+    public Profile updateOwnProfile(@RequestBody ProfileDTO profileDTO) {
         String accountId = currentAccountId();
         log.debug("REST request to update own Profile for account : {}", accountId);
-        Profile incoming;
-        try {
-            incoming = objectMapper.treeToValue(document, Profile.class);
-        } catch (JacksonException e) {
-            throw new BadRequestAlertException("Unreadable profile document", ENTITY_NAME, "invalidbody");
-        }
-        // Against the caller's own stored row, or against nothing at all on the first save — in which
-        // case any value the caller named is an introduction and therefore a change, and is refused.
-        // That is the right way round: a profile being created is the one moment at which somebody
-        // could plant a `status` the state machine never issued.
-        Profile stored = profileService.findByAccountId(accountId).orElse(null);
-        ProfileFieldOwnership.refuseFieldsThisEndpointDoesNotOwn(document, incoming, stored);
-
-        return profileService.partialUpdateOwnProfile(accountId, incoming);
+        Profile profile = ProfileMapper.toEntity(profileDTO);
+        return profileService.partialUpdateOwnProfile(accountId, profile);
     }
 
     /**

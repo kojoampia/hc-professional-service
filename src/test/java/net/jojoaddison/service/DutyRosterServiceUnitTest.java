@@ -19,7 +19,7 @@ import net.jojoaddison.domain.enumeration.ShiftType;
 import net.jojoaddison.repository.AbsenceRepository;
 import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.service.DutyRosterService.InvalidRoundException;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.PatientProfile;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.PatientProfile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

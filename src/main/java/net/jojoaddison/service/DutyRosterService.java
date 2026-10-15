@@ -23,7 +23,7 @@ import net.jojoaddison.domain.enumeration.AbsenceType;
 import net.jojoaddison.domain.enumeration.ShiftType;
 import net.jojoaddison.repository.AbsenceRepository;
 import net.jojoaddison.repository.DutyRosterRepository;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.PatientProfile;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.PatientProfile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -294,7 +294,7 @@ public class DutyRosterService {
      * <p><b>This is the only read that refreshes, and the only one that discloses.</b> § 6 says
      * "opening a day fetches the current profiles and updates the stored snapshots behind the render"
      * — a <em>day</em>, not a range. The calendar's range read draws coloured squares and shift names
-     * and is served {@code DutyRosterDtos.Round}, which carries no customer at all, so refreshing
+     * and is served {@code DutyRosterDTO.Round}, which carries no customer at all, so refreshing
      * there would spend a cross-stack call on every page-turn to update data the caller is not even
      * sent. One day, opened deliberately, is where the address is about to be read off the screen and
      * walked to.

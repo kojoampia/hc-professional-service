@@ -38,18 +38,17 @@ import org.springframework.web.server.ResponseStatusException;
  * {@code specialtyCategoryId: "does-not-exist-cat"} and a fabricated team id returned {@code 200} and
  * stored both.
  *
- * <p><b>Two write paths, and they are checked differently on purpose.</b>
- * {@code assignOrganization} is <em>the</em> assignment operation, so it validates whatever it is
- * given, every time — an admin naming a category that does not exist has made a mistake worth being
- * told about even if the profile already held that value. {@code PUT /api/profiles/&#123;id&#125;} is
- * a generic whole-document replace, so it validates only what the write <em>introduces</em>: a
- * document already holding a pointer that resolves to nothing must stay editable, because repairing
- * pointers that were already dangling before this change is explicitly not item 60 and a caller who
- * did not create the problem should not be the one blocked by it.
+ * <p><b>The HTTP half of that rule is unreachable since the write endpoints bind
+ * {@code ProfileDTO}.</b> {@code specialtyCategoryId} and {@code teamIds} are not {@code ProfileDTO}
+ * fields, so a {@code PUT} body naming them arrives with both ignored at the converter — the mapped
+ * entity never introduces a reference, {@code OrganizationReferenceValidator} has nothing to
+ * resolve, and (a {@code PUT} being a whole-document replace) the stored values are <b>cleared</b>
+ * by any PUT, dangling or not. The PUT tests below assert that behaviour; the validator itself is
+ * still exercised through {@code assignOrganization}, the one write path that can still name a
+ * reference.
  *
- * <p><b>{@code PATCH} appears nowhere here</b>, and that is not an omission: it refuses both fields
- * outright — see {@code ProfilePatchFieldCoverageIT} — so there is no write of theirs left to
- * validate.
+ * <p>Every body carries {@code birthDate}, {@code sex}, {@code cardType} and {@code status} because
+ * {@code ProfileMapper.toEntity} parses all four unconditionally.
  */
 @AutoConfigureMockMvc
 @IntegrationTest
@@ -91,88 +90,95 @@ class OrganizationReferenceIntegrityIT {
         return profileRepository.save(new Profile().accountId("item60-refs").firstName("Ama").lastName("Boateng"));
     }
 
-    private String whole(Profile profile) throws Exception {
-        return om.writeValueAsString(profile);
+    /**
+     * A DTO-shaped body for {@code profile}, with {@code extraJsonFields} appended verbatim —
+     * used to put {@code specialtyCategoryId}/{@code teamIds} on the wire, where the converter
+     * ignores them as unknown keys.
+     */
+    private String dtoBody(Profile profile, String extraJsonFields) {
+        return (
+            "{\"id\":\"" +
+            profile.getId() +
+            "\",\"firstName\":\"" +
+            profile.getFirstName() +
+            "\",\"lastName\":\"" +
+            profile.getLastName() +
+            "\",\"birthDate\":\"1990-01-01\",\"sex\":\"FEMALE\",\"cardType\":\"GHANACARD\",\"status\":\"ACTIVE\"" +
+            (extraJsonFields.isEmpty() ? "" : "," + extraJsonFields) +
+            "}"
+        );
     }
 
     // ---------------------------------------------------------------------------------------------
     // PUT /api/profiles/{id}
     // ---------------------------------------------------------------------------------------------
 
-    /** The control: an id that resolves is stored, so the refusals below are about resolution. */
+    /**
+     * A category id on the wire — resolving or not — is an unknown key the converter ignores, so
+     * the write succeeds and stores nothing in the field.
+     */
     @Test
-    void aCategoryThatResolvesIsAccepted() throws Exception {
+    void aCategoryOnTheWireIsIgnoredWhetherItResolvesOrNot() throws Exception {
         Category specialty = categoryRepository.save(new Category().name("Geriatric nursing"));
         Profile clinician = storedClinician();
-        clinician.setSpecialtyCategoryId(specialty.getId());
 
         restMockMvc
-            .perform(put(ENTITY_API_URL_ID, clinician.getId()).contentType("application/json").content(whole(clinician)))
+            .perform(
+                put(ENTITY_API_URL_ID, clinician.getId())
+                    .contentType("application/json")
+                    .content(dtoBody(clinician, "\"specialtyCategoryId\":\"" + specialty.getId() + "\""))
+            )
             .andExpect(status().isOk());
+        assertThat(profileRepository.findById(clinician.getId()).orElseThrow().getSpecialtyCategoryId()).isNull();
 
-        assertThat(profileRepository.findById(clinician.getId()).orElseThrow().getSpecialtyCategoryId()).isEqualTo(specialty.getId());
-    }
-
-    @Test
-    void aCategoryThatResolvesToNothingIsRefused() throws Exception {
-        Profile clinician = storedClinician();
-        clinician.setSpecialtyCategoryId("no-such-category");
-
-        String body = restMockMvc
-            .perform(put(ENTITY_API_URL_ID, clinician.getId()).contentType("application/json").content(whole(clinician)))
-            .andExpect(status().isBadRequest())
-            .andReturn()
-            .getResponse()
-            .getContentAsString();
-
-        assertThat(body).as("the refusal must name what did not resolve").contains("no-such-category");
+        restMockMvc
+            .perform(
+                put(ENTITY_API_URL_ID, clinician.getId())
+                    .contentType("application/json")
+                    .content(dtoBody(clinician, "\"specialtyCategoryId\":\"no-such-category\""))
+            )
+            .andExpect(status().isOk());
         assertThat(profileRepository.findById(clinician.getId()).orElseThrow().getSpecialtyCategoryId()).isNull();
     }
 
-    /**
-     * One bad id in a list of otherwise good ones is still a bad write. Asserted with a resolving
-     * team beside it so that the refusal cannot be an artefact of the list being non-empty.
-     */
+    /** The same for team ids, resolving and fabricated alike in one list. */
     @Test
-    void aTeamThatResolvesToNothingIsRefusedEvenBesideOneThatDoes() throws Exception {
+    void teamIdsOnTheWireAreIgnoredWhetherTheyResolveOrNot() throws Exception {
         Team real = teamRepository.save(new Team().name("Home visits · North"));
         Profile clinician = storedClinician();
-        clinician.setTeamIds(List.of(real.getId(), "no-such-team"));
 
-        String body = restMockMvc
-            .perform(put(ENTITY_API_URL_ID, clinician.getId()).contentType("application/json").content(whole(clinician)))
-            .andExpect(status().isBadRequest())
-            .andReturn()
-            .getResponse()
-            .getContentAsString();
+        restMockMvc
+            .perform(
+                put(ENTITY_API_URL_ID, clinician.getId())
+                    .contentType("application/json")
+                    .content(dtoBody(clinician, "\"teamIds\":[\"" + real.getId() + "\",\"no-such-team\"]"))
+            )
+            .andExpect(status().isOk());
 
-        assertThat(body).contains("no-such-team");
         assertThat(profileRepository.findById(clinician.getId()).orElseThrow().getTeamIds()).isEmpty();
     }
 
-    /** Naming neither is not naming something that does not resolve. */
+    /** Naming neither still writes what the DTO does carry. */
     @Test
     void aWriteThatNamesNeitherIsUntouched() throws Exception {
         Profile clinician = storedClinician();
         clinician.setFirstName("Adwoa");
 
         restMockMvc
-            .perform(put(ENTITY_API_URL_ID, clinician.getId()).contentType("application/json").content(whole(clinician)))
+            .perform(put(ENTITY_API_URL_ID, clinician.getId()).contentType("application/json").content(dtoBody(clinician, "")))
             .andExpect(status().isOk());
 
         assertThat(profileRepository.findById(clinician.getId()).orElseThrow().getFirstName()).isEqualTo("Adwoa");
     }
 
     /**
-     * A profile that already holds a pointer to nothing stays editable.
-     *
-     * <p>Repairing pointers that were dangling before this change is out of item 60's scope, and a
-     * rule that validated the resulting <em>state</em> rather than the change would quietly make
-     * those profiles unwritable through {@code PUT} — which is a whole-document replace, so a caller
-     * cannot avoid carrying the field forward.
+     * A stored organisation pointer — dangling or sound — does not survive a {@code PUT}: the
+     * endpoint replaces the whole document with what the DTO carries, and the DTO cannot carry
+     * either field. The caller cannot prevent this by echoing the values; they are ignored on the
+     * way in.
      */
     @Test
-    void anAlreadyDanglingPointerCarriedForwardUnchangedIsNotRefused() throws Exception {
+    void aPutClearsStoredOrganisationPointersTheDtoCannotCarry() throws Exception {
         Profile clinician = storedClinician();
         clinician.setSpecialtyCategoryId("dangling-from-before");
         clinician.setTeamIds(List.of("dangling-team"));
@@ -180,12 +186,17 @@ class OrganizationReferenceIntegrityIT {
 
         clinician.setFirstName("Adwoa");
         restMockMvc
-            .perform(put(ENTITY_API_URL_ID, clinician.getId()).contentType("application/json").content(whole(clinician)))
+            .perform(
+                put(ENTITY_API_URL_ID, clinician.getId())
+                    .contentType("application/json")
+                    .content(dtoBody(clinician, "\"specialtyCategoryId\":\"dangling-from-before\",\"teamIds\":[\"dangling-team\"]"))
+            )
             .andExpect(status().isOk());
 
         Profile after = profileRepository.findById(clinician.getId()).orElseThrow();
         assertThat(after.getFirstName()).isEqualTo("Adwoa");
-        assertThat(after.getSpecialtyCategoryId()).isEqualTo("dangling-from-before");
+        assertThat(after.getSpecialtyCategoryId()).isNull();
+        assertThat(after.getTeamIds()).isEmpty();
     }
 
     // ---------------------------------------------------------------------------------------------

@@ -17,7 +17,7 @@ import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.security.WithMockGatewayUser;
 import net.jojoaddison.service.PatientServiceClient;
 import net.jojoaddison.service.PatientServiceUnavailableException;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.ClinicalCase;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.ClinicalCase;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

@@ -3,6 +3,7 @@ package net.jojoaddison.domain;
 import jakarta.validation.constraints.*;
 import java.io.Serial;
 import java.io.Serializable;
+import java.util.Set;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.DBRef;
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -33,6 +34,10 @@ public class Hub implements Serializable {
     @DBRef
     @Field("address")
     private Address address;
+
+    @DBRef
+    @Field("profiles")
+    private Set<Profile> profiles = new java.util.HashSet<>();
 
     // jhipster-needle-entity-add-field - JHipster will add fields here
 
@@ -85,6 +90,19 @@ public class Hub implements Serializable {
 
     public Hub address(Address address) {
         this.setAddress(address);
+        return this;
+    }
+
+    public Set<Profile> getProfiles() {
+        return this.profiles;
+    }
+
+    public void setProfiles(Set<Profile> profiles) {
+        this.profiles = profiles;
+    }
+
+    public Hub profiles(Set<Profile> profiles) {
+        this.setProfiles(profiles);
         return this;
     }
 

@@ -16,7 +16,7 @@ import java.util.Map;
 import java.util.Optional;
 import net.jojoaddison.repository.DutyRosterRepository;
 import net.jojoaddison.repository.ProfileRepository;
-import net.jojoaddison.service.dto.patientservice.PatientServiceDtos.PatientProfile;
+import net.jojoaddison.service.dto.patientservice.PatientServiceDTO.PatientProfile;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

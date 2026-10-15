@@ -1,5 +1,6 @@
 package net.jojoaddison.config;
 
+import java.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.DisposableBean;
@@ -25,6 +26,9 @@ public class KafkaTestContainer implements InitializingBean, DisposableBean {
         if (null == kafkaContainer) {
             kafkaContainer = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.6.0"))
                 .withLogConsumer(new Slf4jLogConsumer(log))
+                // The docker daemon is shared with four other products' stacks and test runs, so the
+                // first broker start of a suite can exceed the wait strategy's 60-second default.
+                .withStartupTimeout(Duration.ofMinutes(3))
                 .withReuse(true);
         }
         if (!kafkaContainer.isRunning()) {
