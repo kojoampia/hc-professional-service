@@ -5,6 +5,7 @@ import net.jojoaddison.domain.Profile;
 import net.jojoaddison.domain.enumeration.ProfileStatus;
 import net.jojoaddison.repository.ProfileRepository;
 import net.jojoaddison.service.dto.ProfileTeamDTO;
+import net.jojoaddison.service.dto.SpecialCategoryDTO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -36,6 +37,35 @@ public class ProfileService {
         profile.getTeamIds().add(teamId);
         profileRepository.save(profile);
         return profileTeamDTO;
+    }
+
+    public ProfileTeamDTO removeProfileFromTeam(ProfileTeamDTO profileTeamDTO) {
+        log.debug("Request to remove Profile from Team : {}", profileTeamDTO);
+        String profileId = profileTeamDTO.getProfileId();
+        String teamId = profileTeamDTO.getTeamId();
+        Profile profile = profileRepository.findById(profileId).orElseThrow(() -> new IllegalArgumentException("Profile not found"));
+        profile.getTeamIds().remove(teamId);
+        profileRepository.save(profile);
+        return profileTeamDTO;
+    }
+
+    public SpecialCategoryDTO setSpecialCategoryToProfile(SpecialCategoryDTO specialCategoryDTO) {
+        log.debug("Request to add Special Category to Profile : {}", specialCategoryDTO);
+        String profileId = specialCategoryDTO.getProfileId();
+        String categoryId = specialCategoryDTO.getCategoryId();
+        Profile profile = profileRepository.findById(profileId).orElseThrow(() -> new IllegalArgumentException("Profile not found"));
+        profile.setSpecialtyCategoryId(categoryId);
+        profileRepository.save(profile);
+        return specialCategoryDTO;
+    }
+
+    public SpecialCategoryDTO removeSpecialCategoryFromProfile(SpecialCategoryDTO specialCategoryDTO) {
+        log.debug("Request to remove Special Category from Profile : {}", specialCategoryDTO);
+        String profileId = specialCategoryDTO.getProfileId();
+        Profile profile = profileRepository.findById(profileId).orElseThrow(() -> new IllegalArgumentException("Profile not found"));
+        profile.setSpecialtyCategoryId(null);
+        profileRepository.save(profile);
+        return specialCategoryDTO;
     }
 
     /*
@@ -99,6 +129,7 @@ public class ProfileService {
         // fabricated category id and a fabricated team id returned 200 and stored both, producing by
         // typo exactly the dangling pointer item 57 stopped a delete from producing.
         organizationReferenceValidator.requireIntroducedReferencesResolve(profile, stored);
+
         return profileRepository.save(profile);
     }
 
