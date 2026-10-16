@@ -18,8 +18,10 @@ public class ProfileMapper {
         }
         ProfileDTO dto = new ProfileDTO();
         dto.setId(profile.getId());
+        dto.setTitle(profile.getTitle());
         dto.setAccountId(profile.getAccountId());
         dto.setFirstName(profile.getFirstName());
+        dto.setMiddleNames(profile.getMiddleNames());
         dto.setLastName(profile.getLastName());
         dto.setBirthDate(profile.getBirthDate().toString());
         dto.setSex(String.valueOf(profile.getSex().ordinal()));
@@ -40,14 +42,11 @@ public class ProfileMapper {
         }
         Profile profile = new Profile();
         profile.setId(dto.getId());
+        profile.setTitle(dto.getTitle());
         profile.setAccountId(dto.getAccountId());
         profile.setFirstName(dto.getFirstName());
+        profile.setMiddleNames(dto.getMiddleNames());
         profile.setLastName(dto.getLastName());
-        // Absent means "not provided", never a parse: PUT /api/profile is a partial write per pane,
-        // and applyProvidedFields must see null so the stored value survives a body that did not
-        // carry the field — OwnPersonalDocumentAvatarIT writes a two-field body onto the row the
-        // avatar created. A present-but-malformed value still throws (OwnProfilePathIT holds the
-        // unparseable birthDate to a 5xx).
         profile.setBirthDate(dto.getBirthDate() == null ? null : LocalDate.parse(dto.getBirthDate()));
         profile.setSex(dto.getSex() == null ? null : Sex.valueOf(dto.getSex()));
         profile.setCardType(dto.getCardType() == null ? null : DocumentType.valueOf(dto.getCardType()));

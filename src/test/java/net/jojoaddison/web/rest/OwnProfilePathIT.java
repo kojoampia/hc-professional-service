@@ -48,8 +48,9 @@ import org.springframework.test.web.servlet.ResultActions;
  * {@code ProfileService.applyProvidedFields}, so the value sent never reaches the row. The DTO's
  * field names differ from the entity's where they differ on the wire: {@code mobileNumber} (entity
  * {@code mobilePhone}) and a contact's {@code phoneNumber} (entity {@code phone}). {@code title} and
- * {@code middleNames} are bound and never mapped, so the wire cannot deliver either. A key the DTO
- * does not declare is ignored.
+ * {@code middleNames} were bound and never mapped until the S3 fix (profile-addendum.md § 4) made
+ * {@code ProfileMapper.toEntity} copy both, so the wire now delivers them like any other field. A key
+ * the DTO does not declare is ignored.
  *
  * <h2>What this class is for, as distinct from its neighbours</h2>
  *
@@ -251,18 +252,18 @@ class OwnProfilePathIT {
     }
 
     /**
-     * {@code middleNames} is accepted on the wire and dropped: {@code ProfileDTO} declares it and
-     * {@code ProfileMapper.toEntity} never copies it, so no applicant-facing write path stores it —
-     * the field the wizard collects (profile.md's Profile model lists {@code middleNames}) is
-     * unreachable from the wire, and {@code ProfileCompleteness} requires it, so completeness is only
-     * reachable for a row that already holds one. The stamp cases below pre-seed it for exactly that
-     * reason.
+     * {@code middleNames} is delivered by the wire: {@code ProfileDTO} declares it and
+     * {@code ProfileMapper.toEntity} copies it since the S3 fix (profile-addendum.md § 4), so the
+     * applicant's own write stores the field the wizard collects (profile.md's Profile model lists
+     * {@code middleNames}). It answered 200 and silently dropped the field before — and because
+     * {@code ProfileCompleteness} requires it, that made {@code PROFILE_COMPLETED} unreachable
+     * through the wizard alone. The stamp cases below are where that consequence is held.
      */
     @Test
-    void middleNamesIsDroppedByTheWire() throws Exception {
+    void middleNamesIsDeliveredByTheWire() throws Exception {
         putOwnProfile(dtoBody("\"firstName\":\"Ama\",\"middleNames\":\"Nana Yaa\",\"lastName\":\"Boateng\"")).andExpect(status().isOk());
 
-        assertThat(reloadCaller().getMiddleNames()).as("ProfileMapper.toEntity never copies middleNames").isNull();
+        assertThat(reloadCaller().getMiddleNames()).as("ProfileMapper.toEntity copies middleNames since the S3 fix").isEqualTo("Nana Yaa");
         assertThat(reloadCaller().getFirstName()).as("the control: the rest of the body did land").isEqualTo("Ama");
     }
 
@@ -585,17 +586,10 @@ class OwnProfilePathIT {
     // HTTP half — that the stamp happens on the write, that it happens ACROSS several panes rather
     // than only on a single complete body, and that the caller cannot ask for it.
     //
-    // ⚠ middleNames is one of the 39 and the wire cannot deliver it — ProfileMapper.toEntity never
-    // copies it — so completeness is only reachable for a row that already holds one. Each stamp
-    // case pre-seeds it through the repository for that reason.
-
-    /**
-     * middleNames pre-seeded through the repository: required by {@code ProfileCompleteness},
-     * undeliverable by the wire. See the section comment.
-     */
-    private void seedCallerRowWithMiddleNames() {
-        profileRepository.save(new Profile().accountId(CALLER_ACCOUNT).middleNames("Nana Yaa"));
-    }
+    // ⭐ middleNames is one of the 39 and the wire delivers it since the S3 fix (profile-addendum.md
+    // § 4) — so PROFILE_COMPLETED is reachable through the wizard alone for the first time, and these
+    // cases no longer pre-seed anything through the repository: every value the predicate reads
+    // arrives over HTTP, which is exactly the claim.
 
     /**
      * A write that completes the stored row is stamped {@code PROFILE_COMPLETED}, in the response
@@ -604,7 +598,7 @@ class OwnProfilePathIT {
      */
     @Test
     void aWriteThatCompletesTheStoredRowIsStampedProfileCompleted() throws Exception {
-        seedCallerRowWithMiddleNames();
+        storedCallerProfile();
 
         putOwnProfile(completeProfileJson()).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("PROFILE_COMPLETED"));
 
@@ -623,8 +617,6 @@ class OwnProfilePathIT {
      */
     @Test
     void thePanesCompleteTheProfileBetweenThemAndTheLastOneStampsIt() throws Exception {
-        seedCallerRowWithMiddleNames();
-
         putOwnProfile("{" + CORE_FIELDS_FRAGMENT + "}").andExpect(status().isOk());
         assertThat(reloadCaller().getStatus()).as("the contacts pane has not run yet").isNull();
 
@@ -642,8 +634,6 @@ class OwnProfilePathIT {
      */
     @Test
     void oneCompleteContactDoesNotCompleteTheProfile() throws Exception {
-        seedCallerRowWithMiddleNames();
-
         putOwnProfile("{" + CORE_FIELDS_FRAGMENT + "," + oneContactFragment() + "}").andExpect(status().isOk());
 
         assertThat(reloadCaller().getStatus()).as("profile.md requires at least two emergency contacts").isNull();
@@ -655,13 +645,12 @@ class OwnProfilePathIT {
      * <p>It is absent from {@code profile.md}'s Profile model table, even though the page header
      * renders {@code profile.title}. The owner's enumeration of the 39 excludes it by name, so a
      * profile with no title is complete — and this case is what fails if somebody "finishes" the
-     * predicate by adding every field the class happens to declare. (The wire could not deliver one
-     * anyway: {@code ProfileMapper} never copies {@code title} either.)
+     * predicate by adding every field the class happens to declare. (Since the S3 fix the wire
+     * genuinely delivers a title when one is sent, so the exclusion is the predicate's own decision
+     * rather than an artefact of the mapper.)
      */
     @Test
     void titleIsNotOneOfTheRequiredFields() throws Exception {
-        seedCallerRowWithMiddleNames();
-
         putOwnProfile(completeProfileJson()).andExpect(status().isOk());
 
         assertThat(reloadCaller().getTitle()).as("the complete body deliberately omits it").isNull();
@@ -679,8 +668,6 @@ class OwnProfilePathIT {
      */
     @Test
     void aCompleteWriteThatAlsoNamesStatusDoesNotStoreTheNamedValue() throws Exception {
-        seedCallerRowWithMiddleNames();
-
         putOwnProfile(completeProfileJson().replace("\"status\":\"CREATED\"", "\"status\":\"APPROVED\"")).andExpect(status().isOk());
 
         assertThat(reloadCaller().getStatus())
@@ -753,23 +740,22 @@ class OwnProfilePathIT {
         "]";
 
     /**
-     * The wire-deliverable half of what {@code profile.md} step 2 requires of {@code Profile} itself,
-     * plus the full {@code address} — DTO field names ({@code mobileNumber}, not the entity's
-     * {@code mobilePhone}). Includes {@link #MANDATORY_WIRE_FIELDS}; {@code middleNames} is in the
-     * required 39 and NOT here, because the mapper drops it — the stamp cases pre-seed it instead.
+     * What {@code profile.md} step 2 requires of {@code Profile} itself, plus the full
+     * {@code address} — DTO field names ({@code mobileNumber}, not the entity's
+     * {@code mobilePhone}). Includes {@link #MANDATORY_WIRE_FIELDS} and {@code middleNames}, which
+     * the wire delivers since the S3 fix (profile-addendum.md § 4).
      */
     private static final String CORE_FIELDS_FRAGMENT =
         MANDATORY_WIRE_FIELDS +
-        ",\"firstName\":\"Ama\",\"lastName\":\"Boateng\"," +
+        ",\"firstName\":\"Ama\",\"middleNames\":\"Nana Yaa\",\"lastName\":\"Boateng\"," +
         "\"mobileNumber\":\"+233200000000\",\"phoneNumber\":\"+233300000000\",\"email\":\"ama@example.com\"," +
         "\"cardNumber\":\"GHA-1\"," +
         "\"address\":" +
         addressFragment("GA-123-4567", "12 Oxford St", "Osu", "Accra", "Ayawaso East");
 
     /**
-     * All the wire can deliver of the 39 values {@code profile.md} step 2 requires: 9 of the 10
-     * {@code Profile} fields (middleNames is undeliverable), the 7 {@code address} fields, and 11 on
-     * each of two contacts.
+     * All 39 values {@code profile.md} step 2 requires, every one delivered over the wire: the 10
+     * {@code Profile} fields, the 7 {@code address} fields, and 11 on each of two contacts.
      *
      * <p>⛔ <b>{@code title} is deliberately absent</b> — see {@link #titleIsNotOneOfTheRequiredFields}.
      * So are {@code id} and {@code accountId}, neither of which is a user input. {@code status} is

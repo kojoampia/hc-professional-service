@@ -198,10 +198,10 @@ class OnboardingFlowIT {
             )
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.accountId").value(accountIdFor("fresh-applicant")));
-        // title is on the wire (a ProfileDTO field) but ProfileMapper.toEntity never copies it, so
-        // nothing stores it — asserted on the row, so the claim does not depend on how the
-        // serializer renders a null.
-        assertThat(profileRepository.findByAccountId(accountIdFor("fresh-applicant")).orElseThrow().getTitle()).isNull();
+        // title is on the wire (a ProfileDTO field) and ProfileMapper.toEntity copies it since the
+        // S3 fix (profile-addendum.md § 4), so the applicant's own write stores it — asserted on the
+        // row rather than the response.
+        assertThat(profileRepository.findByAccountId(accountIdFor("fresh-applicant")).orElseThrow().getTitle()).isEqualTo("RN");
         // update keeps the same profile (no duplicate)
         restMockMvc
             .perform(

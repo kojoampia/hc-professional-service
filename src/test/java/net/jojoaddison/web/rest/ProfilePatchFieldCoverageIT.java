@@ -48,10 +48,11 @@ import org.springframework.test.web.servlet.MockMvc;
  * a key the DTO does not declare — {@code specialtyCategoryId}, {@code teamIds}, the three push
  * preferences, the retired {@code emergencyContact} alias — is an unknown property and is silently
  * ignored. A key the DTO declares is either <em>applied</em> (through
- * {@code ProfileService.applyProvidedFields}) or <em>dropped</em>: {@code title} and
- * {@code middleNames} are declared on the DTO but never copied by {@code ProfileMapper.toEntity},
- * {@code status} is mapped onto the entity but never copied by {@code applyProvidedFields}, and
- * {@code accountId} likewise. There is no 400-refusal arm on this path any more —
+ * {@code ProfileService.applyProvidedFields}) or <em>dropped</em>: {@code status} is mapped onto the
+ * entity but never copied by {@code applyProvidedFields}, and {@code accountId} likewise.
+ * {@code title} and {@code middleNames} were a third dropped pair — declared on the DTO and never
+ * copied by {@code ProfileMapper.toEntity} — until the S3 fix (profile-addendum.md § 4) made the
+ * mapper copy both, so they are applied fields now. There is no 400-refusal arm on this path any more —
  * {@code ProfileFieldOwnership} is no longer called here, so item 60's "applied or refused, never
  * dropped" invariant does not hold on this endpoint. {@link #everyWireFieldIsEitherAppliedOrDropped}
  * states the invariant that replaced it.
@@ -389,23 +390,44 @@ class ProfilePatchFieldCoverageIT {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // Declared on the DTO and dropped anyway
+    // The S3 pair, applied since the mapper fix — and status, declared on the DTO and dropped anyway
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * {@code title} is declared on {@link ProfileDTO} and never copied by
-     * {@code ProfileMapper.toEntity}, so it is accepted on the wire and dropped before the service
-     * sees it — there is currently no HTTP path that writes a title at all.
+     * {@code title} is applied since the S3 fix (profile-addendum.md § 4): {@code ProfileMapper.toEntity}
+     * copies it and {@code applyProvidedFields} has a branch for it, so HTTP finally has a path that
+     * writes a title. It was declared on {@link ProfileDTO} and dropped before — a 200 with nothing
+     * stored.
      */
     @Test
-    void titleIsDroppedByTheWire() throws Exception {
+    void titleIsApplied() throws Exception {
         Profile stored = storedClinician();
 
-        patchWith(stored.getId(), patchBodyFor(stored).put("title", "Prof").toString()).andExpect(status().isOk());
+        patchWith(stored.getId(), patchBodyFor(stored).put("title", "Prof").toString())
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.title").value("Prof"));
 
         assertThat(profileRepository.findById(stored.getId()).orElseThrow().getTitle())
-            .as("the mapper does not copy title — nothing may be stored")
-            .isNull();
+            .as("the mapper copies title since the S3 fix — the sent value is stored")
+            .isEqualTo("Prof");
+    }
+
+    /**
+     * {@code middleNames} likewise — the other half of the S3 pair, and the one
+     * {@code ProfileCompleteness} requires, so an applicant's wizard can finally deliver all 39
+     * values over the wire ({@code OwnProfilePathIT} holds that consequence on {@code /api/profile}).
+     */
+    @Test
+    void middleNamesAreApplied() throws Exception {
+        Profile stored = storedClinician();
+
+        patchWith(stored.getId(), patchBodyFor(stored).put("middleNames", "Nana Yaa").toString())
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.middleNames").value("Nana Yaa"));
+
+        assertThat(profileRepository.findById(stored.getId()).orElseThrow().getMiddleNames())
+            .as("the mapper copies middleNames since the S3 fix — the sent value is stored")
+            .isEqualTo("Nana Yaa");
     }
 
     /**
@@ -525,16 +547,16 @@ class ProfilePatchFieldCoverageIT {
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * The DTO fields this wire accepts and then drops, each for a located reason: {@code title} and
-     * {@code middleNames} are never copied by {@code ProfileMapper.toEntity}; {@code status} and
+     * The DTO fields this wire accepts and then drops, each for a located reason: {@code status} and
      * {@code accountId} are mapped onto the entity and never copied by
-     * {@code applyProvidedFields}.
+     * {@code applyProvidedFields}. ({@code title} and {@code middleNames} left this set with the S3
+     * fix, profile-addendum.md § 4 — {@code ProfileMapper.toEntity} copies both now.)
      *
      * <p>The walk below holds this list exact in both directions — a dropped field missing from it
      * fails, and an entry that turns out to be applied fails too, so the list cannot go stale
      * silently.
      */
-    private static final Set<String> DROPPED_ON_THE_WIRE = Set.of("title", "middleNames", "status", "accountId");
+    private static final Set<String> DROPPED_ON_THE_WIRE = Set.of("status", "accountId");
 
     /**
      * Every field {@link ProfileDTO} declares is either applied or in {@link #DROPPED_ON_THE_WIRE} —

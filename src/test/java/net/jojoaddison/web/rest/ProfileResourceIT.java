@@ -585,9 +585,9 @@ class ProfileResourceIT {
         assertThat(profileList).hasSize(databaseSizeBeforeUpdate);
         Profile testProfile = profileList.get(profileList.size() - 1);
         assertThat(testProfile.getFirstName()).isEqualTo(UPDATED_FIRST_NAME);
-        // middleNames is on the wire but ProfileMapper.toEntity never copies it, and a PUT is a
-        // whole-document replace — so the stored value is cleared, not updated.
-        assertThat(testProfile.getMiddleNames()).isNull();
+        // middleNames is on the wire and ProfileMapper.toEntity copies it since the S3 fix
+        // (profile-addendum.md § 4) — so a PUT, being a whole-document replace, stores the sent value.
+        assertThat(testProfile.getMiddleNames()).isEqualTo(UPDATED_MIDDLE_NAMES);
         assertThat(testProfile.getLastName()).isEqualTo(UPDATED_LAST_NAME);
         assertThat(testProfile.getBirthDate()).isEqualTo(UPDATED_BIRTH_DATE);
         assertThat(testProfile.getSex()).isEqualTo(UPDATED_SEX);
@@ -738,9 +738,10 @@ class ProfileResourceIT {
         assertThat(profileList).hasSize(databaseSizeBeforeUpdate);
         Profile testProfile = profileList.get(profileList.size() - 1);
         assertThat(testProfile.getFirstName()).isEqualTo(UPDATED_FIRST_NAME);
-        // middleNames is on the wire but ProfileMapper.toEntity never copies it, so the stored
-        // value survives untouched.
-        assertThat(testProfile.getMiddleNames()).isEqualTo(DEFAULT_MIDDLE_NAMES);
+        // middleNames is on the wire, ProfileMapper.toEntity copies it since the S3 fix
+        // (profile-addendum.md § 4), and applyProvidedFields applies a non-null value — so the sent
+        // value is what is stored.
+        assertThat(testProfile.getMiddleNames()).isEqualTo(UPDATED_MIDDLE_NAMES);
         assertThat(testProfile.getLastName()).isEqualTo(UPDATED_LAST_NAME);
         assertThat(testProfile.getBirthDate()).isEqualTo(UPDATED_BIRTH_DATE);
         assertThat(testProfile.getSex()).isEqualTo(UPDATED_SEX);
