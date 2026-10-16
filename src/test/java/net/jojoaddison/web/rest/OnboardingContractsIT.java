@@ -90,11 +90,12 @@ class OnboardingContractsIT {
     /**
      * What survives a {@code PUT /api/profiles/{id}} now that the endpoint binds {@code ProfileDTO}.
      *
-     * <p>Of the four WP2 fields, only the next of kin is carried by the DTO wire:
-     * {@code specialtyCategoryId} and {@code teamIds} are not {@code ProfileDTO} fields and arrive as
-     * unknown keys, and {@code title} is a DTO field {@code ProfileMapper.toEntity} never copies. A
-     * {@code PUT} is a whole-document replace, so the three the wire cannot carry are <b>cleared</b>
-     * by any PUT, however faithfully the caller echoes them.
+     * <p>Of the four WP2 fields, the DTO wire carries two: the next of kin ({@code contacts}), and —
+     * since the S3 fix (profile-addendum.md § 4) made {@code ProfileMapper.toEntity} copy it —
+     * {@code title}, which a faithful echo therefore <b>keeps</b>. Only {@code specialtyCategoryId}
+     * and {@code teamIds} remain uncarriable: neither is a {@code ProfileDTO} field, so both arrive
+     * as unknown keys, and a {@code PUT} is a whole-document replace, so both are <b>cleared</b> by
+     * any PUT, however faithfully the caller echoes them.
      *
      * <p>The contact is sent in the DTO's vocabulary — {@code phoneNumber}, where the entity stores
      * {@code phone} — and asserted under both {@code contacts} and the {@code emergencyContact}
@@ -105,7 +106,7 @@ class OnboardingContractsIT {
      */
     @Test
     @WithMockGatewayUser(authorities = { "ROLE_DOCTOR" })
-    void aPutClearsTheWp2FieldsTheDtoWireCannotCarry() throws Exception {
+    void aPutCarriesTitleAndClearsTheWp2FieldsTheDtoWireStillCannotCarry() throws Exception {
         Profile profile = profileRepository.save(
             new Profile()
                 .accountId("account-1")
@@ -141,15 +142,15 @@ class OnboardingContractsIT {
         // Asserted on the stored row rather than the response, so the claim does not depend on how
         // the serializer renders a null.
         Profile after = profileRepository.findById(profile.getId()).orElseThrow();
-        assertThat(after.getTitle()).isNull();
+        assertThat(after.getTitle()).as("the DTO wire carries title since the S3 fix — the echo keeps it").isEqualTo("RN");
         assertThat(after.getSpecialtyCategoryId()).isNull();
         assertThat(after.getTeamIds()).isEmpty();
     }
 
     /**
      * The next of kin round-trips under BOTH names — {@code contacts} is the stored field,
-     * {@code emergencyContact} the output alias projecting its first element. It is the only WP2
-     * field the DTO wire still carries.
+     * {@code emergencyContact} the output alias projecting its first element. It and {@code title}
+     * are the two WP2 fields the DTO wire carries.
      */
     private static ResultMatcher[] theNextOfKinUnderBothNames() {
         return new ResultMatcher[] {
