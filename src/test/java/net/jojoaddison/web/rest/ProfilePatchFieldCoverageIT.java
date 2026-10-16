@@ -246,11 +246,12 @@ class ProfilePatchFieldCoverageIT {
      * ⚠ <b>The retired {@code emergencyContact} alias no longer reaches storage: {@link ProfileDTO}
      * does not declare it, so it is an unknown key and is silently ignored.</b>
      *
-     * <p>That consequence is live and client-facing, which is why this test exists rather than being
-     * deleted with the alias: {@code web/}'s wire type and {@code mobile/}'s {@code me.page.ts} both
-     * still send {@code emergencyContact} (dropping it is T6's work), and against this endpoint that
-     * write now answers 200 with the next of kin quietly not saved. This test pins the server half of
-     * that fact; the client half is T6's to retire.
+     * <p>T6 retired the client half: {@code web/} (PR #97) and {@code mobile/} (PR #64) both send
+     * {@code contacts[]} now, and the entity's deprecated {@code emergencyContact} wire alias was
+     * dropped with them. This test stays as the pin on the server half — the singular key remains
+     * unknown on every wire, so a stale installed mobile client still writing through it gets a 200
+     * with nothing stored. That is the deploy-sequencing residual recorded on the T6 row, not a
+     * reason for the DTO to grow the alias back.
      */
     @Test
     void theRetiredSingularNameIsIgnoredOnTheWire() throws Exception {

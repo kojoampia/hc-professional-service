@@ -193,10 +193,11 @@ class EmergencyContactListMigrationIT {
     /**
      * ⭐ <b>A row carrying BOTH names keeps the newer value AND loses the stale key (F-D).</b>
      *
-     * <p>That combination can genuinely occur. {@code Profile.getEmergencyContact()} is a wire alias
-     * that writes into {@code contacts}, so a client sending the old name through the new endpoint
-     * produces a {@code contacts} row and no legacy key at all — but a database restored from a
-     * backup taken part-way through a migration can hold both, and the newer field has to win.
+     * <p>That combination can genuinely occur. {@code Profile.getEmergencyContact()} was a wire
+     * alias that wrote into {@code contacts} (dropped by T6 once both clients were re-pointed at
+     * {@code contacts[]}), so a client sending the old name through the new endpoint produced a
+     * {@code contacts} row and no legacy key at all — but a database restored from a backup taken
+     * part-way through a migration can hold both, and the newer field has to win.
      *
      * <h2>⛔ The second assertion was the exact opposite of this until F-D</h2>
      *
@@ -291,8 +292,9 @@ class EmergencyContactListMigrationIT {
      * <p>Every assertion above is about BSON, and BSON can be correct in a shape Spring Data still
      * cannot map — in which case the symptom is not a failed migration but <b>every read of that
      * clinician's profile throwing</b>, long after the run that was reported as successful. So the
-     * verdict has to be taken through the entity: the list binds, the nested {@code Address} binds,
-     * and the wire alias still projects the first element for the clients that have not migrated.
+     * verdict has to be taken through the entity: the list binds, and the nested {@code Address}
+     * binds. (Until T6 this also checked the wire alias projected the first element — that alias
+     * retired with T6 once web/ (PR #97) and mobile/ (PR #64) moved to {@code contacts[]}.)
      */
     @Test
     void theMigratedRowReadsBackThroughTheEntity() {
@@ -313,9 +315,7 @@ class EmergencyContactListMigrationIT {
         assertThat(contacts.get(0).getRelationship()).isEqualTo("sister");
         assertThat(contacts.get(0).getAddress()).isNotNull();
         assertThat(contacts.get(0).getAddress().getStreetAddress()).isEqualTo("12 Oxford St");
-        assertThat(reloaded.getEmergencyContact())
-            .as("the wire alias still projects the first element, for web/ until T6 and mobile/ indefinitely")
-            .isNotNull();
-        assertThat(reloaded.getEmergencyContact().getName()).isEqualTo("Efua Mensah");
+        // Until T6 this also asserted Profile.getEmergencyContact() projected the first element —
+        // that wire alias retired with T6 once web/ (PR #97) and mobile/ (PR #64) moved to contacts[].
     }
 }

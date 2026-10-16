@@ -545,11 +545,12 @@ class OwnProfilePathIT {
      * ⚠ <b>The retired singular name no longer writes into the list: {@code emergencyContact} is not
      * a {@code ProfileDTO} field, so it is an unknown key and is ignored.</b>
      *
-     * <p>Pinned because <b>both shipped clients still send it</b> — F8 re-pointed {@code web/}'s
-     * {@code OnboardingProfileDto} and {@code mobile/}'s {@code me.page.ts} at this path without
-     * renaming the field. A client saving next of kin through the singular key now gets a 200 with
-     * nothing stored, which is exactly the shape T6 has to resolve: either the clients move to
-     * {@code contacts[]} or the DTO grows the alias.
+     * <p>T6 resolved the shape this used to warn about by moving the clients: {@code web/} (PR #97)
+     * and {@code mobile/} (PR #64) both speak {@code contacts[]} now, and the entity's deprecated
+     * {@code emergencyContact} wire alias is gone with them. The case stays as the pin that the
+     * singular key remains unknown on this wire — a stale installed mobile client (older than
+     * {@code 2b87dd6}) saving through it still gets a 200 with nothing stored, which is a
+     * deploy-sequencing fact for the production roll, not a reason to regrow the alias.
      */
     @Test
     void theRetiredSingularNameIsIgnoredOnTheWireHere() throws Exception {
