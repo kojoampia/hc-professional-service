@@ -50,7 +50,7 @@ import org.junit.jupiter.api.Test;
  * <p><b>A field the format has no way to state.</b> JDL's field vocabulary is scalar
  * ({@code jdl/jhipster/field-types.js}, {@code CommonDBTypes}): no collections, no embedded value
  * types. {@code DutyRoster.visits} is a {@code List<Visit>} over a type with no {@code @Document} and no
- * repository, and {@code Profile.address}, {@code Profile.emergencyContact}, {@code Profile.teamIds} and
+ * repository, and {@code Profile.address}, {@code Profile.contacts}, {@code Profile.teamIds} and
  * {@code Team.members} are stored as {@code String} approximations of things that are not strings. Each
  * is declared in its own definition file under {@code fieldsThisFormatCannotExpress}, with the reason.
  *

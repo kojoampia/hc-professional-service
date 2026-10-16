@@ -80,10 +80,11 @@ import org.springframework.stereotype.Component;
  * migration as the one it copied and should not have. The correction has arrived back here.
  *
  * <p>The both-keys case is reachable rather than theoretical, and the old javadoc said so correctly:
- * {@code Profile.getEmergencyContact()} is a wire alias that writes into {@code contacts}, so a
- * client sending the old name through the new endpoint produces a {@code contacts} row and no
- * {@code emergency_contact} key — but a database restored from a backup taken mid-migration can hold
- * both. {@code EmergencyContactListMigrationIT} covers it specifically.
+ * {@code Profile.getEmergencyContact()} was a wire alias that wrote into {@code contacts} (dropped
+ * by T6 once both clients were re-pointed at {@code contacts[]}), so a client sending the old name
+ * through the new endpoint produced a {@code contacts} row and no {@code emergency_contact} key —
+ * but a database restored from a backup taken mid-migration can hold both.
+ * {@code EmergencyContactListMigrationIT} covers it specifically.
  *
  * <h2>Idempotent, and by the same construction as its neighbours</h2>
  *

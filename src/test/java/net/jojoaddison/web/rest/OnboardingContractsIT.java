@@ -98,8 +98,10 @@ class OnboardingContractsIT {
      * any PUT, however faithfully the caller echoes them.
      *
      * <p>The contact is sent in the DTO's vocabulary — {@code phoneNumber}, where the entity stores
-     * {@code phone} — and asserted under both {@code contacts} and the {@code emergencyContact}
-     * output alias, which still projects the first element on serialization.
+     * {@code phone} — and asserted under {@code contacts} <b>only</b>: the deprecated singular
+     * {@code emergencyContact} output alias retired with T6, once both clients that named it were
+     * re-pointed at {@code contacts[]} (web PR #97, mobile PR #64), so serialization must carry no
+     * such key in either direction.
      *
      * <p>{@code birthDate}, {@code sex}, {@code cardType} and {@code status} ride along because
      * {@code ProfileMapper.toEntity} parses all four unconditionally.
@@ -129,7 +131,7 @@ class OnboardingContractsIT {
         restMockMvc
             .perform(put("/api/profiles/{id}", profile.getId()).contentType(MediaType.APPLICATION_JSON).content(body))
             .andExpect(status().isOk())
-            .andExpectAll(theNextOfKinUnderBothNames());
+            .andExpectAll(theNextOfKinUnderContactsOnly());
 
         // The independent read is an administrator's since backlog.md item 143: GET /api/profiles/**
         // takes its subject from the path and is ROLE_ADMIN. The write above stays the doctor's —
@@ -137,7 +139,7 @@ class OnboardingContractsIT {
         restMockMvc
             .perform(get("/api/profiles/{id}", profile.getId()).with(gatewayUser("item143.admin", "ROLE_ADMIN")))
             .andExpect(status().isOk())
-            .andExpectAll(theNextOfKinUnderBothNames());
+            .andExpectAll(theNextOfKinUnderContactsOnly());
 
         // Asserted on the stored row rather than the response, so the claim does not depend on how
         // the serializer renders a null.
@@ -148,18 +150,18 @@ class OnboardingContractsIT {
     }
 
     /**
-     * The next of kin round-trips under BOTH names — {@code contacts} is the stored field,
-     * {@code emergencyContact} the output alias projecting its first element. It and {@code title}
-     * are the two WP2 fields the DTO wire carries.
+     * The next of kin round-trips under {@code contacts} and under nothing else. The deprecated
+     * singular {@code emergencyContact} alias — T1's projection of {@code contacts[0]}, kept on the
+     * wire for the two clients that still named it — retired with T6 after web PR #97 and mobile
+     * PR #64 re-pointed both at {@code contacts[]}, so its absence from the JSON is asserted here
+     * rather than merely no longer asserted: a reintroduced alias must fail this, not slip past it.
      */
-    private static ResultMatcher[] theNextOfKinUnderBothNames() {
+    private static ResultMatcher[] theNextOfKinUnderContactsOnly() {
         return new ResultMatcher[] {
             jsonPath("$.contacts[0].name").value("Kojo A"),
             jsonPath("$.contacts[0].relationship").value("spouse"),
             jsonPath("$.contacts[0].phone").value("0242000000"),
-            jsonPath("$.emergencyContact.name").value("Kojo A"),
-            jsonPath("$.emergencyContact.relationship").value("spouse"),
-            jsonPath("$.emergencyContact.phone").value("0242000000"),
+            jsonPath("$.emergencyContact").doesNotExist(),
         };
     }
 

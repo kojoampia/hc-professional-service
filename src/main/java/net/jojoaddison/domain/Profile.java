@@ -1,8 +1,6 @@
 package net.jojoaddison.domain;
 
-import com.fasterxml.jackson.annotation.JsonGetter;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.annotation.JsonSetter;
 import java.io.Serializable;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -15,7 +13,6 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedBy;
 import org.springframework.data.annotation.LastModifiedDate;
-import org.springframework.data.annotation.Transient;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -436,82 +433,12 @@ public class Profile implements Serializable {
         this.contacts = contacts;
     }
 
-    /**
-     * The singular {@code emergencyContact} this document carried until profile.md's T1, kept
-     * <b>on the wire only</b> so the clients that have not migrated yet keep working.
-     *
-     * <h2>Why a compatibility shim rather than a clean break — the reason, corrected (F-E)</h2>
-     *
-     * <p>⛔ <b>The justification that stood here had outlived its subject.</b> It read:
-     *
-     * <blockquote><i>"{@code PUT /api/onboarding/profile} is still live and still the path two
-     * shipped clients write a profile through."</i></blockquote>
-     *
-     * <p><b>That path is gone.</b> F8 retired {@code GET} and {@code PUT /api/onboarding/profile} per
-     * {@code profile.md} § Other Elements (<i>"{@code api/onboarding/profile} should migrate to
-     * {@code api/profile}"</i>); {@code OnboardingResource} now carries only {@code /progress} and the
-     * two {@code /acknowledgement} verbs, and {@code OnboardingService} four files away says so in as
-     * many words. Keeping a deprecated alias on the strength of a retired endpoint is the same shape
-     * as the false cross-product claim F-C deleted from {@code DomainEventPublisher}: a reason that
-     * reads as current because nobody re-checked its subject.
-     *
-     * <p>⭐ <b>The alias is still needed, and the mechanism is different: the clients name it on the
-     * NEW path.</b> Measured 2026-10-09 in both frontends — each builds its URL through
-     * {@code getEndpointFor('api/profile', 'professionalservice')} and each still speaks
-     * {@code emergencyContact}:
-     *
-     * <table>
-     *   <caption>The two live consumers of this alias</caption>
-     *   <tr><th>client</th><th>file</th><th>what it does</th></tr>
-     *   <tr><td>{@code mobile/}</td><td>{@code src/app/features/me/me.page.ts}</td>
-     *       <td>reads {@code profile?.emergencyContact?.name} / {@code .relationship} /
-     *           {@code .phone} and PUTs {@code emergencyContact: {…}} back</td></tr>
-     *   <tr><td>{@code web/}</td><td>{@code app/account/profile/clinical-profile.component.ts}</td>
-     *       <td>the same read and the same write, through
-     *           {@code OnboardingApiService}'s {@code profileUrl}</td></tr>
-     * </table>
-     *
-     * <p>⚠ <b>Two clients, not one</b> — F-E named only {@code mobile/}, and {@code web/}'s
-     * {@code ClinicalProfileComponent} is a second. {@code OnboardingApiService} records the pending
-     * move in its own comment. Dropping the name from the wire today would leave <em>both</em>
-     * next-of-kin forms silently unable to save: a 200 with the field quietly gone, which is
-     * precisely the "answered wrongly" failure this repository keeps closing.
-     *
-     * <p><b>It is a projection of {@link #contacts}, never a second stored field.</b> There is one
-     * {@code contacts} array in Mongo and no {@code emergency_contact} key after
-     * {@code EmergencyContactListMigration} runs. The read answers the first contact; the write puts
-     * one contact into the list.
-     *
-     * <p><b>{@code contacts} wins when a body carries both</b>, whichever order Jackson binds them
-     * in — the setter below only fills a list that is still empty. Without that guard a client
-     * round-tripping a document it had just read would have the outcome depend on field order in the
-     * JSON, which is not a contract anybody could rely on.
-     *
-     * <p>⛔ <b>Not reflected by {@code ProfilePatchFieldCoverageIT}</b>, which enumerates declared
-     * fields and sees no such field. The alias has its own named cases there instead. Retire this
-     * pair with T6, and only once <b>both</b> clients in the table above have been moved — the
-     * retirement is gated on the clients, which is a thing to measure, and no longer on an endpoint,
-     * which was a thing that had already happened.
-     *
-     * @deprecated use {@link #getContacts()}; retires with the last client that names it (T6).
-     */
-    @Deprecated(since = "profile.md T1")
-    @Transient
-    @JsonGetter("emergencyContact")
-    public EmergencyContact getEmergencyContact() {
-        return this.contacts == null || this.contacts.isEmpty() ? null : this.contacts.get(0);
-    }
-
-    /** @deprecated see {@link #getEmergencyContact()}. */
-    @Deprecated(since = "profile.md T1")
-    @JsonSetter("emergencyContact")
-    public void setEmergencyContact(EmergencyContact emergencyContact) {
-        if (this.contacts != null && !this.contacts.isEmpty()) {
-            // `contacts` was bound first and is the newer name; it wins. See the note above.
-            return;
-        }
-        this.contacts = emergencyContact == null ? null : new ArrayList<>(List.of(emergencyContact));
-    }
+    // The deprecated singular `emergencyContact` wire alias — T1's @Transient projection of
+    // contacts[0], a getter/setter pair kept on the wire only for the two clients that still named
+    // it — was dropped by T6 (profile-addendum.md § 3) once both were re-pointed at `contacts[]`:
+    // web/ in PR #97 and mobile/ in PR #64. The name is now an unknown property in both directions;
+    // OnboardingContractsIT.theNextOfKinUnderContactsOnly asserts its absence from serialization,
+    // and ProfilePatchFieldCoverageIT.theRetiredSingularNameIsIgnoredOnTheWire pins the write half.
 
     public String getSpecialtyCategoryId() {
         return this.specialtyCategoryId;
